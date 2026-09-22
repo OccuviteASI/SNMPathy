@@ -1,0 +1,34 @@
+{% from "_macros.html" import uptime_bars, status %}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="60">
+<title>Service status</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/app.js"></script>
+</head>
+<body>
+<div class="status-page">
+  <h1 class="mb">Service status</h1>
+  <div class="status-hero mb {{ 'ok' if all_up else 'bad' }}">
+    {{ status('up' if all_up else 'down', 'All systems operational' if all_up else 'Some services are experiencing problems') }}
+  </div>
+  <div class="card">
+    {% for r in rows %}
+    <div class="card-body" style="border-bottom:1px solid var(--border)">
+      <div class="row between mb">
+        <strong>{{ r.check.name }}</strong>
+        <span class="row">{{ status(r.check.state, {'up': 'Operational', 'down': 'Outage', 'unknown': 'Pending'}.get(r.check.state, r.check.state)) }}<span class="muted small">{{ r.uptime_30d|pct(3) }} uptime (30 days)</span></span>
+      </div>
+      {{ uptime_bars(r.daily) }}
+      <div class="row between small muted" style="margin-top:4px"><span>90 days ago</span><span>Today</span></div>
+    </div>
+    {% else %}
+    <div class="empty">No public checks yet. Mark a check as <em>public</em> to show it here.</div>
+    {% endfor %}
+  </div>
+  <p class="small muted mt">Updated automatically every minute. Powered by SNMPathy.</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status, icon, meter %}
+{% block title %}Devices{% endblock %}
+{% block actions %}
+<input type="search" placeholder="Filter devices…" data-filter="#device-table" value="{{ q }}" aria-label="Filter devices">
+<a class="btn primary" href="/devices/new">{{ icon('plus') }} Add device</a>
+{% endblock %}
+{% block content %}
+{% if tags %}
+<div class="row mb">
+  <span class="muted small">Tags:</span>
+  <a class="tag" href="/devices" style="{{ 'background:var(--accent-soft);color:var(--accent)' if not tag }}">all</a>
+  {% for t in tags %}<a class="tag" href="/devices?tag={{ t|urlencode }}" style="{{ 'background:var(--accent-soft);color:var(--accent)' if tag == t }}">{{ t }}</a>{% endfor %}
+</div>
+{% endif %}
+<div class="card">
+  <div class="card-body flush table-wrap">
+    <table class="table" id="device-table">
+      <thead><tr>
+        <th class="sortable">Status</th><th class="sortable">Device</th><th class="sortable">Vendor / platform</th>
+        <th class="sortable">Location</th><th class="sortable">Ports</th><th class="sortable">CPU</th><th class="sortable">Memory</th>
+        <th class="sortable">Uptime</th><th class="sortable">Last polled</th>
+      </tr></thead>
+      <tbody>
+      {% for d in devices %}
+        {% set c = counts.get(d.id) %}
+        <tr>
+          <td data-sort="{{ {'down': 0, 'unknown': 1, 'up': 2}.get(d.status, 3) }}">{% if not d.enabled %}{{ status('paused', 'disabled') }}{% else %}{{ status(d.status) }}{% endif %}</td>
+          <td><a href="/devices/{{ d.id }}"><strong>{{ d.name }}</strong></a><div class="small muted">{{ d.hostname }}{% for t in d.tags %} <span class="tag">{{ t }}</span>{% endfor %}</div></td>
+          <td><div>{{ d.vendor or '-' }}</div><div class="small muted" style="max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ d.sys_descr }}">{{ d.sys_descr }}</div></td>
+          <td>{{ d.location or d.sys_location or '-' }}</td>
+          <td data-sort="{{ c.ifaces if c else 0 }}">{% if c %}{{ c.ifaces }}{% if c.down %} <span class="status down small">{{ c.down }} down</span>{% endif %}{% else %}-{% endif %}</td>
+          <td style="min-width:110px" data-sort="{{ cpu.get(d.id) or -1 }}">{{ meter(cpu.get(d.id)) }}</td>
+          <td style="min-width:110px" data-sort="{{ mem.get(d.id) or -1 }}">{{ meter(mem.get(d.id)) }}</td>
+          <td class="nowrap" data-sort="{{ d.sys_uptime or 0 }}">{{ d.sys_uptime|duration if d.sys_uptime else '-' }}</td>
+          <td class="nowrap" data-sort="{{ d.last_polled or 0 }}">{% if d.snmp_enabled %}{{ d.last_polled|ts('ago')|safe }}{% if d.last_poll_ms %}<div class="small muted">{{ '%.0f'|format(d.last_poll_ms) }} ms</div>{% endif %}{% else %}<span class="muted">SNMP off</span>{% endif %}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="9"><div class="empty">No devices yet. <a href="/devices/new">Add your first device</a>, or run <code>snmpathy demo</code> to explore with simulated ones.</div></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

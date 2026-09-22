@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon %}
+{% block title %}{{ dash.name }}{% endblock %}
+{% block crumbs %}<div class="crumbs"><a href="/dashboards">Dashboards</a>{% if dash.description %} · {{ dash.description }}{% endif %}</div>{% endblock %}
+{% block heading %}
+<select onchange="location.href='/dashboards/' + this.value" aria-label="Switch dashboard" style="font-size:18px;font-weight:600;border:0;background:transparent;padding:0 4px;margin-left:-4px">
+  {% for o in others %}<option value="{{ o.slug }}" {{ 'selected' if o.slug == dash.slug }}>{{ o.name }}</option>{% endfor %}
+</select>
+{% endblock %}
+{% block actions %}
+<div id="dash-time" class="no-print"></div>
+<select id="dash-refresh" aria-label="Auto-refresh" title="Auto-refresh" class="no-print">
+  <option value="0">Refresh off</option><option value="10">10s</option><option value="30">30s</option><option value="60">1m</option><option value="300">5m</option><option value="900">15m</option>
+</select>
+<button class="btn" id="dash-reload" title="Reload all panels">{{ icon('refresh') }}</button>
+<button class="btn primary hidden" id="dash-save">Save</button>
+<span class="hide-kiosk row">
+<button class="btn" id="dash-add">{{ icon('plus') }} Panel</button>
+<button class="btn" id="dash-edit">Edit layout</button>
+<button class="btn" id="dash-settings" title="Dashboard settings">{{ icon('settings') }}</button>
+<button class="btn" id="dash-json" title="JSON model">JSON</button>
+</span>
+<button class="btn" id="dash-kiosk" title="Kiosk / TV mode">{{ icon('expand') }}</button>
+{% endblock %}
+{% block content %}
+<div id="dash-root">
+  <div class="dash-grid"></div>
+  <p class="small muted mt no-print"><span id="dash-updated"></span> · Tips: click legend entries to isolate a series (Ctrl/⌘-click to toggle), and use the ⤢ button on a panel to enlarge it.</p>
+</div>
+<div class="modal-back hidden" id="dash-settings-modal">
+  <div class="modal">
+    <div class="card-head"><h2>Dashboard settings</h2><button class="btn ghost" data-action="close-modal">&times;</button></div>
+    <form data-api="/api/dashboards/{{ dash.id }}" data-method="PATCH" data-transform="dashSettings" data-redirect="/dashboards/{{ dash.slug }}">
+      <div class="modal-body"><div class="form-grid">
+        <label class="field">Name<input name="name" value="{{ dash.name }}" required></label>
+        <label class="field">Default time range<select name="time">{% for r in ['15m', '1h', '6h', '24h', '7d', '30d', '90d'] %}<option {{ 'selected' if dash.config.time == r }}>{{ r }}</option>{% endfor %}</select></label>
+        <label class="field">Default auto-refresh (seconds, 0 = off)<input name="refresh" type="number" data-type="int" min="0" value="{{ dash.config.refresh or 0 }}"></label>
+        <label class="field wide">Description<input name="description" value="{{ dash.description }}"></label>
+      </div></div>
+      <div class="modal-foot"><button type="button" class="btn" data-action="close-modal">Cancel</button><button class="btn primary" type="submit">Save</button></div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const DASH = {{ dash|tojson }};
+document.addEventListener("DOMContentLoaded", () => {
+  const d = SP.dashboard(SP.$("#dash-root"), DASH);
+  SP.transforms.dashSettings = (b) => {
+    const config = Object.assign({}, d.config, { time: b.time, refresh: b.refresh });
+    return { name: b.name, description: b.description, config };
+  };
+});
+</script>
+{% endblock %}

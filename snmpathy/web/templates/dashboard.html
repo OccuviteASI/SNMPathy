@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status, icon %}
+{% block title %}Overview{% endblock %}
+{% block actions %}
+<a class="btn" href="/dashboards">{{ icon('dash') }} Dashboards</a>
+<a class="btn primary" href="/devices/new">{{ icon('plus') }} Add device</a>
+{% endblock %}
+{% block content %}
+{% set o = overview %}
+<div class="tiles mb">
+  <a class="card tile {{ 'bad' if o.devices.down }}" href="/devices" style="color:inherit">
+    <div class="label">Devices responding</div>
+    <div class="value">{{ o.devices.up }}<span class="muted" style="font-size:16px"> / {{ o.devices.total - o.devices.disabled }}</span></div>
+    <div class="sub">{% if o.devices.down %}{{ status('down', o.devices.down ~ ' down') }}{% else %}{{ status('up', 'all responding') }}{% endif %}</div>
+  </a>
+  <a class="card tile {{ 'bad' if o.checks.down }}" href="/checks" style="color:inherit">
+    <div class="label">Uptime checks</div>
+    <div class="value">{{ o.checks.up }}<span class="muted" style="font-size:16px"> / {{ o.checks.total - o.checks.paused }}</span></div>
+    <div class="sub">{% if o.checks.down %}{{ status('down', o.checks.down ~ ' down') }}{% else %}{{ status('up', 'all up') }}{% endif %}</div>
+  </a>
+  <a class="card tile" href="/reports/uptime?range=24h" style="color:inherit">
+    <div class="label">Availability (24h)</div>
+    <div class="value">{{ avg_availability|pct(3) }}</div>
+    <div class="sub">average of all checks</div>
+  </a>
+  <a class="card tile {{ 'bad' if o.alerts.critical }}" href="/alerts" style="color:inherit">
+    <div class="label">Alerts firing</div>
+    <div class="value">{{ o.alerts.firing }}</div>
+    <div class="sub">{% if o.alerts.critical %}{{ status('critical', o.alerts.critical ~ ' critical') }}{% else %}{{ o.alerts.unacknowledged }} unacknowledged{% endif %}</div>
+  </a>
+  <a class="card tile" href="/syslog?severity=3" style="color:inherit">
+    <div class="label">Syslog, last hour</div>
+    <div class="value">{{ '{:,}'.format(o.syslog.last_hour) }}</div>
+    <div class="sub">{{ o.syslog.errors_last_hour }} at err or worse</div>
+  </a>
+</div>
+
+<div class="grid grid-12">
+  <div class="card" style="grid-column: span 8">
+    <div class="card-head"><h2>Problems</h2><a class="small" href="/alerts">All alerts</a></div>
+    <div class="card-body">
+      {% if not down_devices and not down_checks and not firing %}
+        <div class="empty">{{ status('ok', 'Everything is operating normally') }}</div>
+      {% endif %}
+      {% for d in down_devices %}
+        <div class="alert-row">{{ status('down', '') }}<div class="body"><div class="subject"><a href="/devices/{{ d.id }}">{{ d.name }}</a> is not responding to SNMP</div><div class="msg">{{ d.last_error }}</div><div class="small muted">down for {{ d.status_since|ago|replace(' ago','') }}</div></div></div>
+      {% endfor %}
+      {% for c in down_checks %}
+        <div class="alert-row">{{ status('down', '') }}<div class="body"><div class="subject"><a href="/checks/{{ c.id }}">{{ c.name }}</a> is down</div><div class="msg">{{ c.type|upper }} {{ c.target }}: {{ c.last_message }}</div><div class="small muted">down for {{ c.state_since|ago|replace(' ago','') }}</div></div></div>
+      {% endfor %}
+      {% for a in firing %}
+        {% if not a.check_id or a.check_id not in down_checks|map(attribute='id')|list %}
+        <div class="alert-row">{{ status(a.severity, '') }}<div class="body"><div class="subject">{{ a.subject }}</div><div class="msg">{{ a.message }}</div><div class="small muted">{{ a.severity }} · firing {{ a.fired_at|ago }}{% if a.acknowledged %} · acknowledged by {{ a.ack_by or 'someone' }}{% endif %}</div></div></div>
+        {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+  <div class="card" style="grid-column: span 4">
+    <div class="card-head"><h2>Recent events</h2></div>
+    <div class="card-body">
+      {% for e in events %}
+        <div class="event-row">{{ e.ts|ts('ago')|safe }}<span>{{ e.message }}</span></div>
+      {% else %}<div class="empty">No events yet</div>{% endfor %}
+    </div>
+  </div>
+
+  <div class="card" style="grid-column: span 12">
+    <div class="card-head"><h2>Total traffic, all interfaces</h2><div id="ov-time" class="no-print"></div></div>
+    <div class="card-body">
+      <div id="ov-traffic" data-height="240" data-chart='{"type":"area","targets":[{"key":"if.in_bps","agg":"sum","alias":"Inbound"},{"key":"if.out_bps","agg":"sum","alias":"Outbound"}]}'></div>
+    </div>
+  </div>
+
+  <div class="card" style="grid-column: span 6">
+    <div class="card-head"><h2>Busiest interfaces</h2><a class="small" href="/reports/bandwidth">Bandwidth report</a></div>
+    <div class="card-body flush table-wrap">
+      <table class="table compact">
+        <thead><tr><th>Device</th><th>Interface</th><th class="num">In</th><th class="num">Out</th><th>Utilisation</th></tr></thead>
+        <tbody>
+        {% for i in top_ifaces if i.total_bps %}
+          {% set util = ([i.in_bps or 0, i.out_bps or 0]|max) / i.speed * 100 if i.speed else none %}
+          <tr><td><a href="/devices/{{ i.device_id }}">{{ i.device_name }}</a></td><td><a href="/devices/{{ i.device_id }}?tab=interfaces#if{{ i.if_index }}">{{ i.name }}</a>{% if i.alias %} <span class="muted small">{{ i.alias }}</span>{% endif %}</td>
+          <td class="num">{{ i.in_bps|bps }}</td><td class="num">{{ i.out_bps|bps }}</td>
+          <td style="min-width:120px">{% from "_macros.html" import meter %}{{ meter(util) }}</td></tr>
+        {% else %}<tr><td colspan="5" class="empty">No traffic data yet</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card" style="grid-column: span 6">
+    <div class="card-head"><h2>Highest CPU</h2><a class="small" href="/reports/health">Health report</a></div>
+    <div class="card-body flush table-wrap">
+      <table class="table compact">
+        <thead><tr><th>Device</th><th>CPU</th></tr></thead>
+        <tbody>
+        {% from "_macros.html" import meter %}
+        {% for m in top_cpu %}
+          <tr><td><a href="/devices/{{ m.device_id }}">{{ m.device_name }}</a></td><td style="width:60%">{{ meter(m.last_value) }}</td></tr>
+        {% else %}<tr><td colspan="2" class="empty">No CPU data yet</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const state = SP.urlState({ range: "24h" });
+  const draw = () => SP.loadCharts(SP.$("#ov-traffic").parentNode, state);
+  SP.timePicker(SP.$("#ov-time"), state, () => { SP.pushState(state); draw(); });
+  draw();
+  setInterval(() => { if (!document.hidden) draw(); }, 60000);
+});
+</script>
+{% endblock %}

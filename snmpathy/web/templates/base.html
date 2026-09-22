@@ -1,0 +1,55 @@
+{% from "_macros.html" import icon %}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}SNMPathy{% endblock %} · SNMPathy</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232a78d6'/%3E%3Cpath d='M6 18h5l3-8 4 13 3-7h5' fill='none' stroke='white' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/app.css?v={{ version|default('1') }}">
+<script src="/static/app.js?v={{ version|default('1') }}"></script>
+</head>
+<body{% if refresh %} data-refresh="{{ refresh }}"{% endif %}>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="/">
+      <svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#2a78d6"/><path d="M6 18h5l3-8 4 13 3-7h5" fill="none" stroke="white" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      SNMPathy
+    </a>
+    <nav class="nav">
+      <a href="/" class="{{ 'active' if nav == 'dashboard' }}">{{ icon('home') }} Overview</a>
+      <a href="/dashboards" class="{{ 'active' if nav in ('dashboards', 'dashboard_view') }}">{{ icon('dash') }} Dashboards</a>
+      <div class="nav-label">Monitor</div>
+      <a href="/devices" class="{{ 'active' if nav in ('devices', 'device', 'device_form') }}">{{ icon('device') }} Devices{% if problems.devices %}<span class="count">{{ problems.devices }}</span>{% endif %}</a>
+      <a href="/checks" class="{{ 'active' if nav in ('checks', 'check') }}">{{ icon('check') }} Uptime checks{% if problems.checks %}<span class="count">{{ problems.checks }}</span>{% endif %}</a>
+      <a href="/syslog" class="{{ 'active' if nav == 'syslog' }}">{{ icon('log') }} Syslog</a>
+      <a href="/alerts" class="{{ 'active' if nav == 'alerts' }}">{{ icon('alert') }} Alerts{% if problems.alerts %}<span class="count">{{ problems.alerts }}</span>{% endif %}</a>
+      <div class="nav-label">Analyse</div>
+      <a href="/reports" class="{{ 'active' if nav in ('reports', 'report') }}">{{ icon('report') }} Reports</a>
+      <a href="/status" target="_blank" rel="noopener">{{ icon('globe') }} Public status page</a>
+      <div class="nav-label">Configure</div>
+      <a href="/maintenance" class="{{ 'active' if nav == 'maintenance' }}">{{ icon('wrench') }} Maintenance</a>
+      <a href="/settings" class="{{ 'active' if nav == 'settings' }}">{{ icon('settings') }} Settings</a>
+    </nav>
+    <div class="sidebar-foot">
+      <button class="btn ghost sm" data-action="theme" title="Switch light / dark / system theme">{{ icon('moon') }} Theme</button>
+      {% if auth_enabled %}<a class="btn ghost sm" href="/logout">Log out</a>{% endif %}
+    </div>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <button class="btn ghost menu-toggle" data-action="nav" aria-label="Menu">{{ icon('menu') }}</button>
+      <div class="title">
+        {% block crumbs %}{% endblock %}
+        <h1>{% block heading %}{{ self.title() }}{% endblock %}</h1>
+      </div>
+      <div class="spacer"></div>
+      <div class="actions row">{% block actions %}{% endblock %}</div>
+    </header>
+    <main class="content">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+{% block scripts %}{% endblock %}
+</body>
+</html>

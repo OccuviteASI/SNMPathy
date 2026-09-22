@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, status %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<div class="grid grid-2">
+  <div class="card">
+    <div class="card-head"><h2>System</h2></div>
+    <div class="card-body">
+      <dl class="kv">
+        <dt>Version</dt><dd>SNMPathy {{ version }}</dd>
+        <dt>Python</dt><dd>{{ python }}</dd>
+        <dt>Platform</dt><dd>{{ platform }}</dd>
+        <dt>ICMP mode</dt><dd>{{ icmp_mode }} <span class="small muted">{{ {'raw': 'raw socket', 'dgram': 'unprivileged ICMP socket', 'exec': 'system ping command', 'tcp': 'TCP fallback (ICMP unavailable)'}.get(icmp_mode, '') }}</span></dd>
+        <dt>Full-text search</dt><dd>{{ status('ok', 'FTS5') if fts else status('warning', 'unavailable (LIKE search)') }}</dd>
+        <dt>Database</dt><dd class="mono small">{{ settings.database }} ({{ stats.size_bytes|bytes }})</dd>
+        {% if monitor %}
+        <dt>Engine uptime</dt><dd>{{ monitor.uptime|duration }}</dd>
+        <dt>Polls / checks</dt><dd>{{ '{:,}'.format(monitor.counters.polls) }} polls ({{ monitor.counters.poll_failures }} failed) · {{ '{:,}'.format(monitor.counters.checks) }} checks</dd>
+        <dt>Syslog</dt><dd>{% if monitor.syslog %}{% for p, a in monitor.syslog.listening.items() %}{{ p|upper }} {{ a }}{{ ', ' if not loop.last }}{% endfor %} · {{ '{:,}'.format(monitor.syslog.received) }} received, {{ monitor.syslog.dropped }} dropped{% else %}disabled{% endif %}</dd>
+        {% endif %}
+      </dl>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h2>Data</h2></div>
+    <div class="card-body">
+      <table class="table compact">
+        <tbody>
+        {% for k in ['devices', 'interfaces', 'metrics', 'samples', 'rollups', 'checks', 'heartbeats', 'outages', 'syslog', 'alerts', 'events'] %}
+          <tr><td>{{ k }}</td><td class="num">{{ '{:,}'.format(stats[k] or 0) }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <p class="small muted">Retention: raw samples {{ settings.retention_raw_days }}d, rollups {{ settings.retention_rollup_days }}d, syslog {{ settings.retention_syslog_days }}d, check results {{ settings.retention_heartbeat_days }}d.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h2>Configuration backup</h2></div>
+    <div class="card-body stack">
+      <p class="small muted" style="margin:0">Exports devices, checks, alert rules and channels as JSON. History is not included; to back that up, copy the database file.</p>
+      <div class="row"><a class="btn" href="/api/export" download="snmpathy-config.json">{{ icon('download') }} Export configuration</a></div>
+      <div class="row"><input type="file" id="import-file" accept="application/json"><button class="btn" id="import-btn">Import</button></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h2>Settings in effect</h2><span class="small muted">edit snmpathy.yaml or SNMPATHY_* variables, then restart</span></div>
+    <div class="card-body flush table-wrap scroll" style="max-height:300px">
+      <table class="table compact"><tbody>
+      {% for k, v in settings.__dict__.items() if k != 'extra' %}
+        <tr><td class="mono small">{{ k }}</td><td class="mono small">{{ '********' if ('password' in k or 'token' in k) and v else v }}</td></tr>
+      {% endfor %}
+      </tbody></table>
+    </div>
+  </div>
+
+  <div class="card" id="grafana" style="grid-column: 1 / -1">
+    <div class="card-head"><h2>{{ icon('grafana') }} Grafana</h2></div>
+    <div class="card-body stack">
+      <p style="margin:0">SNMPathy is a data source for the Grafana <strong>JSON</strong> plugin (<code>simpod-json-datasource</code>). With Docker, <code>docker compose --profile grafana up -d</code> provisions everything automatically. For an existing Grafana:</p>
+      <ol style="margin:0">
+        <li>Install the plugin: <code>grafana-cli plugins install simpod-json-datasource</code> (or set <code>GF_INSTALL_PLUGINS=simpod-json-datasource</code>).</li>
+        <li>Add a data source of type <em>JSON</em> with the URL <code>{{ settings.public_url or base_url }}/grafana</code> and UID <code>snmpathy</code>{% if settings.api_token %}, plus a custom HTTP header <code>X-API-Key</code> set to your API token{% endif %}.</li>
+        <li>Import the dashboards below (Dashboards → New → Import → Upload JSON).</li>
+      </ol>
+      <div class="row">{% for b in grafana_boards %}<a class="btn sm" href="/grafana/dashboards/{{ b.file }}" download="{{ b.file }}">{{ icon('download') }} {{ b.title }}</a>{% endfor %}</div>
+      <p class="small muted" style="margin:0">Query types: <code>metric</code>, <code>check</code>, <code>syslog</code>, <code>count</code>, and tables <code>devices</code>, <code>checks</code>, <code>interfaces</code>, <code>alerts</code>, <code>syslog_events</code>, <code>events</code>, <code>top</code>. Template variables: <code>devices</code>, <code>tags</code>, <code>checks</code>, <code>keys</code>, <code>interfaces &lt;device&gt;</code>, <code>hosts</code>.</p>
+    </div>
+  </div>
+
+  <div class="card" style="grid-column: 1 / -1">
+    <div class="card-head"><h2>API</h2></div>
+    <div class="card-body small">
+      Interactive REST API documentation is at <a href="/docs">/docs</a> (OpenAPI schema at <a href="/openapi.json">/openapi.json</a>).
+      {% if settings.api_token %}Send the token as <code>Authorization: Bearer &lt;token&gt;</code> or <code>X-API-Key: &lt;token&gt;</code>.{% else %}{{ status('warning', 'No API token is configured') }}: anyone who can reach this server can use it. Set <code>api_token</code> to require authentication.{% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  SP.$("#import-btn").addEventListener("click", async () => {
+    const f = SP.$("#import-file").files[0];
+    if (!f) return SP.toast("Choose a file first", "error");
+    try {
+      const r = await SP.api("POST", "/api/import", JSON.parse(await f.text()));
+      SP.toast(`Imported ${r.devices} devices, ${r.checks} checks, ${r.rules} rules, ${r.channels} channels`);
+    } catch (e) { SP.toast(e.message, "error"); }
+  });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit ' ~ device.name if device else 'Add device' }}{% endblock %}
+{% block crumbs %}<div class="crumbs"><a href="/devices">Devices</a>{% if device %} / <a href="/devices/{{ device.id }}">{{ device.name }}</a>{% endif %}</div>{% endblock %}
+{% block content %}
+{% set d = device or {} %}
+<form data-api="{{ '/api/devices/' ~ d.id if device else '/api/devices' }}" data-method="{{ 'PATCH' if device else 'POST' }}"
+      data-redirect="/devices/{{ d.id if device else '{id}' }}" id="device-form" style="max-width:980px">
+  <fieldset>
+    <legend>Device</legend>
+    <div class="form-grid">
+      <label class="field">Name<input name="name" required value="{{ d.name or '' }}" placeholder="core-sw01" autocomplete="off"></label>
+      <label class="field">Hostname or IP address<input name="hostname" required value="{{ d.hostname or '' }}" placeholder="10.0.0.1 or sw1.example.com" autocomplete="off"></label>
+      <label class="field">Location<input name="location" value="{{ d.location or '' }}" placeholder="HQ / rack A1"></label>
+      <label class="field">Tags <span class="hint">comma separated</span><input name="tags" data-type="list" value="{{ (d.tags or [])|join(', ') }}" placeholder="core, hq"></label>
+      <label class="field wide">Notes<textarea name="notes" rows="2">{{ d.notes or '' }}</textarea></label>
+      <label class="check"><input type="checkbox" name="enabled" {{ 'checked' if not device or d.enabled }}> Monitoring enabled</label>
+      {% if not device %}<label class="check"><input type="checkbox" name="add_ping_check" checked> Create a ping check</label>{% endif %}
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>SNMP</legend>
+    <div class="form-grid">
+      <label class="check wide"><input type="checkbox" name="snmp_enabled" {{ 'checked' if not device or d.snmp_enabled }}> Poll this device with SNMP <span class="muted small">(untick for availability checks only)</span></label>
+      <label class="field">Version<select name="snmp_version" id="snmp-version">
+        {% for v, l in [('2c', 'v2c'), ('3', 'v3'), ('1', 'v1')] %}<option value="{{ v }}" {{ 'selected' if (d.snmp_version or '2c') == v }}>{{ l }}</option>{% endfor %}
+      </select></label>
+      <label class="field">Port<input name="snmp_port" type="number" data-type="int" value="{{ d.snmp_port or 161 }}" min="1" max="65535"></label>
+      <label class="field">Poll interval (seconds)<input name="poll_interval" type="number" data-type="int" value="{{ d.poll_interval or 300 }}" min="10"></label>
+      <label class="field v12">Community<input name="snmp_community" value="{{ d.snmp_community if device else 'public' }}" autocomplete="off"></label>
+      <label class="field v3">User<input name="v3_user" value="{{ d.v3_user or '' }}" autocomplete="off"></label>
+      <label class="field v3">Auth protocol<select name="v3_auth_proto">{% for p in ['sha', 'sha256', 'sha384', 'sha512', 'sha224', 'md5', 'none'] %}<option {{ 'selected' if (d.v3_auth_proto or 'sha') == p }}>{{ p }}</option>{% endfor %}</select></label>
+      <label class="field v3">Auth passphrase<input name="v3_auth_key" type="password" autocomplete="new-password" placeholder="{{ 'unchanged' if d.has_v3_auth_key else '' }}"></label>
+      <label class="field v3">Privacy protocol<select name="v3_priv_proto">{% for p in ['aes', 'aes192', 'aes256', 'des', '3des', 'none'] %}<option {{ 'selected' if (d.v3_priv_proto or 'aes') == p }}>{{ p }}</option>{% endfor %}</select></label>
+      <label class="field v3">Privacy passphrase<input name="v3_priv_key" type="password" autocomplete="new-password" placeholder="{{ 'unchanged' if d.has_v3_priv_key else '' }}"></label>
+      <label class="field v3">Context<input name="v3_context" value="{{ d.v3_context or '' }}"></label>
+    </div>
+    <div class="row mt">
+      <button type="button" class="btn" id="snmp-test">Test SNMP</button>
+      <span id="snmp-result" class="small"></span>
+    </div>
+  </fieldset>
+  <div class="row">
+    <button type="submit" class="btn primary">{{ 'Save changes' if device else 'Add device' }}</button>
+    <a class="btn" href="{{ '/devices/' ~ d.id if device else '/devices' }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}
+{% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const form = SP.$("#device-form");
+  const ver = SP.$("#snmp-version");
+  const sync = () => {
+    const v3 = ver.value === "3";
+    SP.$$(".v3", form).forEach((el) => el.classList.toggle("hidden", !v3));
+    SP.$$(".v12", form).forEach((el) => el.classList.toggle("hidden", v3));
+  };
+  ver.addEventListener("change", sync);
+  sync();
+  SP.$("#snmp-test").addEventListener("click", async (e) => {
+    const out = SP.$("#snmp-result");
+    e.target.disabled = true;
+    out.innerHTML = '<span class="muted">Contacting device…</span>';
+    try {
+      const d = SP.formData(form);
+      const r = await SP.api("POST", "/api/devices/test", d);
+      out.innerHTML = r.ok
+        ? `<span class="status up">OK</span> ${SP.esc(r.system.sys_name || "")} · ${SP.esc(r.system.vendor || "unknown vendor")} · ${r.interfaces} interfaces, ${r.metrics} metrics<div class="muted">${SP.esc((r.system.sys_descr || "").slice(0, 160))}</div>`
+        : `<span class="status down">Failed</span> ${SP.esc(r.error)}`;
+    } catch (err) {
+      out.innerHTML = `<span class="status down">Failed</span> ${SP.esc(err.message)}`;
+    } finally {
+      e.target.disabled = false;
+    }
+  });
+});
+</script>
+{% endblock %}

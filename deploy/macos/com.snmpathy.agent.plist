@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SNMPathy launchd agent for macOS.
+
+    python3 -m venv ~/.snmpathy && ~/.snmpathy/bin/pip install /path/to/SNMPathy
+    mkdir -p ~/Library/Application\ Support/SNMPathy
+    cp deploy/macos/com.snmpathy.agent.plist ~/Library/LaunchAgents/
+    # edit the paths below (replace YOURNAME), then:
+    launchctl load -w ~/Library/LaunchAgents/com.snmpathy.agent.plist
+
+  macOS allows unprivileged ICMP, so ping checks work without root.
+  To run at boot for all users, copy to /Library/LaunchDaemons instead.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.snmpathy.agent</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/YOURNAME/.snmpathy/bin/snmpathy</string>
+    <string>serve</string>
+    <string>--db</string>
+    <string>/Users/YOURNAME/Library/Application Support/SNMPathy/snmpathy.db</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/YOURNAME/Library/Application Support/SNMPathy</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/Users/YOURNAME/Library/Logs/snmpathy.log</string>
+  <key>StandardErrorPath</key><string>/Users/YOURNAME/Library/Logs/snmpathy.log</string>
+</dict>
+</plist>

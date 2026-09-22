@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status, icon %}
+{% block title %}Alerts{% endblock %}
+{% set refresh = 60 if tab in ('active', 'history') else none %}
+{% block actions %}
+<button class="btn" data-action="api" data-url="/api/alerts/evaluate" data-success="Evaluated: {firing} firing, {pending} pending">{{ icon('refresh') }} Evaluate now</button>
+{% if tab == 'rules' %}<button class="btn primary" data-action="modal" data-target="#rule-modal" id="new-rule">{{ icon('plus') }} New rule</button>{% endif %}
+{% if tab == 'channels' %}<button class="btn primary" data-action="modal" data-target="#channel-modal" id="new-channel">{{ icon('plus') }} New channel</button>{% endif %}
+{% endblock %}
+{% block content %}
+{% set tabs = [('active', 'Active (' ~ active|length ~ ')'), ('history', 'History'), ('rules', 'Rules (' ~ rules|length ~ ')'), ('channels', 'Channels (' ~ channels|length ~ ')'), ('notifications', 'Notification log')] %}
+<div class="tabs">{% for key, label in tabs %}<a href="?tab={{ key }}" class="{{ 'active' if tab == key }}">{{ label }}</a>{% endfor %}</div>
+
+{% if tab == 'active' %}
+<div class="card"><div class="card-body flush table-wrap">
+  <table class="table">
+    <thead><tr><th>Severity</th><th>State</th><th>Subject</th><th>Details</th><th>Since</th><th>Rule</th><th></th></tr></thead>
+    <tbody>
+    {% for a in active %}
+      <tr>
+        <td>{{ status(a.severity) }}</td>
+        <td>{{ status(a.state) }}</td>
+        <td><strong>{% if a.device_id %}<a href="/devices/{{ a.device_id }}">{{ a.subject }}</a>{% elif a.check_id %}<a href="/checks/{{ a.check_id }}">{{ a.subject }}</a>{% else %}{{ a.subject }}{% endif %}</strong></td>
+        <td>{{ a.message }}</td>
+        <td class="nowrap">{{ (a.fired_at or a.started_at)|ts('ago')|safe }}</td>
+        <td class="small">{{ a.rule_name }}</td>
+        <td class="nowrap">{% if a.acknowledged %}<span class="small muted">ack'd by {{ a.ack_by or 'someone' }}</span>{% elif a.state == 'firing' %}<button class="btn sm" data-action="api" data-url="/api/alerts/{{ a.id }}/ack" data-body='{"by": "web"}'>Acknowledge</button>{% endif %}</td>
+      </tr>
+    {% else %}<tr><td colspan="7"><div class="empty">{{ status('ok', 'No active alerts') }}</div></td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div></div>
+
+{% elif tab == 'history' %}
+<div class="card"><div class="card-body flush table-wrap">
+  <table class="table compact">
+    <thead><tr><th>Severity</th><th>Subject</th><th>Details</th><th>Fired</th><th>Resolved</th><th>Duration</th><th>Rule</th></tr></thead>
+    <tbody>
+    {% for a in history %}
+      <tr><td>{{ status(a.severity) }}</td><td>{{ a.subject }}</td><td class="small">{{ a.message }}</td><td class="nowrap">{{ a.fired_at|ts|safe }}</td><td class="nowrap">{{ a.resolved_at|ts|safe }}</td><td>{{ ((a.resolved_at or 0) - (a.fired_at or a.resolved_at or 0))|duration }}</td><td class="small">{{ a.rule_name }}</td></tr>
+    {% else %}<tr><td colspan="7" class="empty">No resolved alerts yet</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div></div>
+
+{% elif tab == 'rules' %}
+<div class="card"><div class="card-body flush table-wrap">
+  <table class="table">
+    <thead><tr><th>Rule</th><th>Kind</th><th>Condition</th><th>Scope</th><th>Severity</th><th>Notify</th><th></th></tr></thead>
+    <tbody>
+    {% for r in rules %}
+      <tr class="{{ 'muted' if not r.enabled }}">
+        <td><strong>{{ r.name }}</strong>{% if not r.enabled %} <span class="tag">disabled</span>{% endif %}<div class="small muted">{{ r.description }}</div></td>
+        <td>{{ r.kind }}</td>
+        <td class="small">
+          {% if r.kind == 'metric' %}<code>{{ r.metric_key }}{% if r.instance %}[{{ r.instance }}]{% endif %} {{ r.operator }} {{ r.threshold }}</code>
+          {% elif r.kind == 'syslog' %}≥ {{ r.count_threshold }} msg{{ 's' if r.count_threshold != 1 }} in {{ r.window_seconds|duration }}{% if r.syslog_query %} matching <code>{{ r.syslog_query }}</code>{% endif %}{% if r.syslog_severity is not none %}, {{ SEVERITIES[r.syslog_severity] }} or worse{% endif %}
+          {% elif r.kind == 'check' %}check is down{% else %}SNMP unreachable{% endif %}
+          {% if r.for_seconds %}<div class="muted">for {{ r.for_seconds|duration }}</div>{% endif %}
+        </td>
+        <td class="small">{% if r.device_id %}{% for d in devices if d.id == r.device_id %}{{ d.name }}{% endfor %}{% elif r.device_tag %}tag <span class="tag">{{ r.device_tag }}</span>{% else %}all{% endif %}</td>
+        <td>{{ status(r.severity) }}</td>
+        <td class="small">{% if r.channels %}{% for c in channels if c.id in r.channels %}{{ c.name }}{{ ', ' if not loop.last }}{% endfor %}{% else %}all channels{% endif %}</td>
+        <td class="nowrap">
+          <button class="btn sm" data-edit-rule='{{ r|tojson|forceescape }}'>Edit</button>
+          <button class="btn sm ghost" data-action="api" data-method="PATCH" data-url="/api/rules/{{ r.id }}" data-body='{"enabled": {{ 'false' if r.enabled else 'true' }}}'>{{ 'Disable' if r.enabled else 'Enable' }}</button>
+          <button class="btn sm ghost danger" data-action="api" data-method="DELETE" data-url="/api/rules/{{ r.id }}" data-confirm="Delete rule {{ r.name }}?">Delete</button>
+        </td>
+      </tr>
+    {% else %}<tr><td colspan="7" class="empty">No rules</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div></div>
+
+<div class="modal-back hidden" id="rule-modal">
+  <div class="modal">
+    <div class="card-head"><h2 id="rule-title">New alert rule</h2><button class="btn ghost" data-action="close-modal">&times;</button></div>
+    <form data-api="/api/rules" id="rule-form" data-transform="rule">
+      <div class="modal-body">
+        <datalist id="metric-keys">{% for k in metric_keys %}<option value="{{ k }}">{{ METRIC_INFO.get(k, {}).get('name', '') }}</option>{% endfor %}</datalist>
+        <div class="form-grid">
+          <label class="field">Name<input name="name" required></label>
+          <label class="field">Kind<select name="kind" id="rule-kind"><option value="metric">Metric threshold</option><option value="check">Uptime check down</option><option value="device">Device unreachable (SNMP)</option><option value="syslog">Syslog messages</option></select></label>
+          <label class="field">Severity<select name="severity"><option value="critical">critical</option><option value="warning" selected>warning</option><option value="info">info</option></select></label>
+          <label class="field">Condition must hold for (seconds)<input name="for_seconds" type="number" data-type="int" value="0" min="0"></label>
+          <label class="field rk rk-metric">Metric key <span class="hint">wildcards ok</span><input name="metric_key" list="metric-keys" placeholder="cpu.avg, if.*_util"></label>
+          <label class="field rk rk-metric">Instance / label <span class="hint">optional glob</span><input name="instance" placeholder="Gi1/0/*"></label>
+          <label class="field rk rk-metric">Operator<select name="operator">{% for op in ['>', '>=', '<', '<=', '==', '!='] %}<option>{{ op }}</option>{% endfor %}</select></label>
+          <label class="field rk rk-metric">Threshold<input name="threshold" type="number" step="any" data-type="float" data-empty="null"></label>
+          <label class="field rk rk-syslog wide">Search query <span class="hint">same syntax as the syslog explorer; empty = any message</span><input name="syslog_query" id="rule-syslog-query" placeholder='"changed state to down" OR %LINK-3-UPDOWN'></label>
+          <label class="field rk rk-syslog">Severity at least<select name="syslog_severity" data-type="nullable"><option value="">any</option>{% for s in SEVERITIES %}<option value="{{ loop.index0 }}">{{ s }}</option>{% endfor %}</select></label>
+          <label class="field rk rk-syslog">Window (seconds)<input name="window_seconds" type="number" data-type="int" value="300" min="10"></label>
+          <label class="field rk rk-syslog">Messages per host<input name="count_threshold" type="number" data-type="int" value="1" min="1"></label>
+          <label class="field">Device <span class="hint">optional</span><select name="device_id" data-type="nullable"><option value="">All devices</option>{% for d in devices %}<option value="{{ d.id }}">{{ d.name }}</option>{% endfor %}</select></label>
+          <label class="field">Device tag <span class="hint">optional</span><input name="device_tag"></label>
+          <label class="field wide">Notify <span class="hint">none selected = every enabled channel</span><select name="channels" multiple data-type="intlist" size="3">{% for c in channels %}<option value="{{ c.id }}">{{ c.name }} ({{ c.type }})</option>{% endfor %}</select></label>
+          <label class="field wide">Description<input name="description"></label>
+          <label class="check"><input type="checkbox" name="enabled" checked> Enabled</label>
+        </div>
+      </div>
+      <div class="modal-foot"><button type="button" class="btn" data-action="close-modal">Cancel</button><button class="btn primary" type="submit">Save rule</button></div>
+    </form>
+  </div>
+</div>
+
+{% elif tab == 'channels' %}
+<div class="card"><div class="card-body flush table-wrap">
+  <table class="table">
+    <thead><tr><th>Channel</th><th>Type</th><th>Destination</th><th></th></tr></thead>
+    <tbody>
+    {% for c in channels %}
+      <tr class="{{ 'muted' if not c.enabled }}">
+        <td><strong>{{ c.name }}</strong>{% if not c.enabled %} <span class="tag">disabled</span>{% endif %}</td>
+        <td>{{ channel_types.get(c.type, c.type) }}</td>
+        <td class="small mono">{{ c.config.url or c.config.to or c.config.routing_key or '-' }}</td>
+        <td class="nowrap">
+          <button class="btn sm" data-action="api" data-url="/api/channels/{{ c.id }}/test" data-success="Test sent" data-then="none">Send test</button>
+          <button class="btn sm" data-edit-channel='{{ c|tojson|forceescape }}'>Edit</button>
+          <button class="btn sm ghost danger" data-action="api" data-method="DELETE" data-url="/api/channels/{{ c.id }}" data-confirm="Delete channel {{ c.name }}?">Delete</button>
+        </td>
+      </tr>
+    {% else %}<tr><td colspan="4" class="empty">No channels</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div></div>
+<div class="modal-back hidden" id="channel-modal">
+  <div class="modal">
+    <div class="card-head"><h2 id="channel-title">New notification channel</h2><button class="btn ghost" data-action="close-modal">&times;</button></div>
+    <form data-api="/api/channels" id="channel-form" data-transform="channel">
+      <div class="modal-body">
+        <div class="form-grid">
+          <label class="field">Name<input name="name" required></label>
+          <label class="field">Type<select name="type" id="channel-type">{% for k, v in channel_types.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
+          <label class="field wide cht cht-webhook cht-slack cht-teams cht-discord">Webhook URL<input name="config.url" type="url" placeholder="https://hooks.slack.com/services/…"></label>
+          <label class="field cht cht-slack">Channel override <span class="hint">optional</span><input name="config.channel" placeholder="#noc"></label>
+          <label class="field wide cht cht-webhook">Extra headers <span class="hint">JSON</span><input name="config.headers" data-type="json" placeholder='{"Authorization": "Bearer …"}'></label>
+          <label class="field wide cht cht-pagerduty">Integration (routing) key<input name="config.routing_key"></label>
+          <label class="field wide cht cht-email">Recipients <span class="hint">comma separated</span><input name="config.to" placeholder="noc@example.com, oncall@example.com"></label>
+          <label class="field cht cht-email">SMTP server <span class="hint">blank = global setting</span><input name="config.smtp_host"></label>
+          <label class="field cht cht-email">SMTP port<input name="config.smtp_port" type="number" data-type="int"></label>
+          <label class="field cht cht-email">SMTP user<input name="config.smtp_user" autocomplete="off"></label>
+          <label class="field cht cht-email">SMTP password<input name="config.smtp_password" type="password" autocomplete="new-password"></label>
+          <label class="field cht cht-email">From<input name="config.from" placeholder="snmpathy@example.com"></label>
+          <label class="check cht cht-email"><input type="checkbox" name="config.starttls"> Use STARTTLS</label>
+          <label class="check"><input type="checkbox" name="enabled" checked> Enabled</label>
+        </div>
+      </div>
+      <div class="modal-foot"><button type="button" class="btn" data-action="close-modal">Cancel</button><button class="btn primary" type="submit">Save channel</button></div>
+    </form>
+  </div>
+</div>
+
+{% elif tab == 'notifications' %}
+<div class="card"><div class="card-body flush table-wrap">
+  <table class="table compact">
+    <thead><tr><th>Time</th><th>Event</th><th>Alert</th><th>Channel</th><th>Result</th></tr></thead>
+    <tbody>
+    {% for n in notifications %}
+      <tr><td class="nowrap">{{ n.ts|ts|safe }}</td><td>{{ status('firing' if n.event == 'firing' else 'resolved', n.event) }}</td><td>{{ n.subject or '-' }}</td><td>{{ n.channel_name or '(deleted)' }}</td>
+      <td>{% if n.status == 'sent' %}{{ status('ok', 'sent') }}{% else %}{{ status('down', 'failed') }} <span class="small">{{ n.error }}</span>{% endif %}</td></tr>
+    {% else %}<tr><td colspan="5" class="empty">No notifications sent yet</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div></div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const toggle = (sel, cls, value) => SP.$$(sel).forEach((el) => {
+    const on = el.classList.contains(cls + value);
+    el.classList.toggle("hidden", !on);
+    SP.$$("input, select", el).forEach((i) => (i.disabled = !on));
+  });
+  const kind = SP.$("#rule-kind");
+  if (kind) {
+    const sync = () => toggle(".rk", "rk-", kind.value);
+    kind.addEventListener("change", sync);
+    sync();
+    const form = SP.$("#rule-form");
+    const reset = () => { form.reset(); form.dataset.api = "/api/rules"; form.dataset.method = "POST"; SP.$("#rule-title").textContent = "New alert rule"; sync(); };
+    SP.$("#new-rule").addEventListener("click", reset);
+    document.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-edit-rule]");
+      if (!b) return;
+      const r = JSON.parse(b.dataset.editRule);
+      reset();
+      form.dataset.api = "/api/rules/" + r.id; form.dataset.method = "PATCH";
+      SP.$("#rule-title").textContent = "Edit rule";
+      SP.$$("[name]", form).forEach((el) => {
+        const v = r[el.name];
+        if (el.type === "checkbox") el.checked = !!v;
+        else if (el.multiple) Array.from(el.options).forEach((o) => (o.selected = (v || []).includes(+o.value)));
+        else el.value = v == null ? "" : v;
+      });
+      sync();
+      SP.openModal(SP.$("#rule-modal"));
+    });
+    const q = new URLSearchParams(location.search).get("syslog_query");
+    if (q) { reset(); kind.value = "syslog"; sync(); SP.$("#rule-syslog-query").value = q; form.querySelector("[name=name]").value = "Syslog: " + q.slice(0, 40); SP.openModal(SP.$("#rule-modal")); }
+  }
+  SP.transforms.rule = (b) => { if (b.device_id === "") b.device_id = null; if (!b.channels) b.channels = []; return b; };
+
+  const ctype = SP.$("#channel-type");
+  if (ctype) {
+    const sync = () => toggle(".cht", "cht-", ctype.value);
+    ctype.addEventListener("change", sync);
+    sync();
+    const form = SP.$("#channel-form");
+    const reset = () => { form.reset(); form.dataset.api = "/api/channels"; form.dataset.method = "POST"; ctype.disabled = false; SP.$("#channel-title").textContent = "New notification channel"; sync(); };
+    SP.$("#new-channel").addEventListener("click", reset);
+    document.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-edit-channel]");
+      if (!b) return;
+      const c = JSON.parse(b.dataset.editChannel);
+      reset();
+      form.dataset.api = "/api/channels/" + c.id; form.dataset.method = "PATCH";
+      SP.$("#channel-title").textContent = "Edit channel";
+      form.querySelector("[name=name]").value = c.name;
+      form.querySelector("[name=enabled]").checked = !!c.enabled;
+      ctype.value = c.type; sync(); ctype.disabled = true;
+      Object.entries(c.config || {}).forEach(([k, v]) => {
+        const el = form.querySelector(`[name="config.${k}"]`);
+        if (!el) return;
+        if (el.type === "checkbox") el.checked = !!v; else el.value = typeof v === "object" ? JSON.stringify(v) : v;
+      });
+      SP.openModal(SP.$("#channel-modal"));
+    });
+  }
+  SP.transforms.channel = (b) => {
+    Object.keys(b.config || {}).forEach((k) => { if (b.config[k] === "" || (typeof b.config[k] === "object" && !Object.keys(b.config[k]).length)) delete b.config[k]; });
+    if (SP.$("#channel-form").dataset.method === "PATCH") delete b.type;
+    return b;
+  };
+});
+</script>
+{% endblock %}

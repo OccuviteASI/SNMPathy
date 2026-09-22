@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon %}
+{% block title %}Dashboards{% endblock %}
+{% block actions %}
+<button class="btn" data-action="api" data-url="/api/dashboards/reset" data-success="Restored {created} built-in dashboard(s)">Restore built-ins</button>
+<button class="btn primary" data-action="modal" data-target="#new-dash">{{ icon('plus') }} New dashboard</button>
+{% endblock %}
+{% block content %}
+<div class="report-cards">
+  {% for d in dashboards %}
+  <div class="card report-card">
+    <a href="/dashboards/{{ d.slug }}" class="row" style="color:inherit">{{ icon('dash') }}<h2>{{ d.name }}</h2></a>
+    <p>{{ d.description or 'No description' }}</p>
+    <div class="small muted">{{ d.config.panels|length }} panels · default range {{ d.config.time }} · refresh {{ d.config.refresh ~ 's' if d.config.refresh else 'off' }}</div>
+    <div class="row mt">
+      <a class="btn sm primary" href="/dashboards/{{ d.slug }}">Open</a>
+      <button class="btn sm" data-action="api" data-url="/api/dashboards/{{ d.id }}/duplicate" data-success="Copied">Duplicate</button>
+      <button class="btn sm ghost danger" data-action="api" data-method="DELETE" data-url="/api/dashboards/{{ d.id }}" data-confirm="Delete dashboard {{ d.name }}?">Delete</button>
+    </div>
+  </div>
+  {% else %}
+  <div class="card"><div class="empty">No dashboards. Create one or restore the built-in set.</div></div>
+  {% endfor %}
+</div>
+<p class="muted small mt">Prefer Grafana? SNMPathy is also a Grafana data source. See <a href="/settings#grafana">Settings → Grafana</a>.</p>
+
+<div class="modal-back hidden" id="new-dash">
+  <div class="modal">
+    <div class="card-head"><h2>New dashboard</h2><button class="btn ghost" data-action="close-modal">&times;</button></div>
+    <form data-api="/api/dashboards" data-redirect="/dashboards/{id}">
+      <div class="modal-body"><div class="form-grid">
+        <label class="field">Name<input name="name" required placeholder="Branch offices"></label>
+        <label class="field">Default time range<select name="config.time">{% for r in ['1h', '6h', '24h', '7d', '30d'] %}<option {{ 'selected' if r == '24h' }}>{{ r }}</option>{% endfor %}</select></label>
+        <label class="field">Auto-refresh<select name="config.refresh" data-type="int"><option value="0">Off</option><option value="30">30 s</option><option value="60" selected>1 min</option><option value="300">5 min</option></select></label>
+        <label class="field wide">Description<input name="description"></label>
+      </div></div>
+      <div class="modal-foot"><button type="button" class="btn" data-action="close-modal">Cancel</button><button class="btn primary" type="submit">Create</button></div>
+    </form>
+  </div>
+</div>
+{% endblock %}

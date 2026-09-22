@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · SNMPathy</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/app.js"></script>
+</head>
+<body>
+<div class="login">
+  <div class="card">
+    <div class="card-body stack">
+      <div class="row"><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#2a78d6"/><path d="M6 18h5l3-8 4 13 3-7h5" fill="none" stroke="white" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg><h1>SNMPathy</h1></div>
+      {% if error %}<div class="status down">That token is not valid.</div>{% endif %}
+      <form method="post" action="/login" class="stack">
+        <input type="hidden" name="next" value="{{ next }}">
+        <label class="field">Access token<input type="password" name="token" required autofocus autocomplete="current-password"></label>
+        <button class="btn primary" type="submit">Sign in</button>
+      </form>
+      <p class="small muted" style="margin:0">The token is the <code>api_token</code> value from the SNMPathy configuration.</p>
+    </div>
+  </div>
+</div>
+</body>
+</html>

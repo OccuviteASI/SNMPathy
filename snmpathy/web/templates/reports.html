@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, status %}
+{% block title %}Reports{% endblock %}
+{% block actions %}<button class="btn primary" data-action="modal" data-target="#schedule-modal">{{ icon('plus') }} Schedule a report</button>{% endblock %}
+{% block content %}
+<div class="report-cards mb">
+  {% for key, info in report_types.items() %}
+  <a class="card report-card" href="/reports/{{ key }}">
+    <div class="row">{{ icon('report') }}<h2>{{ info.title }}</h2></div>
+    <p>{{ info.description }}</p>
+    <div class="row small">
+      {% for r, l in [('24h', '24h'), ('7d', '7 days'), ('last_month', 'last month')] %}<span class="tag">{{ l }}</span>{% endfor %}
+    </div>
+  </a>
+  {% endfor %}
+</div>
+
+<div class="card">
+  <div class="card-head"><h2>Scheduled reports</h2><span class="small muted">Delivered by e-mail (HTML + CSV), Slack / Teams / Discord (summary) or webhook (JSON)</span></div>
+  <div class="card-body flush table-wrap">
+    <table class="table">
+      <thead><tr><th>Name</th><th>Report</th><th>When</th><th>Period</th><th>Deliver to</th><th>Last sent</th><th></th></tr></thead>
+      <tbody>
+      {% set days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] %}
+      {% for s in schedules %}
+        <tr class="{{ 'muted' if not s.enabled }}">
+          <td><strong>{{ s.name }}</strong>{% if not s.enabled %} <span class="tag">paused</span>{% endif %}</td>
+          <td>{{ report_types[s.report].title if s.report in report_types else s.report }}</td>
+          <td>{% if s.frequency == 'daily' %}Daily{% elif s.frequency == 'weekly' %}{{ days[s.weekday] }}s{% else %}Day {{ s.monthday }} of each month{% endif %} at {{ '%02d'|format(s.hour) }}:00</td>
+          <td>{{ s.range|replace('_', ' ') }}</td>
+          <td class="small">{% if s.channels %}{% for c in channels if c.id in s.channels %}{{ c.name }}{{ ', ' if not loop.last }}{% endfor %}{% else %}all e-mail channels{% endif %}</td>
+          <td class="small">{% if s.last_run %}{{ s.last_run|ts('ago')|safe }}<div class="muted">{{ s.last_status }}</div>{% else %}<span class="muted">not yet</span>{% endif %}</td>
+          <td class="nowrap">
+            <a class="btn sm" href="/reports/{{ s.report }}?range={{ s.range }}{% if s.options.device_id %}&device_id={{ s.options.device_id }}{% endif %}">Preview</a>
+            <button class="btn sm" data-action="api" data-url="/api/report-schedules/{{ s.id }}/send" data-success="Report sent">Send now</button>
+            <button class="btn sm ghost" data-action="api" data-method="PATCH" data-url="/api/report-schedules/{{ s.id }}" data-body='{"enabled": {{ 'false' if s.enabled else 'true' }}}'>{{ 'Pause' if s.enabled else 'Resume' }}</button>
+            <button class="btn sm ghost danger" data-action="api" data-method="DELETE" data-url="/api/report-schedules/{{ s.id }}" data-confirm="Delete this schedule?">Delete</button>
+          </td>
+        </tr>
+      {% else %}<tr><td colspan="7" class="empty">No scheduled reports. Schedule one to receive a weekly SLA or bandwidth summary automatically.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="modal-back hidden" id="schedule-modal">
+  <div class="modal">
+    <div class="card-head"><h2>Schedule a report</h2><button class="btn ghost" data-action="close-modal">&times;</button></div>
+    <form data-api="/api/report-schedules" data-transform="schedule">
+      <div class="modal-body">
+        <div class="form-grid">
+          <label class="field">Name<input name="name" required placeholder="Weekly SLA for management"></label>
+          <label class="field">Report<select name="report">{% for k, v in report_types.items() %}<option value="{{ k }}">{{ v.title }}</option>{% endfor %}</select></label>
+          <label class="field">Frequency<select name="frequency" id="sch-freq"><option value="daily">Daily</option><option value="weekly" selected>Weekly</option><option value="monthly">Monthly</option></select></label>
+          <label class="field">Hour (server time)<input name="hour" type="number" data-type="int" min="0" max="23" value="7"></label>
+          <label class="field sch sch-weekly">Day of week<select name="weekday" data-type="int">{% for d in days %}<option value="{{ loop.index0 }}">{{ d }}</option>{% endfor %}</select></label>
+          <label class="field sch sch-monthly">Day of month<input name="monthday" type="number" data-type="int" min="1" max="28" value="1"></label>
+          <label class="field">Period covered<select name="range"><option value="">Previous day / week / month (matches frequency)</option><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="this_month">Month to date</option></select></label>
+          <label class="field">Device <span class="hint">optional</span><select name="options.device_id" data-type="nullable"><option value="">All devices</option>{% for d in devices %}<option value="{{ d.id }}">{{ d.name }}</option>{% endfor %}</select></label>
+          <label class="field">Device tag <span class="hint">optional</span><input name="options.tag"></label>
+          <label class="field wide">Deliver to <span class="hint">none selected = all e-mail channels</span><select name="channels" multiple data-type="intlist" size="4">{% for c in channels %}<option value="{{ c.id }}">{{ c.name }} ({{ c.type }})</option>{% endfor %}</select></label>
+        </div>
+        {% if not channels|selectattr('type', 'equalto', 'email')|list %}<p class="small muted">Tip: add an e-mail channel under <a href="/alerts?tab=channels">Alerts → Channels</a> to receive the full HTML report with a CSV attachment.</p>{% endif %}
+      </div>
+      <div class="modal-foot"><button type="button" class="btn" data-action="close-modal">Cancel</button><button class="btn primary" type="submit">Create schedule</button></div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const f = SP.$("#sch-freq");
+  const sync = () => SP.$$(".sch").forEach((el) => el.classList.toggle("hidden", !el.classList.contains("sch-" + f.value)));
+  f.addEventListener("change", sync);
+  sync();
+});
+SP.transforms.schedule = (b) => {
+  const o = b.options || {};
+  Object.keys(o).forEach((k) => { if (o[k] === "" || o[k] == null) delete o[k]; });
+  b.options = o;
+  b.channels = b.channels || [];
+  return b;
+};
+</script>
+{% endblock %}
