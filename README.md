@@ -88,6 +88,12 @@ Claude/
     └── README.txt
 ```
 
+The script prints `step 1/4` to `step 4/4` as it runs and ends with **BUILD OK** or
+**BUILD FAILED**. If it fails, the cause is the first `ERROR` line above that message;
+run the script again with `--fresh` to rebuild its environment from scratch. The build
+uses its own pip cache in `build/pip-cache`, so pip's "Cache entry deserialization
+failed" warnings from a shared cache don't apply.
+
 The packaged app keeps its database and configuration next to the executable, whatever
 directory it is started from. PyInstaller builds for the OS it runs on. CI also builds the
 Windows, macOS and Linux executables on every push; download them from the run's

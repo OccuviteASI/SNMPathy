@@ -96,27 +96,65 @@ def venv_python() -> Path:
     return VENV_DIR / ("Scripts/python.exe" if IS_WINDOWS else "bin/python")
 
 
+def build_env() -> dict[str, str]:
+    """Environment for pip / PyInstaller child processes.
+
+    The build uses its own pip cache: a fresh virtualenv starts with the pip
+    bundled with Python, which cannot read cache entries written by a newer
+    pip in the user's shared cache and prints a wall of
+    "Cache entry deserialization failed" warnings.
+    """
+    env = dict(os.environ)
+    env.update(
+        PIP_CACHE_DIR=str(BUILD_DIR / "pip-cache"),
+        PIP_DISABLE_PIP_VERSION_CHECK="1",
+        PIP_NO_INPUT="1",
+        PYTHONUTF8="1",  # avoid console encoding errors on Windows code pages
+    )
+    env.pop("PYTHONPATH", None)
+    env.pop("PIP_REQUIRE_VIRTUALENV", None)
+    return env
+
+
+def _venv_usable() -> bool:
+    """The build venv exists, runs, and was made by this same Python version."""
+    py = venv_python()
+    if not py.exists():
+        return False
+    try:
+        out = subprocess.run([str(py), "-c", "import sys; print(sys.version_info[:2])"],
+                             capture_output=True, text=True, timeout=60, env=build_env())
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return out.returncode == 0 and out.stdout.strip() == str(sys.version_info[:2])
+
+
 def ensure_build_env(fresh: bool) -> Path:
     """An isolated virtualenv with SNMPathy and PyInstaller, so your own Python stays untouched."""
-    if fresh and VENV_DIR.exists():
-        shutil.rmtree(VENV_DIR)
+    if VENV_DIR.exists() and (fresh or not _venv_usable()):
+        log("removing the old build environment")
+        shutil.rmtree(VENV_DIR, ignore_errors=True)
     if not venv_python().exists():
-        log(f"creating build environment in {VENV_DIR}")
+        log(f"step 1/4: creating build environment in {VENV_DIR}")
         venv.EnvBuilder(with_pip=True, clear=True).create(VENV_DIR)
+    else:
+        log(f"step 1/4: reusing build environment in {VENV_DIR}")
     py = str(venv_python())
-    log("installing SNMPathy and PyInstaller into the build environment")
-    subprocess.run([py, "-m", "pip", "install", "--quiet", "--upgrade", "pip"], check=True)
-    subprocess.run([py, "-m", "pip", "install", "--quiet", str(ROOT), "pyinstaller>=6.0"], check=True)
+    env = build_env()
+    log("step 2/4: installing SNMPathy and PyInstaller into the build environment (first run downloads ~60 MB)")
+    subprocess.run([py, "-m", "pip", "install", "--quiet", "--upgrade", "pip"], check=True, env=env)
+    subprocess.run([py, "-m", "pip", "install", "--quiet", "--upgrade", str(ROOT), "pyinstaller>=6.0"],
+                   check=True, env=env)
     return venv_python()
 
 
 def build(py: Path) -> Path:
-    log("running PyInstaller (this takes a minute)")
+    log("step 3/4: running PyInstaller (this takes a minute or two)")
     subprocess.run(
         [str(py), "-m", "PyInstaller", "--noconfirm", "--clean",
          "--distpath", str(ROOT / "dist"), "--workpath", str(BUILD_DIR / "pyinstaller"),
          str(ROOT / "packaging" / "snmpathy.spec")],
-        check=True, cwd=ROOT,
+        check=True, cwd=ROOT, env=build_env(),
     )
     exe = ROOT / "dist" / EXE_NAME
     if not exe.exists():
@@ -125,7 +163,8 @@ def build(py: Path) -> Path:
 
 
 def smoke_test(exe: Path) -> None:
-    out = subprocess.run([str(exe), "version"], capture_output=True, text=True, timeout=120)
+    log("step 4/4: checking the executable starts")
+    out = subprocess.run([str(exe), "version"], capture_output=True, text=True, timeout=120, env=build_env())
     if out.returncode != 0 or "snmpathy" not in out.stdout:
         raise SystemExit(f"smoke test failed:\n{out.stdout}\n{out.stderr}")
     log(f"smoke test ok: {out.stdout.strip()}")
@@ -186,15 +225,27 @@ def main() -> int:
     if dest:
         log(f"executable will be stored in {dest}")
 
-    py = ensure_build_env(args.fresh)
-    exe = build(py)
-    smoke_test(exe)
+    log(f"using Python {sys.version.split()[0]} ({sys.executable})")
+    if sys.version_info < (3, 10):
+        log("SNMPathy needs Python 3.10 or newer: install it from https://www.python.org/downloads/")
+        return 2
+    try:
+        py = ensure_build_env(args.fresh)
+        exe = build(py)
+        smoke_test(exe)
+    except subprocess.CalledProcessError as exc:
+        step = " ".join(str(part) for part in exc.cmd[1:5])
+        log(f"BUILD FAILED while running: {step} ... (exit code {exc.returncode})")
+        log("scroll up to the first ERROR line for the cause. Warnings such as")
+        log("'Cache entry deserialization failed' are harmless and can be ignored.")
+        log("to retry from a clean state:  build_executable --fresh")
+        return 1
     if args.no_copy:
-        log(f"built {exe}")
+        log(f"BUILD OK: {exe}")
         return 0
     target = install(exe, dest)
     size = target.stat().st_size / 1_048_576
-    log(f"done: {target} ({size:.0f} MB)")
+    log(f"BUILD OK: {target} ({size:.0f} MB)")
     return 0
 
 
