@@ -57,7 +57,7 @@ def _ts(value: Any, default: float) -> float:
         return float(value) / (1000 if value > 1e11 else 1)
     try:
         return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
-    except ValueError:
+    except (ValueError, OSError, OverflowError):
         return default
 
 

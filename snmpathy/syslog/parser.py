@@ -233,7 +233,7 @@ def _parse_bsd_ts(m: re.Match, received_at: float) -> float | None:
     try:
         hh, mm, ss = (int(x) for x in m.group("time").split(":"))
         day = int(m.group("day"))
-        local_now = datetime.fromtimestamp(received_at)
+        local_now = datetime.fromtimestamp(received_at) if received_at > 86400 else datetime.now()
         year = int(m.group("year")) if m.group("year") else local_now.year
         dt = datetime(year, mon, day, hh, mm, ss)
     except ValueError:
@@ -248,12 +248,12 @@ def _parse_bsd_ts(m: re.Match, received_at: float) -> float | None:
         digits = tz[1:].replace(":", "")
         offset = timedelta(hours=int(digits[:2]), minutes=int(digits[2:4] or 0))
         dt = dt.replace(tzinfo=timezone(sign * offset))
-    ts = dt.timestamp()  # naive -> local time, which is what BSD syslog means
-    if not m.group("year") and ts - received_at > 2 * 86400:
+    ts = _timestamp(dt)  # naive -> local time, which is what BSD syslog means
+    if ts is not None and not m.group("year") and ts - received_at > 2 * 86400:
         # "Dec 31" received on Jan 1st belongs to last year.
         try:
-            ts = dt.replace(year=year - 1).timestamp()
-        except ValueError:
+            ts = _timestamp(dt.replace(year=year - 1)) or ts
+        except ValueError:  # Feb 29 in a non-leap year
             pass
     return ts
 
@@ -269,7 +269,19 @@ def _parse_iso(value: str) -> float | None:
         dt = datetime.fromisoformat(value.replace(" ", "T", 1))
     except ValueError:
         return None
-    return dt.timestamp()
+    return _timestamp(dt)
+
+
+def _timestamp(dt: datetime) -> float | None:
+    """``dt.timestamp()`` that returns None instead of raising.
+
+    Windows raises OSError for local times before 1970, and any platform can
+    overflow on absurd years sent by misconfigured devices.
+    """
+    try:
+        return dt.timestamp()
+    except (OSError, OverflowError, ValueError):
+        return None
 
 
 def _trust(ts: float | None, received_at: float) -> float:
