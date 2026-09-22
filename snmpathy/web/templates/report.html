@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, status %}
+{% block title %}{{ report.title }}{% endblock %}
+{% block crumbs %}<div class="crumbs"><a href="/reports">Reports</a> / {{ report.subtitle }}</div>{% endblock %}
+{% block actions %}
+<a class="btn" href="/api/reports/{{ report_id }}?format=csv&{{ qs }}">{{ icon('download') }} CSV</a>
+<a class="btn" href="/api/reports/{{ report_id }}?{{ qs }}" target="_blank">JSON</a>
+<button class="btn" data-action="print">{{ icon('print') }} Print / PDF</button>
+{% endblock %}
+{% block content %}
+<form class="card mb no-print" method="get"><div class="card-body row">
+  <label class="field">Period<select name="range" onchange="this.form.submit()">{% for v, l in ranges %}<option value="{{ v }}" {{ 'selected' if range == v }}>{{ l }}</option>{% endfor %}</select></label>
+  {% if report_id != 'alerts' %}
+  <label class="field">Device<select name="device_id" onchange="this.form.submit()"><option value="">All devices</option>{% for d in devices %}<option value="{{ d.id }}" {{ 'selected' if device_id == d.id }}>{{ d.name }}</option>{% endfor %}</select></label>
+  <label class="field">Tag<select name="tag" onchange="this.form.submit()"><option value="">Any</option>{% for t in tags %}<option {{ 'selected' if tag == t }}>{{ t }}</option>{% endfor %}</select></label>
+  {% endif %}
+  {% if report_id == 'uptime' %}
+  <label class="field">SLA target %<input name="sla" type="number" step="0.001" min="0" max="100" value="{{ sla or '99.9' }}" style="width:110px" onchange="this.form.submit()"></label>
+  {% endif %}
+  <div style="flex:1"></div>
+  <div class="small muted">Other reports: {% for k, v in report_types.items() if k != report_id %}<a href="/reports/{{ k }}?range={{ range }}">{{ v.title }}</a>{{ ' · ' if not loop.last }}{% endfor %}</div>
+</div></form>
+
+<div class="print-only"><h2>{{ report.title }}</h2><p>{{ report.subtitle }} · generated {{ report.generated_at|ts|safe }}</p></div>
+<p class="muted small no-print">{{ report.start|ts|safe }} to {{ report.end|ts|safe }} · generated {{ report.generated_at|ts('ago')|safe }}</p>
+
+<div class="report-summary mb">
+  {% for s in report.summary %}
+  <div class="card tile {{ 'bad' if s.status == 'bad' }}"><div class="label">{{ s.label }}</div><div class="value">{{ fmt(s.value, s.fmt or 'text') }}</div></div>
+  {% endfor %}
+</div>
+
+{% for sec in report.sections %}
+<div class="card mb">
+  <div class="card-head"><h2>{{ sec.title }}</h2><span class="small muted">{{ sec.rows|length }} row{{ 's' if sec.rows|length != 1 }}</span>
+    <a class="btn sm no-print" href="/api/reports/{{ report_id }}?format=csv&section={{ loop.index0 }}&{{ qs }}">CSV</a></div>
+  {% if sec.note %}<div class="card-body small muted" style="padding-bottom:0">{{ sec.note }}</div>{% endif %}
+  <div class="card-body flush table-wrap scroll">
+    <table class="table compact">
+      <thead><tr>{% for c in sec.columns %}<th class="sortable {{ 'num' if c.fmt in ('int', 'num', 'pct', 'pct1', 'pct3', 'bps', 'bytes', 'ms', 'duration') }}">{{ c.label }}</th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for row in sec.rows %}
+        <tr>
+        {% for c in sec.columns %}
+          {% set v = row.get(c.key) %}
+          {% set f = c.fmt or 'text' %}
+          {% if f == 'badge' %}<td>{% if v %}{{ status({'met': 'up', 'breached': 'down', 'up': 'up', 'down': 'down', 'firing': 'firing', 'resolved': 'resolved', 'critical': 'critical', 'warning': 'warning', 'info': 'info'}.get(v, 'unknown'), v) }}{% else %}-{% endif %}</td>
+          {% elif f == 'ts' %}<td class="nowrap" data-sort="{{ v or 0 }}">{{ v|ts|safe if v else '-' }}</td>
+          {% elif f == 'text' %}<td>{% if loop.first and row._link %}<a href="{{ row._link }}">{{ v if v not in (none, '') else '-' }}</a>{% else %}{{ v if v not in (none, '') else '-' }}{% endif %}</td>
+          {% else %}<td class="num" data-sort="{{ v if v is not none else -1 }}">{{ fmt(v, f) }}</td>{% endif %}
+        {% endfor %}
+        </tr>
+      {% else %}<tr><td colspan="{{ sec.columns|length }}" class="empty">No data for this period</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endfor %}
+{% endblock %}

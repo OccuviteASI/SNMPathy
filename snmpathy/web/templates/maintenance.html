@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, status %}
+{% block title %}Maintenance windows{% endblock %}
+{% block content %}
+<div class="grid grid-12">
+  <div class="card" style="grid-column: span 8">
+    <div class="card-head"><h2>Windows</h2><span class="small muted">Alerts are suppressed and SLA calculations exclude these periods</span></div>
+    <div class="card-body flush table-wrap">
+      <table class="table">
+        <thead><tr><th>State</th><th>Name</th><th>Scope</th><th>Starts</th><th>Ends</th><th></th></tr></thead>
+        <tbody>
+        {% set t = now() %}
+        {% for w in windows %}
+          <tr>
+            <td>{% if w.starts_at <= t < w.ends_at %}{{ status('warning', 'active') }}{% elif w.starts_at > t %}{{ status('info', 'scheduled') }}{% else %}{{ status('unknown', 'finished') }}{% endif %}</td>
+            <td>{{ w.name }}</td>
+            <td>{% if w.device_name %}device <a href="/devices/{{ w.device_id }}">{{ w.device_name }}</a>{% elif w.check_name %}check <a href="/checks/{{ w.check_id }}">{{ w.check_name }}</a>{% else %}everything{% endif %}</td>
+            <td class="nowrap">{{ w.starts_at|ts|safe }}</td><td class="nowrap">{{ w.ends_at|ts|safe }}</td>
+            <td><button class="btn sm ghost danger" data-action="api" data-method="DELETE" data-url="/api/maintenance/{{ w.id }}" data-confirm="Delete this window?">Delete</button></td>
+          </tr>
+        {% else %}<tr><td colspan="6" class="empty">No maintenance windows</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card" style="grid-column: span 4">
+    <div class="card-head"><h2>Schedule maintenance</h2></div>
+    <div class="card-body">
+      <form data-api="/api/maintenance" data-transform="maint" class="stack">
+        <label class="field">Name<input name="name" required placeholder="Core switch firmware upgrade"></label>
+        <label class="field">Device<select name="device_id" data-type="nullable"><option value="">-</option>{% for d in devices %}<option value="{{ d.id }}">{{ d.name }}</option>{% endfor %}</select></label>
+        <label class="field">or check<select name="check_id" data-type="nullable"><option value="">-</option>{% for c in checks %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></label>
+        <span class="small muted">Leave both empty to cover everything.</span>
+        <label class="field">Starts<input name="start_local" type="datetime-local" data-skip-send></label>
+        <label class="field">Duration (minutes)<input name="duration_minutes" type="number" data-type="float" value="60" min="1"></label>
+        <button class="btn primary" type="submit">Schedule</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+SP.transforms.maint = (b) => {
+  if (b.start_local) b.starts_at = new Date(b.start_local).getTime() / 1000;
+  delete b.start_local;
+  return b;
+};
+</script>
+{% endblock %}

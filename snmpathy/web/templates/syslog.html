@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Syslog{% endblock %}
+{% block actions %}
+<span id="log-count" class="muted small"></span>
+<button class="btn" id="log-live">Live tail</button>
+{% endblock %}
+{% block content %}
+<div id="syslog-root">
+  <div class="card mb"><div class="card-body">
+    <form class="searchbar" autocomplete="off">
+      <input class="q" name="q" type="search" placeholder='Search messages: words, "exact phrase", -exclude, prefix*' value="{{ params.q or '' }}" aria-label="Search">
+      <input name="host" placeholder="Host (wildcards ok)" value="{{ params.host or '' }}" style="width:170px" aria-label="Host">
+      <input name="app" placeholder="App" value="{{ params.app or '' }}" style="width:120px" aria-label="App">
+      <select name="severity" aria-label="Minimum severity">
+        <option value="">Any severity</option>
+        {% for s in SEVERITIES %}<option value="{{ loop.index0 }}" {{ 'selected' if params.severity == loop.index0|string }}>{{ s }} and worse</option>{% endfor %}
+      </select>
+      <select name="device_id" aria-label="Device">
+        <option value="">Any device</option>
+        {% for d in devices %}<option value="{{ d.id }}" {{ 'selected' if params.device_id == d.id|string }}>{{ d.name }}</option>{% endfor %}
+      </select>
+      <button class="btn primary" type="submit">Search</button>
+    </form>
+    <div class="row mt" id="log-time"></div>
+  </div></div>
+
+  <div class="grid grid-12">
+    <div class="stack" style="grid-column: span 3">
+      <div class="card"><div class="card-head"><h3>Hosts</h3></div><div class="card-body" id="facet-host"></div></div>
+      <div class="card"><div class="card-head"><h3>Applications</h3></div><div class="card-body" id="facet-app"></div></div>
+      <div class="card"><div class="card-head"><h3>Severity</h3></div><div class="card-body" id="facet-sev"></div></div>
+      <div class="card"><div class="card-body small muted" id="listen-hint">
+        {% if listening %}Listening on {% for proto, addr in listening.items() %}<strong>{{ proto|upper }} {{ addr }}</strong>{{ ', ' if not loop.last }}{% endfor %}.
+        Test with <code>snmpathy send-syslog "hello"</code>.{% else %}The syslog listener is not running.{% endif %}
+      </div></div>
+    </div>
+    <div class="stack" style="grid-column: span 9">
+      <div class="card"><div class="card-body"><div id="log-hist" data-height="150"></div></div></div>
+      <div class="card">
+        <div class="card-body flush table-wrap">
+          <table class="table compact log-table">
+            <thead><tr><th>Time</th><th>Host</th><th>Severity</th><th>Facility</th><th>App</th><th>Message</th></tr></thead>
+            <tbody id="log-body"></tbody>
+          </table>
+        </div>
+        <div class="card-body"><button class="btn hidden" id="log-more">Load older messages</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>document.addEventListener("DOMContentLoaded", () => SP.syslogExplorer(SP.$("#syslog-root")));</script>
+{% endblock %}

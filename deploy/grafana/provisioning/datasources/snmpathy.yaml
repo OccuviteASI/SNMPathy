@@ -1,0 +1,13 @@
+apiVersion: 1
+datasources:
+  - name: SNMPathy
+    type: simpod-json-datasource
+    uid: snmpathy
+    access: proxy
+    url: http://snmpathy:8080/grafana
+    isDefault: true
+    editable: true
+    jsonData:
+      httpHeaderName1: X-API-Key
+    secureJsonData:
+      httpHeaderValue1: ${SNMPATHY_API_TOKEN}

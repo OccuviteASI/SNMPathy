@@ -1,0 +1,56 @@
+# SNMPathy stack.
+#
+#   docker compose up -d                      # SNMPathy only
+#   docker compose --profile grafana up -d    # plus Grafana with dashboards provisioned
+#
+# Optional settings go in a .env file next to this one, e.g.
+#   SNMPATHY_API_TOKEN=change-me
+#   SNMPATHY_PUBLIC_URL=https://monitor.example.com
+#   SNMPATHY_SMTP_HOST=smtp.example.com
+services:
+  snmpathy:
+    build: .
+    image: snmpathy:latest
+    container_name: snmpathy
+    restart: unless-stopped
+    ports:
+      - "8080:8080"          # web UI, API, Grafana data source
+      - "514:5514/udp"       # syslog
+      - "514:5514/tcp"
+    volumes:
+      - snmpathy-data:/data
+    environment:
+      SNMPATHY_API_TOKEN: ${SNMPATHY_API_TOKEN:-}
+      SNMPATHY_PUBLIC_URL: ${SNMPATHY_PUBLIC_URL:-}
+      SNMPATHY_SMTP_HOST: ${SNMPATHY_SMTP_HOST:-}
+      SNMPATHY_SMTP_PORT: ${SNMPATHY_SMTP_PORT:-25}
+      SNMPATHY_SMTP_USER: ${SNMPATHY_SMTP_USER:-}
+      SNMPATHY_SMTP_PASSWORD: ${SNMPATHY_SMTP_PASSWORD:-}
+      SNMPATHY_SMTP_FROM: ${SNMPATHY_SMTP_FROM:-snmpathy@localhost}
+      TZ: ${TZ:-UTC}
+    # Lets the unprivileged container user send ICMP echo without raw sockets.
+    sysctls:
+      net.ipv4.ping_group_range: "0 2147483647"
+    cap_add:
+      - NET_RAW
+
+  grafana:
+    profiles: ["grafana"]
+    image: grafana/grafana-oss:11.2.0
+    container_name: snmpathy-grafana
+    restart: unless-stopped
+    depends_on:
+      - snmpathy
+    ports:
+      - "3000:3000"
+    environment:
+      GF_INSTALL_PLUGINS: simpod-json-datasource
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/json/snmpathy-overview.json
+      SNMPATHY_API_TOKEN: ${SNMPATHY_API_TOKEN:-}
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+
+volumes:
+  snmpathy-data:
+  grafana-data:

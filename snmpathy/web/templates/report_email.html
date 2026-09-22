@@ -1,0 +1,29 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>{{ report.title }}</title></head>
+<body style="margin:0;padding:24px;background:#f4f5f7;font-family:Segoe UI,Helvetica,Arial,sans-serif;color:#0f1115;font-size:14px">
+<div style="max-width:900px;margin:0 auto;background:#ffffff;border:1px solid #e1e3e8;border-radius:10px;padding:24px">
+  <div style="color:#2a78d6;font-weight:700;font-size:13px;letter-spacing:.04em;text-transform:uppercase">SNMPathy report</div>
+  <h1 style="margin:6px 0 2px;font-size:22px">{{ report.title }}</h1>
+  <div style="color:#80858f;margin-bottom:18px">{{ report.subtitle }}</div>
+  <table role="presentation" style="border-collapse:collapse;margin-bottom:20px"><tr>
+  {% for s in report.summary %}
+    <td style="padding:10px 14px;border:1px solid #e1e3e8;border-radius:8px;vertical-align:top">
+      <div style="color:#80858f;font-size:12px">{{ s.label }}</div>
+      <div style="font-size:20px;font-weight:650;color:{{ '#b42323' if s.status == 'bad' else '#0f1115' }}">{{ fmt(s.value, s.fmt or 'text') }}</div>
+    </td>
+  {% endfor %}
+  </tr></table>
+  {% for sec in report.sections %}
+    <h2 style="font-size:16px;margin:22px 0 8px">{{ sec.title }}</h2>
+    {% if sec.note %}<div style="color:#80858f;font-size:12px;margin-bottom:6px">{{ sec.note }}</div>{% endif %}
+    <table style="border-collapse:collapse;width:100%;font-size:12.5px">
+      <tr>{% for c in sec.columns %}<th style="text-align:left;padding:6px 8px;border-bottom:2px solid #e1e3e8;color:#80858f;font-weight:600">{{ c.label }}</th>{% endfor %}</tr>
+      {% for row in sec.rows[:50] %}
+      <tr>{% for c in sec.columns %}<td style="padding:5px 8px;border-bottom:1px solid #eceef1">{{ fmt(row.get(c.key), c.fmt or 'text') }}</td>{% endfor %}</tr>
+      {% else %}<tr><td colspan="{{ sec.columns|length }}" style="padding:10px;color:#80858f">No data for this period</td></tr>{% endfor %}
+    </table>
+    {% if sec.rows|length > 50 %}<div style="color:#80858f;font-size:12px;margin-top:4px">{{ sec.rows|length - 50 }} more rows in the attached CSV.</div>{% endif %}
+  {% endfor %}
+  {% if base_url %}<p style="margin-top:24px"><a href="{{ base_url }}/reports/{{ report.id }}" style="color:#2a78d6">Open the full report in SNMPathy</a></p>{% endif %}
+</div>
+</body></html>

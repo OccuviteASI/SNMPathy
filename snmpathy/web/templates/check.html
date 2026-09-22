@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status, icon %}
+{% block title %}{{ check.name }}{% endblock %}
+{% set refresh = 60 %}
+{% block crumbs %}<div class="crumbs"><a href="/checks">Uptime checks</a>{% if check.device_name %} / <a href="/devices/{{ check.device_id }}">{{ check.device_name }}</a>{% endif %}</div>{% endblock %}
+{% block heading %}{{ check.name }} {% if not check.enabled %}{{ status('paused') }}{% else %}{{ status(check.state) }}{% endif %}{% endblock %}
+{% block actions %}
+<button class="btn" data-action="api" data-url="/api/checks/{{ check.id }}/run" data-success="Check ran: {state} ({last_message})">{{ icon('refresh') }} Run now</button>
+<button class="btn" data-action="api" data-method="PATCH" data-url="/api/checks/{{ check.id }}" data-body='{"enabled": {{ 'false' if check.enabled else 'true' }}}'>{{ 'Pause' if check.enabled else 'Resume' }}</button>
+<button class="btn" data-action="modal" data-target="#edit-check">Edit</button>
+<button class="btn danger" data-action="api" data-method="DELETE" data-url="/api/checks/{{ check.id }}" data-confirm="Delete this check and its history?" data-redirect="/checks">Delete</button>
+{% endblock %}
+{% block content %}
+<div class="card mb"><div class="card-body">
+  <div class="row between">
+    <div>
+      <div class="mono">{{ check.type|upper }} {{ check.target }}{% if check.port %}:{{ check.port }}{% endif %}</div>
+      <div class="small muted">every {{ check.interval|duration }} · timeout {{ check.timeout }}s · down after {{ check.retries + 1 }} consecutive failure(s){% if check.public %} · shown on the <a href="/status">status page</a>{% endif %}</div>
+    </div>
+    <div class="right">
+      <div>{{ status(check.state) }} {% if check.state_since %}<span class="muted small">since {{ check.state_since|ts|safe }}</span>{% endif %}</div>
+      <div class="small muted">Last result: {{ check.last_message or '-' }} · {{ check.last_checked|ts('ago')|safe }}</div>
+    </div>
+  </div>
+</div></div>
+
+<div class="report-summary mb">
+  {% for name, w in windows.items() %}
+  <div class="card tile"><div class="label">Uptime, last {{ name }}</div><div class="value">{{ w.uptime_pct|pct(3) }}</div>
+    <div class="sub">{{ w.outages }} outage{{ 's' if w.outages != 1 }} · {{ w.downtime_seconds|duration }} down</div></div>
+  {% endfor %}
+</div>
+
+<div class="grid grid-12">
+  <div class="card" style="grid-column: span 12">
+    <div class="card-head"><h2>Last 90 days</h2><span class="small muted">Each bar is a day; hover for details</span></div>
+    <div class="card-body"><div id="bars90" class="ubars"></div><div class="row between small muted mt"><span>90 days ago</span><span>today</span></div></div>
+  </div>
+  <div class="card" style="grid-column: span 8">
+    <div class="card-head"><h2>Response time</h2><div id="check-time" class="no-print"></div></div>
+    <div class="card-body" id="check-charts">
+      <div data-height="240" data-chart='{"type":"area","targets":[{"source":"check","check":"{{ check.id }}","field":"latency"}]}'></div>
+    </div>
+  </div>
+  <div class="card" style="grid-column: span 4">
+    <div class="card-head"><h2>Statistics (30 days)</h2></div>
+    <div class="card-body">
+      {% set w = windows['30d'] %}
+      <dl class="kv">
+        <dt>Availability</dt><dd>{{ w.uptime_pct|pct(4) }}</dd>
+        <dt>Downtime</dt><dd>{{ w.downtime_seconds|duration }}</dd>
+        <dt>Outages</dt><dd>{{ w.outages }}</dd>
+        <dt>Longest outage</dt><dd>{{ w.longest_outage|duration }}</dd>
+        <dt>MTTR</dt><dd>{{ w.mttr|duration }}</dd>
+        <dt>MTBF</dt><dd>{{ w.mtbf|duration }}</dd>
+        <dt>Avg response</dt><dd>{{ w.avg_latency_ms|value('ms') }}</dd>
+        <dt>Min / max</dt><dd>{{ w.min_latency_ms|value('ms') }} / {{ w.max_latency_ms|value('ms') }}</dd>
+        <dt>Checks run</dt><dd>{{ '{:,}'.format(w.checks_run) }} ({{ '{:,}'.format(w.checks_run - w.checks_ok) }} failed)</dd>
+        {% if w.maintenance_seconds %}<dt>Maintenance</dt><dd>{{ w.maintenance_seconds|duration }} excluded</dd>{% endif %}
+      </dl>
+    </div>
+  </div>
+  <div class="card" style="grid-column: span 12">
+    <div class="card-head"><h2>Outages</h2></div>
+    <div class="card-body flush table-wrap">
+      <table class="table compact">
+        <thead><tr><th>Started</th><th>Ended</th><th>Duration</th><th>Reason</th></tr></thead>
+        <tbody>
+        {% for o in outages %}
+          <tr><td>{{ o.started_at|ts|safe }}</td><td>{% if o.ended_at %}{{ o.ended_at|ts|safe }}{% else %}{{ status('down', 'ongoing') }}{% endif %}</td>
+          <td>{{ ((o.ended_at or now()) - o.started_at)|duration }}</td><td>{{ o.reason }}</td></tr>
+        {% else %}<tr><td colspan="4" class="empty">{{ status('ok', 'No outages recorded') }}</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="modal-back hidden" id="edit-check">
+  <div class="modal">
+    <div class="card-head"><h2>Edit check</h2><button class="btn ghost" data-action="close-modal">&times;</button></div>
+    <form data-api="/api/checks/{{ check.id }}" data-method="PATCH" data-transform="check">
+      <div class="modal-body">{% include "_check_fields.html" %}</div>
+      <div class="modal-foot"><button type="button" class="btn" data-action="close-modal">Cancel</button><button class="btn primary" type="submit">Save</button></div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+{% include "_check_script.html" %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const state = SP.urlState({ range: "24h" });
+  const draw = () => SP.loadCharts(SP.$("#check-charts"), state);
+  SP.timePicker(SP.$("#check-time"), state, () => { SP.pushState(state); draw(); });
+  draw();
+  SP.api("GET", "/api/checks/{{ check.id }}/uptime?days=90").then((r) => { SP.$("#bars90").outerHTML = SP.uptimeBars(r.daily); });
+});
+</script>
+{% endblock %}

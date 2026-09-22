@@ -1,0 +1,24 @@
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const type = SP.$("#check-type");
+  if (!type) return;
+  const labels = { http: ["URL", "https://www.example.com/"], icmp: ["Host or IP", "10.0.0.1"], tcp: ["Host or IP", "mail.example.com"], dns: ["Hostname to resolve", "www.example.com"], snmp: ["Host or IP", "10.0.0.1"] };
+  const sync = () => {
+    SP.$$(".ct").forEach((el) => {
+      const on = el.classList.contains("ct-" + type.value);
+      el.classList.toggle("hidden", !on);
+      SP.$$("input, select", el).forEach((i) => (i.disabled = !on));
+    });
+    SP.$("#target-label").textContent = labels[type.value][0];
+    SP.$("#check-target").placeholder = labels[type.value][1];
+  };
+  type.addEventListener("change", sync);
+  sync();
+});
+// Drop empty option values so the server applies its defaults.
+SP.transforms.check = (body) => {
+  if (body.options) Object.keys(body.options).forEach((k) => { if (body.options[k] === "" || body.options[k] === false && k !== "verify_tls") delete body.options[k]; });
+  if (body.device_id === "") body.device_id = null;
+  return body;
+};
+</script>

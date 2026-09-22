@@ -1,0 +1,225 @@
+{
+  "uid": "snmpathy-uptime",
+  "title": "SNMPathy - Availability",
+  "description": "Uptime, SLA and response times.",
+  "tags": [
+    "snmpathy",
+    "uptime"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "1m",
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "check",
+        "label": "Check",
+        "type": "query",
+        "datasource": {
+          "type": "simpod-json-datasource",
+          "uid": "snmpathy"
+        },
+        "query": {
+          "query": "checks",
+          "format": "string",
+          "refId": "var-check"
+        },
+        "definition": "checks",
+        "refresh": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": "*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "sort": 1
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": [
+    {
+      "title": "SNMPathy dashboards",
+      "type": "dashboards",
+      "tags": [
+        "snmpathy"
+      ],
+      "asDropdown": true
+    }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "type": "table",
+      "title": "Uptime for the selected range",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 9
+      },
+      "datasource": {
+        "type": "simpod-json-datasource",
+        "uid": "snmpathy"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "simpod-json-datasource",
+            "uid": "snmpathy"
+          },
+          "target": "checks",
+          "payload": {},
+          "editorMode": "builder"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Response time",
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 24,
+        "h": 9
+      },
+      "datasource": {
+        "type": "simpod-json-datasource",
+        "uid": "snmpathy"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "simpod-json-datasource",
+            "uid": "snmpathy"
+          },
+          "target": "check",
+          "payload": {
+            "check": "$check",
+            "field": "latency"
+          },
+          "editorMode": "builder"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": 600000,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Availability",
+      "gridPos": {
+        "x": 0,
+        "y": 18,
+        "w": 24,
+        "h": 7
+      },
+      "datasource": {
+        "type": "simpod-json-datasource",
+        "uid": "snmpathy"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "simpod-json-datasource",
+            "uid": "snmpathy"
+          },
+          "target": "check",
+          "payload": {
+            "check": "$check",
+            "field": "up"
+          },
+          "editorMode": "builder"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": 600000,
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "max": 100,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,332 @@
+{
+  "uid": "snmpathy-interfaces",
+  "title": "SNMPathy - Traffic & Interfaces",
+  "description": "Bandwidth, utilisation and errors.",
+  "tags": [
+    "snmpathy",
+    "traffic"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "1m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "device",
+        "label": "Device",
+        "type": "query",
+        "datasource": {
+          "type": "simpod-json-datasource",
+          "uid": "snmpathy"
+        },
+        "query": {
+          "query": "devices",
+          "format": "string",
+          "refId": "var-device"
+        },
+        "definition": "devices",
+        "refresh": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": "*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "sort": 1
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": [
+    {
+      "title": "SNMPathy dashboards",
+      "type": "dashboards",
+      "tags": [
+        "snmpathy"
+      ],
+      "asDropdown": true
+    }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Top inbound",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "simpod-json-datasource",
+        "uid": "snmpathy"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "simpod-json-datasource",
+            "uid": "snmpathy"
+          },
+          "target": "metric",
+          "payload": {
+            "key": "if.in_bps",
+            "device": "$device",
+            "limit": "10"
+          },
+          "editorMode": "builder"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": 600000,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Top outbound",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "simpod-json-datasource",
+        "uid": "snmpathy"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "simpod-json-datasource",
+            "uid": "snmpathy"
+          },
+          "target": "metric",
+          "payload": {
+            "key": "if.out_bps",
+            "device": "$device",
+            "limit": "10"
+          },
+          "editorMode": "builder"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": 600000,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Utilisation",
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 24,
+        "h": 8
+      },
+      "datasource": {
+        "type": "simpod-json-datasource",
+        "uid": "snmpathy"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "simpod-json-datasource",
+            "uid": "snmpathy"
+          },
+          "target": "metric",
+          "payload": {
+            "key": "if.*_util",
+            "device": "$device",
+            "limit": "15"
+          },
+          "editorMode": "builder"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": 600000,
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "max": 100,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Busiest interfaces",
+      "gridPos": {
+        "x": 0,
+        "y": 17,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "simpod-json-datasource",
+        "uid": "snmpathy"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "simpod-json-datasource",
+            "uid": "snmpathy"
+          },
+          "target": "top",
+          "payload": {
+            "key": "if.in_bps",
+            "device": "$device",
+            "limit": "15"
+          },
+          "editorMode": "builder"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Most errors",
+      "gridPos": {
+        "x": 12,
+        "y": 17,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "simpod-json-datasource",
+        "uid": "snmpathy"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "simpod-json-datasource",
+            "uid": "snmpathy"
+          },
+          "target": "top",
+          "payload": {
+            "key": "if.in_errors",
+            "device": "$device",
+            "limit": "15"
+          },
+          "editorMode": "builder"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    }
+  ]
+}

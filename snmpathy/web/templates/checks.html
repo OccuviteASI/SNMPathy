@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status, icon %}
+{% block title %}Uptime checks{% endblock %}
+{% set refresh = 60 %}
+{% block actions %}
+<input type="search" placeholder="Filter checks…" data-filter="#check-table" aria-label="Filter checks">
+<a class="btn" href="/reports/uptime">SLA report</a>
+<button class="btn primary" data-action="modal" data-target="#new-check">{{ icon('plus') }} Add check</button>
+{% endblock %}
+{% block content %}
+{% set up = checks|selectattr('state', 'equalto', 'up')|list|length %}
+{% set down = checks|selectattr('state', 'equalto', 'down')|list|length %}
+<div class="tiles mb">
+  <div class="card tile good"><div class="label">Up</div><div class="value">{{ up }}</div></div>
+  <div class="card tile {{ 'bad' if down }}"><div class="label">Down</div><div class="value">{{ down }}</div></div>
+  <div class="card tile"><div class="label">Paused / pending</div><div class="value">{{ checks|length - up - down }}</div></div>
+  {% set measured = checks|selectattr('uptime_30d')|list %}
+  <div class="card tile"><div class="label">Average uptime (30d)</div><div class="value">{{ ((measured|sum(attribute='uptime_30d')) / measured|length)|pct(3) if measured else '-' }}</div></div>
+</div>
+<div class="card">
+  <div class="card-body flush table-wrap">
+    <table class="table" id="check-table">
+      <thead><tr><th class="sortable">Status</th><th class="sortable">Check</th><th class="sortable">Type</th><th class="sortable">Response</th><th class="sortable">24h</th><th class="sortable">30d</th><th>Last 30 days</th><th class="sortable">Last checked</th></tr></thead>
+      <tbody>
+      {% for c in checks %}
+        <tr>
+          <td data-sort="{{ {'down': 0, 'unknown': 1, 'up': 2}.get(c.state, 3) }}">{% if not c.enabled %}{{ status('paused') }}{% else %}{{ status(c.state) }}{% endif %}{% if c.state_since and c.enabled %}<div class="small muted">for {{ c.state_since|ago|replace(' ago', '') }}</div>{% endif %}</td>
+          <td><a href="/checks/{{ c.id }}"><strong>{{ c.name }}</strong></a>{% if c.public %} <span class="tag">public</span>{% endif %}
+            <div class="small muted mono">{{ c.target }}{% if c.port %}:{{ c.port }}{% endif %}{% if c.device_name %} · {{ c.device_name }}{% endif %}</div>
+            {% if c.state == 'down' %}<div class="small status down" style="white-space:normal">{{ c.last_message }}</div>{% endif %}</td>
+          <td>{{ c.type|upper }}<div class="small muted">every {{ c.interval|duration }}</div></td>
+          <td class="num" data-sort="{{ c.last_latency_ms or 0 }}">{{ c.last_latency_ms|value('ms') if c.last_latency_ms is not none else '-' }}</td>
+          <td class="num" data-sort="{{ c.uptime_24h or -1 }}">{{ c.uptime_24h|pct(2) }}</td>
+          <td class="num" data-sort="{{ c.uptime_30d or -1 }}">{{ c.uptime_30d|pct(3) }}</td>
+          <td style="min-width:200px"><div data-bars="{{ c.id }}" class="ubars sm"></div></td>
+          <td class="nowrap" data-sort="{{ c.last_checked or 0 }}">{{ c.last_checked|ts('ago')|safe }}</td>
+        </tr>
+      {% else %}<tr><td colspan="8"><div class="empty">No checks yet. Add a ping, TCP, HTTP, DNS or SNMP check to start measuring uptime.</div></td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="modal-back hidden" id="new-check">
+  <div class="modal">
+    <div class="card-head"><h2>Add uptime check</h2><button class="btn ghost" data-action="close-modal">&times;</button></div>
+    <form data-api="/api/checks" data-redirect="/checks/{id}" id="check-form" data-transform="check">
+      <div class="modal-body">
+        {% include "_check_fields.html" %}
+      </div>
+      <div class="modal-foot"><button type="button" class="btn" data-action="close-modal">Cancel</button><button class="btn primary" type="submit">Add check</button></div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+{% include "_check_script.html" %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  SP.$$("[data-bars]").forEach(async (el) => {
+    try {
+      const r = await SP.api("GET", `/api/checks/${el.dataset.bars}/uptime?days=30`);
+      el.outerHTML = SP.uptimeBars(r.daily).replace('class="ubars"', 'class="ubars sm"');
+    } catch (e) { /* leave empty */ }
+  });
+});
+</script>
+{% endblock %}
