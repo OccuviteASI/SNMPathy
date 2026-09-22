@@ -58,6 +58,41 @@ snmpathy serve
 To run it as a Windows service see [`deploy/windows`](deploy/windows). The syslog port
 needs an inbound firewall rule: `New-NetFirewallRule -DisplayName SNMPathy-Syslog -Direction Inbound -Protocol UDP -LocalPort 5514 -Action Allow`.
 
+### Standalone executable (no Python needed to run it)
+
+Build a single-file `SNMPathy.exe` (Windows) or `SNMPathy` (macOS / Linux) and store it in
+your **Claude folder**, next to KASTR, DiskWorks and LinkTest:
+
+```text
+Windows:        scripts\build_executable.cmd          (double-click, or run from a prompt)
+macOS / Linux:  ./scripts/build_executable.sh
+```
+
+The script builds in an isolated environment under `build/`, smoke-tests the result and
+copies it into `<Claude folder>/SNMPathy/`. It finds the Claude folder by looking for the
+one that contains KASTR, DiskWorks or LinkTest, starting with the folders above this
+repository and then `~`, `~/Documents` and OneDrive. It also writes a default
+`snmpathy.yaml` and a `README.txt` there. Rebuilding replaces only the executable:
+the database and configuration are kept. Use `--dest <folder>` or the `SNMPATHY_EXE_DIR`
+variable to store it somewhere else, or `--no-copy` to only build into `dist/`.
+
+```text
+Claude/
+├── DiskWorks/
+├── KASTR/
+├── LinkTest/
+└── SNMPathy/
+    ├── SNMPathy.exe      double-click: starts the server and opens http://localhost:8080
+    ├── snmpathy.yaml     configuration (edit, then restart)
+    ├── snmpathy.db       all data (created on first start)
+    └── README.txt
+```
+
+The packaged app keeps its database and configuration next to the executable, whatever
+directory it is started from. PyInstaller builds for the OS it runs on. CI also builds the
+Windows, macOS and Linux executables on every push; download them from the run's
+*Artifacts* section.
+
 ### Docker
 
 ```bash

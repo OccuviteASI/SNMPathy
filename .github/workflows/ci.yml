@@ -49,3 +49,30 @@ jobs:
           done
           docker logs snmpathy
           exit 1
+
+  executables:
+    name: executable / ${{ matrix.os }}
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build standalone executable
+        run: python scripts/build_executable.py --no-copy
+      - name: Check the executable runs
+        shell: bash
+        run: |
+          exe=dist/SNMPathy; [ -f dist/SNMPathy.exe ] && exe=dist/SNMPathy.exe
+          "$exe" version
+          "$exe" ping 127.0.0.1 -n 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SNMPathy-${{ runner.os }}
+          path: dist/SNMPathy*
+          if-no-files-found: error

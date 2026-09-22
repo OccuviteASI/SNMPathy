@@ -75,7 +75,20 @@ def _settings(args: argparse.Namespace):
     return settings
 
 
-async def _serve(settings, snmp_factory=None, probe=None, setup=None) -> None:
+async def _open_browser_when_ready(server, url: str) -> None:
+    import webbrowser
+
+    for _ in range(300):
+        if getattr(server, "started", False):
+            try:
+                webbrowser.open(url)
+            except Exception:  # no browser available (headless server): not fatal
+                pass
+            return
+        await asyncio.sleep(0.1)
+
+
+async def _serve(settings, snmp_factory=None, probe=None, setup=None, open_browser: bool = False) -> None:
     import uvicorn
 
     from .app import create_app
@@ -91,8 +104,14 @@ async def _serve(settings, snmp_factory=None, probe=None, setup=None) -> None:
                             access_log=False, lifespan="on")
     server = uvicorn.Server(config)
     shown = "localhost" if settings.http_host in ("0.0.0.0", "::") else settings.http_host
-    logging.getLogger("snmpathy").info("web UI: http://%s:%s/", shown, settings.http_port)
-    await server.serve()
+    url = f"http://{shown}:{settings.http_port}/"
+    logging.getLogger("snmpathy").info("web UI: %s (database: %s)", url, settings.database)
+    opener = asyncio.create_task(_open_browser_when_ready(server, url)) if open_browser else None
+    try:
+        await server.serve()
+    finally:
+        if opener:
+            opener.cancel()
 
 
 def _run(coro) -> Any:
@@ -108,7 +127,7 @@ def _run(coro) -> Any:
 # ------------------------------------------------------------------ commands
 def cmd_serve(args: argparse.Namespace) -> int:
     settings = _settings(args)
-    _run(_serve(settings))
+    _run(_serve(settings, open_browser=getattr(args, "open", False)))
     return 0
 
 
@@ -123,7 +142,8 @@ def cmd_demo(args: argparse.Namespace) -> int:
         sender = asyncio.create_task(demo_syslog_sender(settings))
         try:
             await _serve(settings, snmp_factory=demo_snmp_factory, probe=demo_probe,
-                         setup=lambda db: populate_demo(db, settings, days=args.days))
+                         setup=lambda db: populate_demo(db, settings, days=args.days),
+                         open_browser=getattr(args, "open", False))
         finally:
             sender.cancel()
 
@@ -343,6 +363,7 @@ def _server_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--token", dest="api_token", help="require this API/UI token")
     p.add_argument("--no-syslog", action="store_true")
     p.add_argument("--no-poller", action="store_true")
+    p.add_argument("--open", action="store_true", help="open the web UI in a browser once started")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -437,5 +458,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     _setup_logging(args.log_level)
     if not getattr(args, "func", None):
-        args = parser.parse_args(["serve", *(argv or sys.argv[1:])])
+        # No sub-command: run the server. A double-clicked executable also opens the browser.
+        from .config import is_frozen
+
+        extra = ["--open"] if is_frozen() else []
+        # Only top-level options (e.g. --log-level) can be present here, so they go first.
+        args = parser.parse_args([*(argv if argv is not None else sys.argv[1:]), "serve", *extra])
     return int(args.func(args) or 0)
