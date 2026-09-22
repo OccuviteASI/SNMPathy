@@ -154,6 +154,7 @@ covering test.
 | NFR-1 | Portability | Run natively on Windows 10/11 and Server 2019+, macOS 12+ and mainstream Linux, with Python 3.10 to 3.13, and in Docker. | Pure-Python dependencies with wheels on all three OSes; no Unix-only APIs; `asyncio.run` (Proactor loop on Windows); CI matrix on ubuntu / windows / macos (`.github/workflows/ci.yml`). |
 | NFR-2 | Portability | ICMP checks work without elevated privileges on every platform. | Runtime detection: raw socket → unprivileged ICMP socket → system `ping` (always on Windows) → TCP probe, with automatic fallback when a mode fails (§3.10). |
 | NFR-3 | Installability | One command to install and one to run; no external services. | `pip install .` then `snmpathy serve`; SQLite; Docker image and Compose file. |
+| NFR-3a | Installability | A single-file executable per OS needs no Python on the target machine, and is stored in `<Claude folder>/SNMPathy/` next to the KASTR, DiskWorks and LinkTest projects. | PyInstaller spec (`packaging/snmpathy.spec`) and `scripts/build_executable.py`; when frozen, the data and config live next to the executable; CI publishes the executables as artifacts. |
 | NFR-4 | Operability | Runs as a system service on each OS. | systemd unit, launchd plist, Windows service via NSSM or a scheduled task (`deploy/`). |
 | NFR-5 | Performance | Poll a few hundred devices at 5-minute intervals and ingest sustained syslog on one modest host. | Async I/O with bounded concurrency (64); batched writes. Measured on a single core: ~16,000 syslog messages/s parsed, FTS-indexed and stored; ~950,000 metric samples/s written. |
 | NFR-6 | Responsiveness | Dashboards render in well under a second for typical ranges. | Rollups, bucketed SQL aggregation, at most ~300 points per series, at most 50 series per panel (8 coloured, the rest grey). The demo's five dashboards compute in 10 to 50 ms server-side. |
@@ -455,7 +456,11 @@ and additionally builds the Docker image and probes `/healthz`.
 3. **Docker with Grafana:** `docker compose --profile grafana up -d`. Grafana
    automatically gets the JSON plugin, the data source (UID `snmpathy`) and the five
    dashboards (folder "SNMPathy").
-4. **Behind a reverse proxy:** terminate TLS at nginx / Caddy / IIS and set
+4. **Standalone executable:** `scripts/build_executable.(cmd|sh)` produces
+   `SNMPathy.exe` / `SNMPathy` in `<Claude folder>/SNMPathy/`. Double-clicking it runs
+   `serve` and opens the browser. `snmpathy.yaml` and `snmpathy.db` sit next to the
+   executable.
+5. **Behind a reverse proxy:** terminate TLS at nginx / Caddy / IIS and set
    `public_url` so links in notifications and reports are correct.
 
 ### 3.12 Extension points

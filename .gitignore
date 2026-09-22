@@ -10,3 +10,9 @@ dist/
 *.db-wal
 *.db-shm
 /snmpathy.yaml
+
+# Built executables (also copied into the repository root when it *is* <Claude>/SNMPathy)
+/SNMPathy.exe
+/SNMPathy
+/README.txt
+/*.new

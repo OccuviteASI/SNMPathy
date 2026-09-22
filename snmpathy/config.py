@@ -9,9 +9,27 @@ Settings are resolved in this order (later wins):
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
+
+
+def is_frozen() -> bool:
+    """True when running as a PyInstaller-built executable."""
+    return bool(getattr(sys, "frozen", False))
+
+
+def app_dir() -> Path:
+    """Directory that holds the executable (frozen) or the current directory.
+
+    A packaged SNMPathy keeps its database and config next to the executable,
+    so it behaves the same whether it is double-clicked, run from a shortcut
+    or started by a service manager with a different working directory.
+    """
+    if is_frozen():
+        return Path(sys.executable).resolve().parent
+    return Path.cwd()
 
 
 @dataclass
@@ -69,6 +87,8 @@ class Settings:
         env = dict(os.environ if env is None else env)
         data: dict[str, Any] = {}
         path = path or env.get("SNMPATHY_CONFIG")
+        if not path and is_frozen() and (app_dir() / "snmpathy.yaml").exists():
+            path = app_dir() / "snmpathy.yaml"
         if path:
             data.update(_load_yaml(Path(path)))
         known = {f.name: f for f in fields(cls) if f.name != "extra"}
@@ -85,6 +105,8 @@ class Settings:
                 extra[key] = value
         settings = cls(**kwargs)
         settings.extra = extra
+        if is_frozen() and not Path(settings.database).is_absolute():
+            settings.database = str(app_dir() / settings.database)
         return settings
 
 
