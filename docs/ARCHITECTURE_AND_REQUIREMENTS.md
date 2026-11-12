@@ -64,6 +64,7 @@ covering test.
 | FR-SNMP-8 | S | User-defined custom OIDs per device (gauge, counter, ratio, inverse ratio). | `services.py::add_custom_metric` |
 | FR-SNMP-9 | S | Test credentials without saving; CLI `get` / `walk` / `discover` tools that need no net-snmp. | `api.py::test_snmp`, `cli.py` |
 | FR-SNMP-10 | S | Reject impossible counter spikes (> 2× line rate) and the zero rates caused by agent counter caching. | `snmp/poller.py` |
+| FR-SNMP-11 | S | Vendor private-MIB discovery: Rajant BreadCrumb (temperature, memory, CPU from idle ticks, InstaMesh counters, radios, GPS; bare-OID scalars) and Tachyon TNA-30x (identity, CPU / memory, temperatures, radios, per-peer RSSI / SNR / rate / MCS / distance / traffic, peers as wireless map links). | `snmp/vendors.py`, `tests/test_vendors.py` |
 
 #### Syslog
 

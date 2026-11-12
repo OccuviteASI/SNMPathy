@@ -128,6 +128,8 @@ ENTERPRISES = {
     207: "Allied Telesis",
     3224: "Juniper (NetScreen)",
     5624: "Enterasys",
+    34861: "Rajant",
+    57344: "Tachyon Networks",
 }
 
 
@@ -145,6 +147,31 @@ def vendor_from_sysobjectid(sys_object_id: str) -> str:
 
 # Well-known metric keys and their presentation metadata.
 METRIC_INFO: dict[str, dict[str, str]] = {
+    "hw.temperature": {"name": "Temperature", "unit": "°C"},
+    "mem.free_bytes": {"name": "Free memory", "unit": "B"},
+    "radio.frequency": {"name": "Radio frequency", "unit": "MHz"},
+    "radio.noise": {"name": "Radio noise floor", "unit": "dBm"},
+    "radio.tx_power": {"name": "Radio transmit power", "unit": "dBm"},
+    "radio.channel_width": {"name": "Radio channel width", "unit": "MHz"},
+    "wireless.peers": {"name": "Wireless peers", "unit": ""},
+    "wireless.rssi": {"name": "Wireless peer signal (RSSI)", "unit": "dBm"},
+    "wireless.snr": {"name": "Wireless peer SNR", "unit": "dB"},
+    "wireless.tx_rate": {"name": "Wireless link TX rate", "unit": "bps"},
+    "wireless.rx_rate": {"name": "Wireless link RX rate", "unit": "bps"},
+    "wireless.tx_mcs": {"name": "Wireless TX MCS", "unit": ""},
+    "wireless.rx_mcs": {"name": "Wireless RX MCS", "unit": ""},
+    "wireless.link_uptime": {"name": "Wireless link uptime", "unit": "s"},
+    "wireless.distance": {"name": "Wireless link distance", "unit": "m"},
+    "wireless.rx_bps": {"name": "Wireless peer traffic in", "unit": "bps"},
+    "wireless.tx_bps": {"name": "Wireless peer traffic out", "unit": "bps"},
+    "rajant.mesh.rx_pps": {"name": "InstaMesh packets received", "unit": "pps"},
+    "rajant.mesh.tx_pps": {"name": "InstaMesh packets sent", "unit": "pps"},
+    "rajant.mesh.dropped_pps": {"name": "InstaMesh packets dropped", "unit": "pps"},
+    "rajant.mesh.floods_dropped_pps": {"name": "InstaMesh floods dropped", "unit": "pps"},
+    "gps.latitude": {"name": "GPS latitude", "unit": "°"},
+    "gps.longitude": {"name": "GPS longitude", "unit": "°"},
+    "gps.altitude": {"name": "GPS altitude", "unit": "m"},
+    "gps.satellites": {"name": "GPS satellites", "unit": ""},
     "sys.uptime": {"name": "System uptime", "unit": "s"},
     "cpu.load": {"name": "CPU load (per core)", "unit": "%"},
     "cpu.avg": {"name": "CPU load (average)", "unit": "%"},

@@ -22,7 +22,7 @@ from .client import SnmpClient, SnmpError, format_mac, index_of, oid_sort_key
 log = logging.getLogger(__name__)
 
 # Protocols written by discovery; anything else (e.g. 'manual') is never touched.
-DISCOVERY_PROTOCOLS = ("lldp", "cdp")
+DISCOVERY_PROTOCOLS = ("lldp", "cdp", "wireless")
 
 # LLDP chassis-id / port-id subtypes (IEEE 802.1AB).
 _CHASSIS_MAC = 4
@@ -197,7 +197,10 @@ async def discover_neighbors(client: SnmpClient) -> list[dict[str, Any]]:
 
     lldp = await _discover_lldp(client, iface_name, name_to_index)
     cdp = await _discover_cdp(client, iface_name)
-    return _merge(lldp, cdp)
+    from .vendors import wireless_neighbors
+
+    # Point-to-point / PtMP radio peers from vendor MIBs (e.g. Tachyon) become "wireless" links.
+    return _merge(lldp, cdp) + await wireless_neighbors(client)
 
 
 async def _discover_lldp(

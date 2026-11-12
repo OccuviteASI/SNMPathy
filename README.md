@@ -153,6 +153,18 @@ detection (40+ vendors), ifTable / ifXTable, HOST-RESOURCES CPU and storage, and
 load and memory. **Custom metrics:** on a device's *Metrics* tab, add any numeric OID as
 a gauge, counter (converted to a rate) or ratio.
 
+**Vendor-specific metrics** are added automatically when discovery recognises the device
+(by sysObjectID, or by probing devices that report a generic Net-SNMP ID):
+
+| Vendor | What is collected (private MIB) |
+|---|---|
+| **Rajant** BreadCrumb (RAJANT-CORPORATION-MIB, enterprise 34861) | model / serial / firmware, system temperature, free memory, CPU (from the idle counter when HOST-RESOURCES is absent), InstaMesh packets received / sent / dropped / floods dropped, per-radio (wlan0-3) frequency and noise floor, GPS position and satellites. The Rajant MIB has no per-peer table, so mesh peer signal is not available over SNMP |
+| **Tachyon Networks** TNA-30x (TACHYON-MIB, enterprise 57344) | model / serial / firmware, CPU %, memory %, CPU / modem / radio temperature, radio TX power, frequency and channel width, peer count, and per peer: RSSI, SNR, TX / RX PHY rate, TX / RX MCS, link uptime, distance and traffic. Peers also appear as **wireless links on the network map** |
+
+Example alert rules: `wireless.rssi < -70` (instance glob per peer), `wireless.snr < 10`,
+`hw.temperature > 75`. Devices discovered before an upgrade pick these up at their next
+rediscovery (every 6 hours) or immediately with **Rediscover** on the device page.
+
 ### Change SNMP settings later
 
 Open the device and click **Edit** (or **Change SNMP settings** next to the SNMP line on
@@ -467,6 +479,38 @@ commented example.
 
 The CLI flags `--db`, `--host`, `--port`, `--syslog-udp`, `--syslog-tcp`, `--token`,
 `--no-syslog` and `--no-poller` override the file.
+
+## Open the firewall for syslog
+
+**Settings → Firewall**: tick what to open (**Syslog** by default; also *Web UI and API*,
+*GELF / JSON log inputs*, *NetFlow / IPFIX / sFlow*) and click **Add firewall rules**
+(**Remove** takes them out again). The table shows which ports are already open. From the
+command line: `snmpathy firewall status`, `snmpathy firewall add --include syslog,flows`,
+`snmpathy firewall remove`.
+
+| OS | What it does |
+|---|---|
+| Windows | inbound allow rules in Windows Defender Firewall (`netsh`, named `SNMPathy …`, all profiles). Needs Administrator: if SNMPathy is not elevated, a UAC prompt appears on the SNMPathy computer |
+| Linux | firewalld (`--permanent --add-port`, then reload) or ufw (`ufw allow`), as root or through password-less `sudo`; otherwise the exact commands are shown to paste into a terminal. Without firewalld / ufw, iptables commands are shown |
+| macOS | the application firewall is per app: SNMPathy (or its Python) is added and unblocked with `socketfilterfw` |
+| Docker | not needed: publish the ports (the Compose file maps 514 → 5514) |
+
+## Start automatically at login
+
+**Settings → Startup → Start SNMPathy automatically when I log in** (or
+`snmpathy autostart on` / `off` / `status`). No admin rights are needed; it uses the
+normal per-user mechanism of each OS:
+
+| OS | What it creates |
+|---|---|
+| Windows | `HKCU\…\CurrentVersion\Run\SNMPathy`, launching through a small VBScript so no console window appears |
+| macOS | `~/Library/LaunchAgents/com.snmpathy.autostart.plist` (logs in `~/Library/Logs/SNMPathy.log`) |
+| Linux | a systemd user service (`~/.config/systemd/user/snmpathy.service`), or `~/.config/autostart/snmpathy.desktop` without systemd |
+
+The autostarted server uses the same executable / Python, configuration file and database
+as the one you enabled it from, and does not open a browser. For a machine that should
+monitor without anyone logged in, use a service (below) instead. In Docker, use the
+container restart policy.
 
 ## Running as a service
 

@@ -25,7 +25,7 @@ MAIN_SITE = "Main site"
 KIND_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("firewall", ("fortigate", "fortios", "palo alto", "pan-os", "adaptive security appliance", "asa ", "firepower",
                   "sonicwall", "pfsense", "opnsense", "check point", "checkpoint", "srx", "watchguard", "sophos")),
-    ("wireless", ("access point", "aironet", "unifi ap", "uap-", "wireless lan controller", "wlc", "meraki mr",
+    ("wireless", ("rajant", "breadcrumb", "instamesh", "tachyon", "tna-30", "access point", "aironet", "unifi ap", "uap-", "wireless lan controller", "wlc", "meraki mr",
                   "aruba ap", "instant on ap", "ruckus", "airos")),
     ("router", ("ios xr", "ios-xe", " isr", "asr", "router", "routeros", "mikrotik", "edgerouter", "edgeos", "vyos",
                 "junos mx", " mx", "juniper networks, inc. mx", "srx", "viptela", "velocloud")),

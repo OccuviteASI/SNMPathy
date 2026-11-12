@@ -466,6 +466,58 @@ def cmd_scan(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_autostart(args: argparse.Namespace) -> int:
+    """Turn starting SNMPathy at login on or off for the current user."""
+    from . import autostart
+
+    settings = _settings(args)
+    try:
+        if args.action == "on":
+            info = autostart.enable(settings)
+        elif args.action == "off":
+            info = autostart.disable(settings)
+        else:
+            info = autostart.status(settings)
+    except (autostart.AutostartError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    if not info["supported"]:
+        print(f"autostart not supported: {info['note']}")
+        return 1
+    print(f"autostart is {'ON' if info['enabled'] else 'OFF'} ({info['platform']})")
+    if info["enabled"]:
+        print(f"  entry:   {info['location']}")
+        print(f"  command: {' '.join(info['command'])}")
+    if info["note"]:
+        print(f"  {info['note']}")
+    return 0
+
+
+def cmd_firewall(args: argparse.Namespace) -> int:
+    """Open (or close) the host firewall for SNMPathy's listeners."""
+    from . import firewall
+
+    settings = _settings(args)
+    groups = [g.strip() for g in (args.include or "syslog").split(",") if g.strip()]
+    if args.action == "status":
+        info = firewall.status(settings)
+        print(f"firewall backend: {info['backend']}  (running as admin/root: {'yes' if info['admin'] else 'no'})")
+        for r in info["rules"]:
+            state = {True: "open", False: "not open", None: "unknown"}[r["present"]]
+            print(f"  {r['name']:<34} {state}")
+        print(info["note"])
+        return 0
+    try:
+        result = firewall.apply(settings, groups, remove=args.action == "remove")
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(result["output"])
+    if result["manual"]:
+        print("\n" + result["manual"])
+    return 0 if result["ok"] else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="snmpathy", description="SNMP polling, syslog ingest and uptime monitoring")
     parser.add_argument("--log-level", default="info")
@@ -580,6 +632,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--state-dir", help="where buffered results are kept while the server is unreachable")
     p.add_argument("--concurrency", type=int)
     p.set_defaults(func=cmd_collector)
+
+    p = sub.add_parser("autostart", help="start SNMPathy automatically when you log in (on / off / status)")
+    p.add_argument("action", nargs="?", choices=["on", "off", "status"], default="status")
+    p.add_argument("--config", help="config file the autostarted server should use")
+    p.add_argument("--db", dest="database", help="database the autostarted server should use")
+    p.set_defaults(func=cmd_autostart)
+
+    p = sub.add_parser("firewall", help="open the host firewall for syslog (and other listeners)")
+    p.add_argument("action", nargs="?", choices=["add", "remove", "status"], default="status")
+    p.add_argument("--include", help="comma-separated groups: syslog (default), web, logs, flows")
+    p.add_argument("--config")
+    p.set_defaults(func=cmd_firewall)
 
     p = sub.add_parser("version", help="print version information")
     p.set_defaults(func=cmd_version)

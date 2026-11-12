@@ -332,7 +332,27 @@ def settings(request: Request):
         base_url=str(request.base_url).rstrip("/"),
         python=sys.version.split()[0], platform=platform.platform(), icmp_mode=detect_icmp_mode(),
         fts=db.has_fts, monitor=monitor.status() if monitor else None,
+        autostart=_autostart_status(s), firewall=_firewall_status(s),
     )
+
+
+def _firewall_status(settings: Any) -> dict[str, Any]:
+    from ..firewall import GROUPS, status
+
+    try:
+        return status(settings)
+    except Exception as exc:  # never break the settings page
+        return {"backend": "unknown", "admin": False, "note": str(exc), "rules": [], "groups": GROUPS,
+                "default_groups": ["syslog"], "can_apply": False}
+
+
+def _autostart_status(settings: Any) -> dict[str, Any]:
+    from ..autostart import status
+
+    try:
+        return status(settings)
+    except Exception as exc:  # never break the settings page
+        return {"supported": False, "enabled": False, "note": str(exc), "command": [], "location": ""}
 
 
 @router.get("/status", response_class=HTMLResponse)
