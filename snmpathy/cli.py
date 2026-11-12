@@ -88,7 +88,8 @@ async def _open_browser_when_ready(server, url: str) -> None:
         await asyncio.sleep(0.1)
 
 
-async def _serve(settings, snmp_factory=None, probe=None, setup=None, open_browser: bool = False) -> None:
+async def _serve(settings, snmp_factory=None, probe=None, setup=None, open_browser: bool = False,
+                 on_app=None) -> None:
     import uvicorn
 
     from .app import create_app
@@ -100,6 +101,8 @@ async def _serve(settings, snmp_factory=None, probe=None, setup=None, open_brows
         if asyncio.iscoroutine(result):
             await result
     app = create_app(settings, db=db, snmp_factory=snmp_factory, probe=probe)
+    if on_app:
+        on_app(app)
     config = uvicorn.Config(app, host=settings.http_host, port=settings.http_port, log_level="info",
                             access_log=False, lifespan="on")
     server = uvicorn.Server(config)
@@ -132,7 +135,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 
 def cmd_demo(args: argparse.Namespace) -> int:
-    from .demo import demo_probe, demo_snmp_factory, demo_syslog_sender, populate_demo
+    from .demo import demo_flow_sender, demo_probe, demo_snmp_factory, demo_syslog_sender, populate_demo
 
     settings = _settings(args)
     if args.database is None:
@@ -140,12 +143,19 @@ def cmd_demo(args: argparse.Namespace) -> int:
         settings.database = str(Path(settings.database).with_name("snmpathy-demo.db"))
     async def run() -> None:
         sender = asyncio.create_task(demo_syslog_sender(settings))
+        flows: list[asyncio.Task] = []
+
+        def start_flows(app) -> None:
+            monitor = lambda: app.state.monitor.flows if app.state.monitor else None  # noqa: E731
+            flows.append(asyncio.create_task(demo_flow_sender(monitor)))
         try:
             await _serve(settings, snmp_factory=demo_snmp_factory, probe=demo_probe,
                          setup=lambda db: populate_demo(db, settings, days=args.days),
-                         open_browser=getattr(args, "open", False))
+                         open_browser=getattr(args, "open", False), on_app=start_flows)
         finally:
             sender.cancel()
+            for task in flows:
+                task.cancel()
 
     _run(run())
     return 0

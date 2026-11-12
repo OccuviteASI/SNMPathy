@@ -19,6 +19,7 @@ from .collectors import CollectorHub
 from .scanner import ScanManager
 from .topology import router as topology_router
 from .fusion import router as fusion_router
+from .flows.web import router as flows_router
 from .grafana import router as grafana_router
 from .checks.runner import ProbeFunc
 from .config import Settings
@@ -110,6 +111,7 @@ def create_app(settings: Settings | None = None, db: Database | None = None, sta
     app.include_router(collector_router)
     app.include_router(topology_router)
     app.include_router(fusion_router)
+    app.include_router(flows_router)
     app.include_router(api_router)
     app.include_router(grafana_router)
     app.include_router(web_router)

@@ -26,7 +26,7 @@ from ..syslog.search import SyslogFilter, top as syslog_top
 
 log = logging.getLogger(__name__)
 
-RULE_KINDS = ("metric", "check", "device", "syslog")
+RULE_KINDS = ("metric", "check", "device", "syslog", "flow")
 SEVERITIES = ("critical", "warning", "info")
 OPERATORS: dict[str, Callable[[float, float], bool]] = {
     ">": operator.gt, ">=": operator.ge, "<": operator.lt, "<=": operator.le,
@@ -184,6 +184,10 @@ def evaluate_rule(db: Database, rule: dict[str, Any], devices: dict[int, dict[st
                 value=float(n),
                 device_id=device["id"] if device else None,
             ))
+    elif kind == "flow":
+        from ..flows.alerts import evaluate_flow_rule
+
+        matches = [Match(**m) for m in evaluate_flow_rule(db, rule, now)]
     return matches
 
 

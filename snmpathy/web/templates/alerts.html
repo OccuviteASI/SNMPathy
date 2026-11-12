@@ -80,7 +80,11 @@
         <datalist id="metric-keys">{% for k in metric_keys %}<option value="{{ k }}">{{ METRIC_INFO.get(k, {}).get('name', '') }}</option>{% endfor %}</datalist>
         <div class="form-grid">
           <label class="field">Name<input name="name" required></label>
-          <label class="field">Kind<select name="kind" id="rule-kind"><option value="metric">Metric threshold</option><option value="check">Uptime check down</option><option value="device">Device offline</option><option value="syslog">Syslog messages</option></select></label>
+          <label class="field">Kind<select name="kind" id="rule-kind"><option value="metric">Metric threshold</option><option value="check">Uptime check down</option><option value="device">Device offline</option><option value="syslog">Syslog messages</option><option value="flow">Traffic (flow) bandwidth</option></select></label>
+          <label class="field wide rk rk-flow">Traffic filter <span class="hint">e.g. dport=443, ip=10.0.0.5, cidr=10.1.0.0/16 proto=udp, by=src - empty = all traffic</span><input name="metric_key" placeholder="dport=443"></label>
+          <label class="field rk rk-flow">Operator<select name="operator">{% for op in ['>', '>=', '<', '<='] %}<option>{{ op }}</option>{% endfor %}</select></label>
+          <label class="field rk rk-flow">Threshold (bits/s)<input name="threshold" type="number" step="any" data-type="float" data-empty="null" placeholder="500000000"></label>
+          <label class="field rk rk-flow">Averaged over (seconds)<input name="window_seconds" type="number" data-type="int" value="300" min="60"></label>
           <label class="field">Severity<select name="severity"><option value="critical">critical</option><option value="warning" selected>warning</option><option value="info">info</option></select></label>
           <label class="field">Condition must hold for (seconds)<input name="for_seconds" type="number" data-type="int" value="0" min="0"></label>
           <label class="field rk rk-metric">Metric key <span class="hint">wildcards ok</span><input name="metric_key" list="metric-keys" placeholder="cpu.avg, if.*_util"></label>

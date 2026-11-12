@@ -580,7 +580,12 @@ def alerts_report(db: Database, start: float, end: float, label: str, device_id:
     return rep
 
 
+from .flows.alerts import TRAFFIC_REPORT_TYPE, traffic_report  # noqa: E402
+
+REPORT_TYPES["traffic"] = TRAFFIC_REPORT_TYPE
+
 BUILDERS: dict[str, Callable[..., dict[str, Any]]] = {
+    "traffic": traffic_report,
     "uptime": uptime_report,
     "health": health_report,
     "bandwidth": bandwidth_report,

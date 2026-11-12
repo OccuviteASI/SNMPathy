@@ -148,6 +148,9 @@ class FlowCollector:
             delta = self._pending[source_id] = _SourceDelta()
         delta.kind = result.kind
         delta.sampling = max(1, result.sampling)
+        # A configured sampling rate applies only when the exporter does not report its own.
+        factor = self._override(source_id) if result.sampling <= 1 else 1
+        delta.sampling = max(delta.sampling, factor)
         delta.last_seen = max(delta.last_seen, now)
         delta.packets += 1
 
@@ -168,8 +171,8 @@ class FlowCollector:
                     self.stats.dropped += 1
                     continue
                 slot = agg[key] = [0, 0, 0]
-            slot[0] += int(rec["bytes"])
-            slot[1] += int(rec["packets"])
+            slot[0] += int(rec["bytes"]) * factor
+            slot[1] += int(rec["packets"]) * factor
             slot[2] += 1
             added += 1
         delta.records += added
@@ -196,9 +199,19 @@ class FlowCollector:
         self._sources[address] = entry
         return entry
 
+    def _override(self, source_id: int) -> int:
+        cache = self.__dict__.setdefault("_overrides", {})
+        if source_id not in cache:
+            try:
+                cache[source_id] = max(1, int(self.db.get_meta(f"flows.sampling_override.{source_id}") or 1))
+            except (TypeError, ValueError):
+                cache[source_id] = 1
+        return cache[source_id]
+
     def invalidate_sources(self) -> None:
         """Forget cached source rows (call after editing/deleting ``flow_sources``)."""
         self._sources = {}
+        self.__dict__["_overrides"] = {}
 
     # ---------------------------------------------------------------- lifecycle
     async def start(self) -> None:

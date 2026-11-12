@@ -151,7 +151,7 @@ class CheckPatch(BaseModel):
 
 class RuleIn(BaseModel):
     name: str
-    kind: Literal["metric", "check", "device", "syslog"]
+    kind: Literal["metric", "check", "device", "syslog", "flow"]
     enabled: bool = True
     severity: Literal["critical", "warning", "info"] = "warning"
     device_id: Optional[int] = None
@@ -172,7 +172,7 @@ class RuleIn(BaseModel):
 
 class RulePatch(BaseModel):
     name: Optional[str] = None
-    kind: Optional[Literal["metric", "check", "device", "syslog"]] = None
+    kind: Optional[Literal["metric", "check", "device", "syslog", "flow"]] = None
     enabled: Optional[bool] = None
     severity: Optional[Literal["critical", "warning", "info"]] = None
     device_id: Optional[int] = None

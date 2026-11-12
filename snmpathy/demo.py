@@ -439,6 +439,7 @@ async def populate_demo(db: Database, settings: Settings, days: int = 7) -> None
     started = time.time()
     log.info("generating %s days of demo history (this takes a few seconds)...", days)
     await _populate(db, days)
+    await asyncio.to_thread(backfill_flows, db)
     db.set_meta("demo_populated", str(time.time()))
     log.info("demo data ready in %.1fs", time.time() - started)
 
@@ -501,3 +502,65 @@ async def _populate(db: Database, days: int) -> None:
         "UPDATE syslog SET device_id = (SELECT id FROM devices WHERE devices.name = syslog.host) WHERE device_id IS NULL"
     )
     rollup(db, now)
+
+
+# ------------------------------------------------------------------ flows
+# Talkers for the simulated NetFlow exporter (edge-fw01): (src, dst, sport, dport, proto, Mbps at peak).
+DEMO_FLOWS: list[tuple[str, str, int, int, int, float]] = [
+    ("10.10.1.25", "142.250.72.14", 51544, 443, 6, 38.0),
+    ("10.10.1.31", "52.96.165.18", 50112, 443, 6, 22.0),
+    ("10.10.2.40", "10.20.0.15", 49822, 445, 6, 64.0),
+    ("10.10.1.25", "151.101.1.69", 52011, 443, 6, 9.0),
+    ("10.20.0.15", "10.10.5.10", 873, 40211, 6, 120.0),
+    ("10.10.3.12", "8.8.8.8", 53211, 53, 17, 0.4),
+    ("10.10.4.7", "13.107.42.14", 3478, 3478, 17, 6.5),
+    ("10.10.2.40", "10.20.0.22", 50421, 3389, 6, 2.2),
+    ("192.0.2.77", "10.20.0.30", 61234, 22, 6, 0.8),
+    ("10.10.1.80", "23.215.0.136", 50999, 80, 6, 3.1),
+    ("10.10.6.2", "10.20.0.40", 5060, 5060, 17, 1.5),
+    ("10.20.0.30", "10.10.1.25", 443, 51544, 6, 14.0),
+]
+DEMO_FLOW_EXPORTER = "198.51.100.1"
+
+
+def demo_netflow_packet(t: float, interval: float, rng: random.Random) -> bytes:
+    """A NetFlow v5 datagram describing ``interval`` seconds of simulated traffic ending at ``t``."""
+    import ipaddress
+    import struct
+
+    records = []
+    for i, (src, dst, sport, dport, proto, mbps) in enumerate(DEMO_FLOWS):
+        rate = mbps * 1e6 / 8 * (0.25 + 0.75 * _diurnal(t, i * 0.7)) * rng.uniform(0.7, 1.3)
+        octets = min(2**32 - 1, max(64, int(rate * interval)))
+        pkts = max(1, octets // (1200 if proto == 6 else 400))
+        records.append(struct.pack(
+            "!4s4s4sHHIIIIHHxBBBHHBBxx", ipaddress.IPv4Address(src).packed, ipaddress.IPv4Address(dst).packed,
+            b"\0\0\0\0", 1 + i % 3, 4, pkts, octets, 0, int(interval * 1000), sport, dport, 0x18, proto, 0, 0, 0, 24, 24))
+    header = struct.pack("!HHIIIIBBH", 5, len(records), int(interval * 1000), int(t), 0, rng.randint(0, 2**31), 0, 0, 0)
+    return header + b"".join(records)
+
+
+def backfill_flows(db: Database, hours: int = 24, step: int = 60) -> None:
+    """Write ``hours`` of simulated flow history through the real collector code."""
+    from .flows.collector import FlowCollector
+
+    collector = FlowCollector(db)
+    rng = random.Random(7)
+    now = time.time()
+    t = now - hours * 3600
+    while t < now:
+        collector.ingest(demo_netflow_packet(t, step, rng), DEMO_FLOW_EXPORTER, now=t)
+        t += step
+    collector.flush_now()
+    db.execute("UPDATE flow_sources SET name = 'edge-fw01 (demo NetFlow)', "
+               "device_id = (SELECT id FROM devices WHERE name = 'edge-fw01') WHERE address = ?", (DEMO_FLOW_EXPORTER,))
+
+
+async def demo_flow_sender(get_collector: Callable[[], Any], interval: float = 10.0) -> None:
+    """Feed live simulated NetFlow into the running collector."""
+    rng = random.Random()
+    while True:
+        await asyncio.sleep(interval)
+        collector = get_collector()
+        if collector is not None:
+            collector.ingest(demo_netflow_packet(time.time(), interval, rng), DEMO_FLOW_EXPORTER)
