@@ -538,7 +538,11 @@ class StructuredLogServer(SyslogServer):
                 buffer.extend(chunk.replace(b"\x00", b"\n"))
                 start = 0
                 while (end := buffer.find(b"\n", start)) != -1:
-                    if not discarding:
+                    if not discarding and end - start > MAX_TCP_LINE:
+                        # The line completed in this read but is still too long.
+                        self.stats.dropped += 1
+                        log.debug("dropping JSON line over %d bytes from %s", MAX_TCP_LINE, source_ip)
+                    elif not discarding:
                         frame = bytes(buffer[start:end]).strip(b"\r\t ")
                         if frame:
                             self.enqueue(frame, source_ip)

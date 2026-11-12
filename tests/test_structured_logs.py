@@ -341,3 +341,29 @@ async def test_tcp_overlong_line_is_dropped(db):
         await server.stop()
     assert [r["message"] for r in db.query("SELECT message FROM syslog")] == ["after"]
     assert server.stats.dropped == 1
+
+
+async def test_overlong_line_completed_in_a_later_read_is_dropped(db):
+    # Reads of exactly 64 KiB leave the buffer at the limit (not over it) until the
+    # read that completes the line; that line must still be dropped.
+    server = StructuredLogServer(db, "127.0.0.1", gelf_udp_port=None, json_tcp_port=None, json_udp_port=None)
+    huge = json.dumps({"message": "huge", "blob": "x" * (300 * 1024)}).encode()
+    data = huge + b"\x00" + json.dumps({"message": "after"}).encode() + b"\x00"
+
+    class Reader:
+        chunks = [data[i:i + 65536] for i in range(0, len(data), 65536)]
+
+        async def read(self, n):
+            return self.chunks.pop(0) if self.chunks else b""
+
+    class Writer:
+        def get_extra_info(self, key):
+            return ("192.0.2.1", 1234)
+
+        def close(self):
+            pass
+
+    frames = []
+    server.enqueue = lambda frame, ip: frames.append(json.loads(frame)["message"])
+    await server._handle_tcp(Reader(), Writer())
+    assert frames == ["after"] and server.stats.dropped == 1
