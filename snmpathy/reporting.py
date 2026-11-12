@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from typing import Any, Callable
 
 from . import reports as uptime
+from .availability import describe_rule
 from .db import Database, loads
 from .syslog.parser import SEVERITIES
 from .syslog.search import parse_duration
@@ -222,6 +223,40 @@ def uptime_report(db: Database, start: float, end: float, label: str, device_id:
         ],
         "rows": table,
     })
+    devices = _device_where(device_id, tag, db)
+    dev_rows = []
+    for d in devices:
+        if not d["enabled"]:
+            continue
+        a = uptime.device_availability(db, d, start, end)
+        dev_rows.append({
+            "name": d["name"], "rule": describe_rule(d), "status": d["status"],
+            "uptime_pct": a["uptime_pct"], "downtime": a["downtime_seconds"], "outages": a["outages"],
+            "longest": a["longest_outage"], "mttr": a["mttr"],
+            "sla": None if a["uptime_pct"] is None else ("met" if a["uptime_pct"] >= sla_target else "breached"),
+            "_link": f"/devices/{d['id']}",
+        })
+    dev_rows.sort(key=lambda x: (x["uptime_pct"] is None, x["uptime_pct"] if x["uptime_pct"] is not None else 0))
+    measured = [r for r in dev_rows if r["uptime_pct"] is not None]
+    if measured:
+        rep["summary"].insert(1, {
+            "label": "Device availability", "fmt": "pct",
+            "value": sum(r["uptime_pct"] for r in measured) / len(measured),
+            "status": "ok" if all(r["uptime_pct"] >= sla_target for r in measured) else "bad"})
+    rep["sections"].insert(0, {
+        "title": "Availability by device",
+        "columns": [
+            {"key": "name", "label": "Device"}, {"key": "status", "label": "Now", "fmt": "badge"},
+            {"key": "uptime_pct", "label": "Uptime", "fmt": "pct3"},
+            {"key": "sla", "label": f"SLA {sla_target}%", "fmt": "badge"},
+            {"key": "downtime", "label": "Downtime", "fmt": "duration"},
+            {"key": "outages", "label": "Outages", "fmt": "int"},
+            {"key": "longest", "label": "Longest", "fmt": "duration"},
+            {"key": "mttr", "label": "MTTR", "fmt": "duration"},
+            {"key": "rule", "label": "Online rule"},
+        ],
+        "rows": dev_rows,
+    })
     outages = db.query(
         "SELECT outages.*, checks.name AS check_name FROM outages JOIN checks ON checks.id = outages.check_id "
         "WHERE outages.started_at < ? AND COALESCE(outages.ended_at, ?) > ? ORDER BY outages.started_at DESC LIMIT 500",
@@ -266,7 +301,7 @@ def health_report(db: Database, start: float, end: float, label: str, device_id:
         f"SELECT device_id, COUNT(*) AS n FROM events WHERE type = 'device.change' AND message LIKE '% restarted (uptime reset%' "
         f"AND ts >= ? AND ts <= ? AND device_id IN ({marks}) GROUP BY device_id", [start, end, *ids])}
     snmp_down = {r["device_id"]: r["n"] for r in db.query(
-        f"SELECT device_id, COUNT(*) AS n FROM events WHERE type = 'device.down' AND ts >= ? AND ts <= ? "
+        f"SELECT device_id, COUNT(*) AS n FROM events WHERE type = 'snmp.down' AND ts >= ? AND ts <= ? "
         f"AND device_id IN ({marks}) GROUP BY device_id", [start, end, *ids])}
     ifdown = {r["device_id"]: r["n"] for r in db.query(
         f"SELECT device_id, COUNT(*) AS n FROM interfaces WHERE admin_status = 1 AND oper_status = 2 "
@@ -274,9 +309,7 @@ def health_report(db: Database, start: float, end: float, label: str, device_id:
     logs = {r["device_id"]: r for r in db.query(
         f"SELECT device_id, COUNT(*) AS n, SUM(CASE WHEN severity <= 3 THEN 1 ELSE 0 END) AS errors FROM syslog "
         f"WHERE ts >= ? AND ts <= ? AND device_id IN ({marks}) GROUP BY device_id", [start, end, *ids])}
-    ping = {}
-    for c in db.query(f"SELECT * FROM checks WHERE type = 'icmp' AND device_id IN ({marks})", ids):
-        ping[c["device_id"]] = uptime.availability(db, c, start, end)["uptime_pct"]
+    ping = {d["id"]: uptime.device_availability(db, d, start, end)["uptime_pct"] for d in devices}
 
     rows = []
     for d in devices:
@@ -318,7 +351,7 @@ def health_report(db: Database, start: float, end: float, label: str, device_id:
         "title": "Devices",
         "columns": [
             {"key": "name", "label": "Device"}, {"key": "status", "label": "Status", "fmt": "badge"},
-            {"key": "availability", "label": "Ping uptime", "fmt": "pct3"},
+            {"key": "availability", "label": "Availability", "fmt": "pct3"},
             {"key": "cpu_avg", "label": "CPU avg", "fmt": "pct1"}, {"key": "cpu_max", "label": "CPU max", "fmt": "pct1"},
             {"key": "mem_avg", "label": "Mem avg", "fmt": "pct1"}, {"key": "mem_max", "label": "Mem max", "fmt": "pct1"},
             {"key": "disk_max", "label": "Fullest disk", "fmt": "pct1"},

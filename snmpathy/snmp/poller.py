@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..availability import evaluate_device
 from ..db import Database
 from . import mibs
 from .client import SnmpClient, SnmpError
@@ -232,33 +233,40 @@ async def poll_device(db: Database, client: SnmpClient, device: dict[str, Any], 
             "UPDATE interfaces SET oper_status = ?, in_bps = ?, out_bps = ?, updated_at = ? WHERE id = ?",
             iface_updates,
         )
-        was_down = device.get("status") == "down"
+        was_down = device.get("snmp_status") == "down"
         db.update("devices", device["id"], {
-            "status": "up",
-            "status_since": now if device.get("status") != "up" else device.get("status_since") or now,
+            "snmp_status": "up",
+            "snmp_since": now if device.get("snmp_status") != "up" else device.get("snmp_since") or now,
+            "snmp_fail_count": 0,
             "last_polled": now,
             "last_poll_ms": duration,
             "last_error": "",
             "sys_uptime": uptime if uptime is not None else device.get("sys_uptime"),
         })
         if was_down:
-            db.log_event("device.up", f"{device['name']} is responding to SNMP again", "info", device_id=device["id"], ts=now)
+            db.log_event("snmp.up", f"{device['name']} is responding to SNMP again", "info", device_id=device["id"], ts=now)
         for message in result.events:
             level = "warning" if (message.endswith(("down", "lowerLayerDown")) or "restarted" in message) else "info"
             db.log_event("device.change", message, level, device_id=device["id"], ts=now)
+        evaluate_device(db, device["id"], now)
 
     result.samples = len(samples)
     return result
 
 
 def _mark_failure(db: Database, device: dict[str, Any], error: str, now: float) -> None:
-    changed = device.get("status") != "down"
-    db.update("devices", device["id"], {
-        "status": "down",
-        "status_since": now if changed else device.get("status_since") or now,
-        "last_polled": now,
-        "last_error": error[:500],
-    })
-    if changed:
-        db.log_event("device.down", f"{device['name']} is not responding to SNMP: {error}", "error",
-                     device_id=device["id"], ts=now)
+    """Record a failed poll. SNMP counts as down after ``snmp_down_after`` failures in a row."""
+    fails = int(device.get("snmp_fail_count") or 0) + 1
+    threshold = max(1, int(device.get("snmp_down_after") or 1))
+    changes: dict[str, Any] = {"snmp_fail_count": fails, "last_polled": now, "last_error": error[:500]}
+    going_down = fails >= threshold and device.get("snmp_status") != "down"
+    if going_down:
+        interval = float(device.get("poll_interval") or 300)
+        # Backdate to the first failed poll of this streak.
+        changes.update(snmp_status="down", snmp_since=now - (fails - 1) * interval)
+    with db.transaction():
+        db.update("devices", device["id"], changes)
+        if going_down:
+            db.log_event("snmp.down", f"{device['name']} is not responding to SNMP: {error}", "warning",
+                         device_id=device["id"], ts=now)
+        evaluate_device(db, device["id"], now)

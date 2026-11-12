@@ -2,7 +2,7 @@
 document.addEventListener("DOMContentLoaded", () => {
   const type = SP.$("#check-type");
   if (!type) return;
-  const labels = { http: ["URL", "https://www.example.com/"], icmp: ["Host or IP", "10.0.0.1"], tcp: ["Host or IP", "mail.example.com"], dns: ["Hostname to resolve", "www.example.com"], snmp: ["Host or IP", "10.0.0.1"] };
+  const labels = { http: ["URL", "https://www.example.com/"], icmp: ["Host or IP", "10.0.0.1"], tcp: ["Host or IP", "mail.example.com"], dns: ["Hostname to resolve", "www.example.com"], snmp: ["Host or IP", "10.0.0.1"], nagios: ["Host or IP ($HOSTADDRESS$)", "10.0.0.1"], passive: ["Host / source", "backup-server"] };
   const sync = () => {
     SP.$$(".ct").forEach((el) => {
       const on = el.classList.contains("ct-" + type.value);

@@ -15,6 +15,19 @@
       <label class="field wide">Notes<textarea name="notes" rows="2">{{ d.notes or '' }}</textarea></label>
       <label class="check"><input type="checkbox" name="enabled" {{ 'checked' if not device or d.enabled }}> Monitoring enabled</label>
       {% if not device %}<label class="check"><input type="checkbox" name="add_ping_check" checked> Create a ping check</label>{% endif %}
+      <label class="field">Monitored from<select name="collector_id" data-type="nullable"><option value="">This server</option>{% for col in collectors %}<option value="{{ col.id }}" {{ 'selected' if d.collector_id == col.id }}>Collector: {{ col.name }}{{ ' (' ~ col.site ~ ')' if col.site }}</option>{% endfor %}</select></label>
+      <label class="field">Parent device <span class="hint">upstream router/switch</span><select name="parent_id" data-type="nullable"><option value="">None</option>{% for p in all_devices if p.id != d.id %}<option value="{{ p.id }}" {{ 'selected' if d.parent_id == p.id }}>{{ p.name }}</option>{% endfor %}</select></label>
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>Online / offline rule</legend>
+    <p class="small muted" style="margin-top:0">A device can be watched several ways (SNMP polling and the checks linked to it, such as ping). Choose how they combine: with the default, a device that answers ping but not SNMP (or the other way round) is still online and shown as <em>degraded</em>. If the parent device is down, this device is shown as <em>unreachable</em> instead of down and does not raise its own alert.</p>
+    <div class="form-grid">
+      <label class="field">Device is online when<select name="avail_mode" id="avail-mode">
+        {% for key, label in AVAIL_MODES.items() %}<option value="{{ key }}" {{ 'selected' if (d.avail_mode or 'any') == key }}>{{ label }}</option>{% endfor %}
+      </select></label>
+      <label class="field" id="avail-min-field">Methods that must respond (N)<input name="avail_min" type="number" data-type="int" min="1" max="20" value="{{ d.avail_min or 2 }}"></label>
+      <label class="field">SNMP failures before SNMP counts as down<input name="snmp_down_after" type="number" data-type="int" min="1" max="20" value="{{ d.snmp_down_after or 1 }}"></label>
     </div>
   </fieldset>
   <fieldset>
@@ -57,6 +70,10 @@ document.addEventListener("DOMContentLoaded", () => {
   };
   ver.addEventListener("change", sync);
   sync();
+  const mode = SP.$("#avail-mode");
+  const syncMode = () => SP.$("#avail-min-field").classList.toggle("hidden", mode.value !== "quorum");
+  mode.addEventListener("change", syncMode);
+  syncMode();
   SP.$("#snmp-test").addEventListener("click", async (e) => {
     const out = SP.$("#snmp-result");
     e.target.disabled = true;

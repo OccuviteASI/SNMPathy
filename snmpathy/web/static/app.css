@@ -211,6 +211,8 @@ th.sortable:hover { color: var(--text); }
 .status.down, .status.critical, .status.breached, .status.firing { color: var(--critical-text); }
 .status.warning, .status.pending { color: var(--warning-text); }
 .status.unknown, .status.paused { color: var(--muted); }
+.status.unreachable::before { background: transparent; border: 2px solid var(--warning); width: 5px; height: 5px; }
+.status.unreachable { color: var(--warning-text); }
 
 .badge {
   display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11.5px; font-weight: 600;

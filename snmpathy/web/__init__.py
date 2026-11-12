@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from .. import reports, services
+from ..availability import AVAIL_MODES, device_report
 from ..db import Database, loads
 from ..snmp import mibs
 from ..syslog.parser import FACILITIES, SEVERITIES, SEVERITY_LABELS
@@ -38,7 +39,7 @@ templates.env.filters.update(
 )
 templates.env.globals.update(
     SEVERITIES=SEVERITIES, SEVERITY_LABELS=SEVERITY_LABELS, FACILITIES=FACILITIES,
-    IF_OPER=mibs.IF_OPER_STATUS_NAMES, METRIC_INFO=mibs.METRIC_INFO, now=time.time,
+    IF_OPER=mibs.IF_OPER_STATUS_NAMES, METRIC_INFO=mibs.METRIC_INFO, now=time.time, AVAIL_MODES=AVAIL_MODES,
 )
 
 
@@ -51,10 +52,12 @@ def render(request: Request, name: str, **context: Any) -> HTMLResponse:
     context.setdefault("nav", name.split(".")[0])
     context["problems"] = {
         "devices": db.scalar("SELECT COUNT(*) FROM devices WHERE enabled = 1 AND status = 'down'"),
+        "collectors": db.scalar("SELECT COUNT(*) FROM collectors WHERE enabled = 1 AND status = 'offline'"),
         "checks": db.scalar("SELECT COUNT(*) FROM checks WHERE enabled = 1 AND state = 'down'"),
         "alerts": db.scalar("SELECT COUNT(*) FROM alerts WHERE state = 'firing'"),
     }
     context["auth_enabled"] = bool(request.app.state.settings.api_token)
+    context.setdefault("collectors", db.query("SELECT id, name, site, status FROM collectors ORDER BY name COLLATE NOCASE"))
     from .. import __version__
 
     context.setdefault("version", __version__)
@@ -66,7 +69,8 @@ def render(request: Request, name: str, **context: Any) -> HTMLResponse:
 def dashboard(request: Request):
     db = db_of(request)
     now = time.time()
-    down_devices = db.query("SELECT * FROM devices WHERE enabled = 1 AND status = 'down' ORDER BY status_since")
+    down_devices = db.query("SELECT * FROM devices WHERE enabled = 1 AND status IN ('down', 'unreachable') "
+                            "ORDER BY status = 'unreachable', status_since")
     down_checks = db.query(
         "SELECT checks.*, devices.name AS device_name FROM checks LEFT JOIN devices ON devices.id = checks.device_id "
         "WHERE checks.enabled = 1 AND checks.state = 'down' ORDER BY checks.state_since")
@@ -112,9 +116,13 @@ def devices(request: Request, tag: str = "", q: str = ""):
                   counts=counts, cpu=cpu, mem=mem)
 
 
+def _device_names(db: Database) -> list[dict[str, Any]]:
+    return db.query("SELECT id, name FROM devices ORDER BY name COLLATE NOCASE")
+
+
 @router.get("/devices/new", response_class=HTMLResponse)
 def device_new(request: Request):
-    return render(request, "device_form.html", device=None, nav="devices")
+    return render(request, "device_form.html", device=None, nav="devices", all_devices=_device_names(db_of(request)))
 
 
 @router.get("/devices/{device_id}/edit", response_class=HTMLResponse)
@@ -122,7 +130,8 @@ def device_edit(request: Request, device_id: int):
     device = db_of(request).one("SELECT * FROM devices WHERE id = ?", (device_id,))
     if not device:
         raise HTTPException(404)
-    return render(request, "device_form.html", device=services.public_device(device), nav="devices")
+    return render(request, "device_form.html", device=services.public_device(device), nav="devices",
+                  all_devices=_device_names(db_of(request)))
 
 
 @router.get("/devices/{device_id}", response_class=HTMLResponse)
@@ -148,8 +157,12 @@ def device_detail(request: Request, device_id: int, tab: str = "overview"):
     events = db.query("SELECT * FROM events WHERE device_id = ? ORDER BY ts DESC, id DESC LIMIT 50", (device_id,))
     alerts = db.query("SELECT * FROM alerts WHERE device_id = ? AND state = 'firing' ORDER BY fired_at DESC",
                       (device_id,))
+    collector = db.one("SELECT * FROM collectors WHERE id = ?", (device["collector_id"],)) if device["collector_id"] else None
+    parent = db.one("SELECT id, name, status FROM devices WHERE id = ?", (device["parent_id"],)) if device["parent_id"] else None
     return render(
-        request, "device.html", nav="devices", tab=tab,
+        request, "device.html", nav="devices", tab=tab, avail=device_report(db, device),
+        uptime_30d=reports.device_availability(db, device, now - 30 * 86400, now, now)["uptime_pct"],
+        collector=collector, parent=parent,
         device=services.public_device(device), metrics=metrics, by_key=by_key,
         interfaces=interfaces, iface_metrics=iface_metrics, checks=checks, events=events, alerts=alerts,
     )

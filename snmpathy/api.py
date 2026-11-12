@@ -60,6 +60,10 @@ class DeviceIn(BaseModel):
     location: str = ""
     tags: list[str] = []
     notes: str = ""
+    avail_mode: Literal["any", "all", "quorum", "snmp", "checks"] = "any"
+    avail_min: int = Field(2, ge=1, le=20)
+    snmp_down_after: int = Field(1, ge=1, le=20)
+    collector_id: Optional[int] = None
     add_ping_check: bool = True
 
 
@@ -81,6 +85,10 @@ class DevicePatch(BaseModel):
     location: Optional[str] = None
     tags: Optional[list[str]] = None
     notes: Optional[str] = None
+    avail_mode: Optional[Literal["any", "all", "quorum", "snmp", "checks"]] = None
+    avail_min: Optional[int] = Field(None, ge=1, le=20)
+    snmp_down_after: Optional[int] = Field(None, ge=1, le=20)
+    collector_id: Optional[int] = None
 
 
 class SnmpTestIn(BaseModel):
@@ -94,6 +102,7 @@ class SnmpTestIn(BaseModel):
     v3_priv_proto: str = "aes"
     v3_priv_key: str = ""
     v3_context: str = ""
+    collector_id: Optional[int] = None
 
 
 class MetricIn(BaseModel):
@@ -110,7 +119,7 @@ class MetricIn(BaseModel):
 
 class CheckIn(BaseModel):
     name: Optional[str] = None
-    type: Literal["icmp", "tcp", "http", "snmp", "dns"]
+    type: Literal["icmp", "tcp", "http", "snmp", "dns", "nagios", "passive"]
     target: str = Field(min_length=1)
     port: Optional[int] = Field(None, ge=1, le=65535)
     interval: int = Field(60, ge=5, le=86400)
@@ -119,12 +128,14 @@ class CheckIn(BaseModel):
     options: dict[str, Any] = {}
     enabled: bool = True
     public: bool = False
+    affects_device: bool = True
     device_id: Optional[int] = None
+    collector_id: Optional[int] = None
 
 
 class CheckPatch(BaseModel):
     name: Optional[str] = None
-    type: Optional[Literal["icmp", "tcp", "http", "snmp", "dns"]] = None
+    type: Optional[Literal["icmp", "tcp", "http", "snmp", "dns", "nagios", "passive"]] = None
     target: Optional[str] = None
     port: Optional[int] = Field(None, ge=1, le=65535)
     interval: Optional[int] = Field(None, ge=5, le=86400)
@@ -133,7 +144,9 @@ class CheckPatch(BaseModel):
     options: Optional[dict[str, Any]] = None
     enabled: Optional[bool] = None
     public: Optional[bool] = None
+    affects_device: Optional[bool] = None
     device_id: Optional[int] = None
+    collector_id: Optional[int] = None
 
 
 class RuleIn(BaseModel):
@@ -152,6 +165,7 @@ class RuleIn(BaseModel):
     syslog_severity: Optional[int] = Field(None, ge=0, le=7)
     window_seconds: int = Field(300, ge=10)
     count_threshold: int = Field(1, ge=1)
+    skip_online_devices: bool = True
     channels: list[int] = []
     description: str = ""
 
@@ -172,6 +186,7 @@ class RulePatch(BaseModel):
     syslog_severity: Optional[int] = Field(None, ge=0, le=7)
     window_seconds: Optional[int] = Field(None, ge=10)
     count_threshold: Optional[int] = Field(None, ge=1)
+    skip_online_devices: Optional[bool] = None
     channels: Optional[list[int]] = None
     description: Optional[str] = None
 
@@ -280,6 +295,36 @@ async def create_device(body: DeviceIn, request: Request, db: Database = Depends
     if monitor and device["snmp_enabled"]:
         monitor.reschedule_device(device["id"])
     return services.public_device(device)
+
+
+class DeviceBulkIn(BaseModel):
+    ids: list[int] = Field(min_length=1)
+    action: Literal["update", "delete"] = "update"
+    values: DevicePatch = DevicePatch()
+
+
+@router.post("/devices/bulk", tags=["devices"])
+def bulk_devices(body: DeviceBulkIn, request: Request, db: Database = Depends(get_db)):
+    """Apply the same change (e.g. new SNMP credentials) to many devices, or delete them."""
+    values = _patch(body.values)
+    for unique in ("name", "hostname"):
+        values.pop(unique, None)
+    monitor = request.app.state.monitor
+    done, errors = [], []
+    for device_id in body.ids:
+        try:
+            if body.action == "delete":
+                services.delete_device(db, device_id)
+                if monitor:
+                    monitor.forget_device(device_id)
+            else:
+                services.update_device(db, device_id, values)
+                if monitor:
+                    monitor.reschedule_device(device_id)
+            done.append(device_id)
+        except (KeyError, ValidationError) as exc:
+            errors.append({"id": device_id, "error": str(exc)})
+    return {"ok": not errors, "updated": len(done), "ids": done, "errors": errors}
 
 
 @router.post("/devices/test", tags=["devices"])

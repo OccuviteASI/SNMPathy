@@ -80,7 +80,7 @@
         <datalist id="metric-keys">{% for k in metric_keys %}<option value="{{ k }}">{{ METRIC_INFO.get(k, {}).get('name', '') }}</option>{% endfor %}</datalist>
         <div class="form-grid">
           <label class="field">Name<input name="name" required></label>
-          <label class="field">Kind<select name="kind" id="rule-kind"><option value="metric">Metric threshold</option><option value="check">Uptime check down</option><option value="device">Device unreachable (SNMP)</option><option value="syslog">Syslog messages</option></select></label>
+          <label class="field">Kind<select name="kind" id="rule-kind"><option value="metric">Metric threshold</option><option value="check">Uptime check down</option><option value="device">Device offline</option><option value="syslog">Syslog messages</option></select></label>
           <label class="field">Severity<select name="severity"><option value="critical">critical</option><option value="warning" selected>warning</option><option value="info">info</option></select></label>
           <label class="field">Condition must hold for (seconds)<input name="for_seconds" type="number" data-type="int" value="0" min="0"></label>
           <label class="field rk rk-metric">Metric key <span class="hint">wildcards ok</span><input name="metric_key" list="metric-keys" placeholder="cpu.avg, if.*_util"></label>
@@ -91,6 +91,7 @@
           <label class="field rk rk-syslog">Severity at least<select name="syslog_severity" data-type="nullable"><option value="">any</option>{% for s in SEVERITIES %}<option value="{{ loop.index0 }}">{{ s }}</option>{% endfor %}</select></label>
           <label class="field rk rk-syslog">Window (seconds)<input name="window_seconds" type="number" data-type="int" value="300" min="10"></label>
           <label class="field rk rk-syslog">Messages per host<input name="count_threshold" type="number" data-type="int" value="1" min="1"></label>
+          <label class="check wide rk rk-check"><input type="checkbox" name="skip_online_devices" checked> Ignore failing checks on devices that are still online <span class="muted small">(per the device's availability rule)</span></label>
           <label class="field">Device <span class="hint">optional</span><select name="device_id" data-type="nullable"><option value="">All devices</option>{% for d in devices %}<option value="{{ d.id }}">{{ d.name }}</option>{% endfor %}</select></label>
           <label class="field">Device tag <span class="hint">optional</span><input name="device_tag"></label>
           <label class="field wide">Notify <span class="hint">none selected = every enabled channel</span><select name="channels" multiple data-type="intlist" size="3">{% for c in channels %}<option value="{{ c.id }}">{{ c.name }} ({{ c.type }})</option>{% endfor %}</select></label>

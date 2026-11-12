@@ -125,6 +125,11 @@ def evaluate_rule(db: Database, rule: dict[str, Any], devices: dict[int, dict[st
             device = devices.get(c["device_id"]) if c["device_id"] else None
             if (rule.get("device_id") or rule.get("device_tag")) and not _device_in_scope(rule, device):
                 continue
+            if (rule.get("skip_online_devices", 1) and device and c.get("affects_device", 1)
+                    and device["status"] == "up"):
+                # One failing method on a device that is still online (by its availability
+                # rule) is a degradation, not an outage.
+                continue
             down_for = now - (c["state_since"] or now)
             matches.append(Match(
                 fingerprint=f"r{rule['id']}:c{c['id']}",
@@ -137,14 +142,16 @@ def evaluate_rule(db: Database, rule: dict[str, Any], devices: dict[int, dict[st
             ))
     elif kind == "device":
         for d in devices.values():
-            if not d["enabled"] or not d["snmp_enabled"] or d["status"] != "down":
+            # The device status already combines SNMP and its checks per the device's
+            # availability rule, so one failing method does not raise this alert.
+            if not d["enabled"] or d["status"] != "down":
                 continue
             if not _device_in_scope(rule, d):
                 continue
             matches.append(Match(
                 fingerprint=f"r{rule['id']}:d{d['id']}",
                 subject=d["name"],
-                message=f"device not responding to SNMP: {d['last_error']}",
+                message=f"device offline: {d.get('status_reason') or d['last_error']}",
                 value=now - (d["status_since"] or now),
                 device_id=d["id"],
                 since=d["status_since"],
