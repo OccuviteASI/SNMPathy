@@ -198,7 +198,8 @@ Start:    double-click {exe}. It runs in the system tray (no console window) and
           the web UI at http://localhost:8080/. Right-click the tray icon for Open,
           Start at login, Update, Open data folder, View log and Quit.
           From a terminal: {exe} serve   (console mode, Ctrl+C to stop)
-Update:   double-click "Update SNMPathy" in this folder (pulls, rebuilds, restarts).
+Update:   right-click the tray icon > Update SNMPathy (a progress window shows each step),
+          or double-click "Update SNMPathy" in this folder (pulls, rebuilds, restarts).
 Log:      snmpathy.log in this folder when running in the tray.
 Demo:     {exe} demo --open        (simulated devices, separate database)
 Help:     {exe} --help             (serve, demo, walk, get, discover, ping, ...)
@@ -247,6 +248,22 @@ def write_update_launcher(dest: Path) -> Path:
         path.write_text("#!/usr/bin/env sh\n# Pulls the latest SNMPathy, rebuilds this executable and restarts it.\n"
                         f'exec "{ROOT / "scripts" / "update.sh"}" "$@"\n', encoding="utf-8")
         path.chmod(0o755)
+    write_updater_info(dest)
+    return path
+
+
+def write_updater_info(dest: Path) -> Path:
+    """updater.json: lets the tray's "Update SNMPathy" open the progress window (scripts/update_gui.py)
+    with the Python that built this executable, without a console window."""
+    import json
+
+    python = Path(sys.executable)
+    if IS_WINDOWS and python.with_name("pythonw.exe").exists():
+        python = python.with_name("pythonw.exe")  # no console window
+    path = dest / "updater.json"
+    path.write_text(json.dumps({"source": str(ROOT), "python": str(python),
+                                "gui": str(ROOT / "scripts" / "update_gui.py")}, indent=2) + "\n",
+                    encoding="utf-8")
     return path
 
 
