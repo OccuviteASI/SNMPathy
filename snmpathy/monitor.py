@@ -76,6 +76,7 @@ class Monitor:
         self.syslog: SyslogServer | None = None
         self.logs: Any = None
         self.flows: Any = None
+        self.fusion: Any = None
         self._tasks: list[asyncio.Task] = []
         self._sem = asyncio.Semaphore(max(1, settings.poller_concurrency))
         self._clients: dict[int, tuple[str, SnmpClient]] = {}
@@ -119,6 +120,10 @@ class Monitor:
             self._spawn(self._alert_loop(), "alert-engine")
         self._spawn(self._housekeeping_loop(), "housekeeping")
         self._spawn(self._collector_loop(), "collectors")
+        from .fusion import FusionPoller
+
+        self.fusion = FusionPoller(self.db, interval=float(s.extra.get("fusion_poll_interval", 60)))
+        await self.fusion.start()
         log.info("monitor started (poller=%s syslog=%s alerting=%s)", s.enable_poller, s.enable_syslog,
                  s.enable_alerting)
 
@@ -133,6 +138,8 @@ class Monitor:
         self._tasks.append(task)
 
     async def stop(self) -> None:
+        if self.fusion:
+            await self.fusion.stop()
         for task in self._tasks:
             task.cancel()
         for task in self._tasks:

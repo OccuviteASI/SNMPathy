@@ -427,7 +427,7 @@ def combined(db: Database, local: dict[str, Any], local_base: str = "", now: flo
                "server_stale": bool(info.get("stale")) or status == "error"}
         base = info["url"]
         if status in ("error", "stale") and not info["local"]:
-            problems.append({**tag, "kind": "server", "name": info["name"],
+            problems.append({**tag, "server_stale": False, "kind": "server", "name": info["name"],
                              "status": "down" if status == "error" else "warning",
                              "since": info.get("last_ok") or info.get("created_at"),
                              "detail": info.get("error") or f"no fresh data for {int(info['age'] or 0)}s",

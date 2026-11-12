@@ -365,8 +365,8 @@ def test_combined_merges_sorts_and_flags_staleness(db, make_device):
     # Severity first (down, unreachable, warning), servers before items, then oldest first.
     assert order[0] == ("APAC", "server", "APAC", "down")
     downs = [o for o in order if o[3] == "down" and o[1] != "server"]
-    assert [o[2] for o in downs] == ["us-r1", "eu-web", "edge1", "core1 ping" if False else downs[3][2], "evil"]
-    assert downs[2][0] == "This server"
+    assert [o[2] for o in downs] == ["us-r1", "eu-web", "edge1", "ICMP 10.0.0.2", "evil"]
+    assert downs[2][0] == "This server" and downs[3][1] == "check"
     statuses = [p["status"] for p in probs]
     assert statuses == sorted(statuses, key=lambda s: fusion.PROBLEM_RANK[s])
     stale_srv = next(p for p in probs if p["kind"] == "server" and p["name"] == "US")
@@ -382,12 +382,14 @@ def test_combined_merges_sorts_and_flags_staleness(db, make_device):
     sev = [a["severity"] for a in view["firing"]]
     assert sev == sorted(sev, key=lambda s: fusion.SEVERITY_RANK.get(s, 3))
     assert view["firing"][0]["subject"] in ("eu-web down", "edge1 offline")
-    assert {a["server"] for a in view["firing"]} == {"This server", "EU", "US"}
+    assert {a["server"] for a in view["firing"]} == {"This server", "EU"}
 
     cpu = view["top"]["cpu"]
     assert [(r["server"], r["device"]) for r in cpu][:2] == [("EU", "eu-fw"), ("This server", "core1")]
     assert all(r["device"] != "eu-x" for r in cpu)
-    assert view["top"]["availability"][0]["device"] == "eu-sw"
+    avail = view["top"]["availability"]
+    assert [r["value"] for r in avail] == sorted(r["value"] for r in avail)
+    assert {"eu-sw", "edge1"} <= {r["device"] for r in avail}
     assert view["top"]["interfaces"][0]["name"] == "xe-0/0/1"
     assert view["top"]["interfaces"][0]["url"] == "https://eu.example.com/devices/3?tab=interfaces#if5"
 

@@ -9,7 +9,8 @@
 {% endblock %}
 {% block content %}
 <style>
-  .fx-tiles { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .fx-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  @media (min-width: 1500px) { .fx-tiles { grid-template-columns: repeat(8, minmax(0, 1fr)); } }
   .fx-tiles .tile { color: inherit; }
   .fx-tiles .tile:hover { text-decoration: none; border-color: var(--border-strong); }
   .tile.warn .value { color: var(--warning-text); }
@@ -33,6 +34,7 @@
   .fx-sub { display: none; color: var(--text-2); font-size: 12px; overflow-wrap: anywhere; white-space: normal; }
   .fx-good { color: var(--good-text); } .fx-warn { color: var(--warning-text); } .fx-bad { color: var(--critical-text); }
   .fx-banner { margin-bottom: 16px; }
+  .fx-show-sm { display: none; }
   .fx-top { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
   .fx-top .table td { white-space: nowrap; }
   .fx-top .table td.fx-wrap { white-space: normal; overflow-wrap: anywhere; }
@@ -44,8 +46,10 @@
   @media (max-width: 700px) {
     .fx-hide-sm { display: none; }
     .fx-sub { display: block; }
+    .fx-show-sm { display: inline; }
     .fx-detail { min-width: 0; }
     .fx-servers { grid-template-columns: minmax(0, 1fr); }
+    .fx-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .fx-url { max-width: 140px; }
   }
 </style>
@@ -144,12 +148,14 @@
           : s.pending ? st("unknown", s.pending + " waiting") : st("ok", "all reporting"),
         s.error ? "bad" : s.stale ? "warn" : "", "#fx-servers"),
       tile("Hosts up", total(d.up + d.degraded, hostsActive),
-        d.degraded ? st("warning", d.degraded + " degraded") : (d.unknown ? st("unknown", d.unknown + " unknown") : st("up", "all responding")),
+        d.degraded ? st("warning", n(d.degraded) + " degraded")
+          : (d.up >= hostsActive ? st("up", "all responding") : `${n(hostsActive - d.up)} not responding`),
         "", "#fx-problems"),
       tile("Hosts down", n(d.down), d.down ? st("down", "need attention") : st("up", "none"), d.down ? "bad" : "good", "#fx-problems"),
       tile("Hosts unreachable", n(d.unreachable), d.unreachable ? st("unreachable", "behind a failure") : st("up", "none"),
         d.unreachable ? "warn" : "good", "#fx-problems"),
-      tile("Checks OK", total(c.up, checksActive), c.unknown ? st("unknown", c.unknown + " unknown") : "&nbsp;", "", "#fx-problems"),
+      tile("Checks OK", total(c.up, checksActive),
+        c.up >= checksActive ? st("up", "all ok") : `${n(checksActive - c.up)} not ok`, "", "#fx-problems"),
       tile("Checks warning", n(c.warning), c.warning ? st("warning", "warning") : st("up", "none"), c.warning ? "warn" : "good", "#fx-problems"),
       tile("Checks critical", n(c.down), c.down ? st("down", "down") : st("up", "none"), c.down ? "bad" : "good", "#fx-problems"),
       tile("Alerts firing", n(a.firing),
@@ -209,11 +215,11 @@
     if (!rows.length) { $("#fx-problems").innerHTML = `<div class="empty">${st("ok", "Everything is operating normally on all servers")}</div>`; return; }
     const kindLabel = { device: "Host", check: "Check", server: "Server" };
     $("#fx-problems").innerHTML = `<div class="card-body flush table-wrap scroll"><table class="table compact">
-      <thead><tr><th>Server</th><th>Item</th><th>Status</th><th>For</th><th class="fx-hide-sm">Detail</th></tr></thead><tbody>`
+      <thead><tr><th class="fx-hide-sm">Server</th><th>Item</th><th>Status</th><th>For</th><th class="fx-hide-sm">Detail</th></tr></thead><tbody>`
       + rows.map((p) => `<tr>
-        <td>${serverCell(p)}</td>
+        <td class="fx-hide-sm">${serverCell(p)}</td>
         <td><span class="muted small">${esc(kindLabel[p.kind] || p.kind)}</span> ${link(p.url, p.name, p.server_local)}${p.device ? ` <span class="muted small">on ${esc(p.device)}</span>` : ""}
-          ${p.detail ? `<div class="fx-sub">${esc(p.detail)}</div>` : ""}</td>
+          <div class="fx-sub"><b>${esc(p.server)}</b>${p.server_stale ? " (stale)" : ""}${p.detail ? " · " + esc(p.detail) : ""}</div></td>
         <td>${st(p.status, PROBLEM_LABEL[p.status] || p.status)}</td>
         <td>${since(p.since)}</td>
         <td class="fx-detail fx-hide-sm">${esc(p.detail)}</td></tr>`).join("")
@@ -225,10 +231,10 @@
     $("#fx-alert-count").textContent = rows.length ? `${rows.length} firing` : "";
     if (!rows.length) { $("#fx-alerts").innerHTML = '<div class="empty">No alerts firing</div>'; return; }
     $("#fx-alerts").innerHTML = `<div class="card-body flush table-wrap scroll"><table class="table compact">
-      <thead><tr><th>Server</th><th>Alert</th><th>Severity</th><th>Firing for</th><th class="fx-hide-sm">Acknowledged</th></tr></thead><tbody>`
+      <thead><tr><th class="fx-hide-sm">Server</th><th>Alert</th><th>Severity</th><th>Firing for</th><th class="fx-hide-sm">Acknowledged</th></tr></thead><tbody>`
       + rows.map((a) => `<tr>
-        <td>${serverCell(a)}</td>
-        <td>${link(a.url, a.subject, a.server_local)}${a.message ? `<div class="fx-sub" style="display:block">${esc(a.message)}</div>` : ""}</td>
+        <td class="fx-hide-sm">${serverCell(a)}</td>
+        <td>${link(a.url, a.subject, a.server_local)}<div class="fx-sub" style="display:block"><b class="fx-show-sm">${esc(a.server)} · </b>${esc(a.message)}</div></td>
         <td><span class="badge ${esc(a.severity)}">${esc(a.severity || "-")}</span></td>
         <td>${since(a.fired_at || a.started_at)}</td>
         <td class="fx-hide-sm">${a.acknowledged ? `<span class="badge ok">${esc(a.ack_by || "yes")}</span>` : '<span class="muted">no</span>'}</td></tr>`).join("")

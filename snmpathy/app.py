@@ -18,6 +18,7 @@ from .collector_api import router as collector_router
 from .collectors import CollectorHub
 from .scanner import ScanManager
 from .topology import router as topology_router
+from .fusion import router as fusion_router
 from .grafana import router as grafana_router
 from .checks.runner import ProbeFunc
 from .config import Settings
@@ -108,6 +109,7 @@ def create_app(settings: Settings | None = None, db: Database | None = None, sta
     app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "web" / "static")), name="static")
     app.include_router(collector_router)
     app.include_router(topology_router)
+    app.include_router(fusion_router)
     app.include_router(api_router)
     app.include_router(grafana_router)
     app.include_router(web_router)
