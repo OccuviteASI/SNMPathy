@@ -1156,3 +1156,28 @@ def put_autostart(body: AutostartIn, request: Request):
         return autostart.set_enabled(body.enabled, request.app.state.settings)
     except (autostart.AutostartError, OSError) as exc:
         raise HTTPException(422, f"could not change autostart: {exc}") from exc
+
+
+# =================================================================== firewall
+class FirewallIn(BaseModel):
+    groups: list[str] = ["syslog"]
+    remove: bool = False
+
+
+@router.get("/system/firewall", tags=["system"])
+def get_firewall(request: Request):
+    """The host firewall backend and whether SNMPathy's ports are open."""
+    from . import firewall
+
+    return firewall.status(request.app.state.settings)
+
+
+@router.post("/system/firewall", tags=["system"])
+def post_firewall(body: FirewallIn, request: Request):
+    """Add (or remove) inbound firewall rules for the selected listener groups."""
+    from . import firewall
+
+    try:
+        return firewall.apply(request.app.state.settings, body.groups, remove=body.remove)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc

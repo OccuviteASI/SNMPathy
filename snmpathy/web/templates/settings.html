@@ -34,6 +34,31 @@
       {% endif %}
     </div>
   </div>
+  <div class="card" id="firewall">
+    <div class="card-head"><h2>Firewall</h2><span class="small muted">{{ firewall.backend }}{% if firewall.admin %} · running as admin{% endif %}</span></div>
+    <div class="card-body stack">
+      <p class="small muted" style="margin:0">{{ firewall.note }}</p>
+      <div class="row" id="fw-groups">
+        {% for key, label in firewall.groups.items() %}<label class="check small"><input type="checkbox" value="{{ key }}" {{ 'checked' if key in firewall.default_groups }}> {{ label }}</label>{% endfor %}
+      </div>
+      <table class="table compact" id="fw-rules">
+        <thead><tr><th>Rule</th><th>State</th></tr></thead>
+        <tbody>
+        {% for r in firewall.rules %}
+          <tr data-group="{{ r.group }}"><td class="small">{{ r.proto|upper }} {{ r.port }} <span class="muted">{{ r.label }}</span></td>
+            <td>{% if r.present is none %}<span class="muted small">{{ 'app-based' if firewall.backend == 'macos' else 'unknown' }}</span>{% elif r.present %}{{ status('up', 'open') }}{% else %}{{ status('unknown', 'not open') }}{% endif %}</td></tr>
+        {% else %}<tr><td colspan="2" class="muted small">No listeners enabled.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+      {% if firewall.backend != 'container' %}
+      <div class="row">
+        <button class="btn primary" id="fw-add">Add firewall rules</button>
+        <button class="btn" id="fw-remove">Remove</button>
+      </div>
+      {% endif %}
+      <pre class="codebox hidden" id="fw-output"></pre>
+    </div>
+  </div>
   <div class="card">
     <div class="card-head"><h2>Data</h2></div>
     <div class="card-body">
@@ -91,6 +116,33 @@
 </div>
 {% endblock %}
 {% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const add = SP.$("#fw-add");
+  if (!add) return;
+  const groups = () => SP.$$("#fw-groups input:checked").map((i) => i.value);
+  const syncRows = () => { const g = new Set(groups()); SP.$$("#fw-rules tr[data-group]").forEach((tr) => tr.classList.toggle("dim", !g.has(tr.dataset.group))); };
+  SP.$("#fw-groups").addEventListener("change", syncRows);
+  syncRows();
+  const run = async (remove, btn) => {
+    if (!groups().length) return SP.toast("Tick at least one group", "error");
+    btn.disabled = true;
+    const out = SP.$("#fw-output");
+    out.classList.remove("hidden");
+    out.textContent = remove ? "Removing rules…" : "Adding rules… (on Windows, approve the UAC prompt on the SNMPathy computer)";
+    try {
+      const r = await SP.api("POST", "/api/system/firewall", { groups: groups(), remove });
+      out.textContent = r.output + (r.manual ? "\n\nRun these commands as administrator / root:\n" + r.manual : "");
+      SP.toast(r.ok ? (remove ? "Firewall rules removed" : "Firewall rules added") : "Rules were not applied automatically - see the commands below", r.ok ? undefined : "error");
+      if (r.ok) setTimeout(() => location.reload(), 1200);
+    } catch (e) { out.textContent = e.message; SP.toast(e.message, "error"); }
+    finally { btn.disabled = false; }
+  };
+  add.addEventListener("click", (e) => run(false, e.target));
+  SP.$("#fw-remove").addEventListener("click", (e) => run(true, e.target));
+});
+</script>
+<style>#fw-rules tr.dim { opacity: .4; }</style>
 <script>
 document.addEventListener("DOMContentLoaded", () => {
   const box = SP.$("#autostart-toggle");

@@ -468,6 +468,21 @@ commented example.
 The CLI flags `--db`, `--host`, `--port`, `--syslog-udp`, `--syslog-tcp`, `--token`,
 `--no-syslog` and `--no-poller` override the file.
 
+## Open the firewall for syslog
+
+**Settings → Firewall**: tick what to open (**Syslog** by default; also *Web UI and API*,
+*GELF / JSON log inputs*, *NetFlow / IPFIX / sFlow*) and click **Add firewall rules**
+(**Remove** takes them out again). The table shows which ports are already open. From the
+command line: `snmpathy firewall status`, `snmpathy firewall add --include syslog,flows`,
+`snmpathy firewall remove`.
+
+| OS | What it does |
+|---|---|
+| Windows | inbound allow rules in Windows Defender Firewall (`netsh`, named `SNMPathy …`, all profiles). Needs Administrator: if SNMPathy is not elevated, a UAC prompt appears on the SNMPathy computer |
+| Linux | firewalld (`--permanent --add-port`, then reload) or ufw (`ufw allow`), as root or through password-less `sudo`; otherwise the exact commands are shown to paste into a terminal. Without firewalld / ufw, iptables commands are shown |
+| macOS | the application firewall is per app: SNMPathy (or its Python) is added and unblocked with `socketfilterfw` |
+| Docker | not needed: publish the ports (the Compose file maps 514 → 5514) |
+
 ## Start automatically at login
 
 **Settings → Startup → Start SNMPathy automatically when I log in** (or
