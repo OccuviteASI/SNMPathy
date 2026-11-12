@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Product** | SNMPathy: self-hosted network monitoring (SNMP polling, syslog ingest, uptime checks, alerting, dashboards, reporting) |
+| **Product** | SNMPathy: self-hosted network monitoring (SNMP polling, network discovery, distributed collectors, topology maps, syslog / log analysis, flow analysis, uptime checks, alerting, dashboards, multi-server Fusion view, reporting) |
 | **Version** | 0.1.0 |
 | **Status** | Implemented. This document describes the system as built. |
 | **Audience** | Engineers operating, extending or reviewing SNMPathy |
@@ -21,6 +21,11 @@ common jobs of several separate tools:
 | Uptime Robot | ICMP / TCP / HTTP / DNS / SNMP availability checks, SLA figures, a public status page |
 | ELK (for network logs) | Syslog collection, full-text search, facets and volume histograms |
 | Grafana | Built-in editable dashboards, plus a native Grafana data source |
+| Auvik | Network scanning with auto-add, LLDP/CDP topology map grouped by site, remote collectors |
+| Nagios Core / XI (distributed) | Remote collectors with passive result submission, Nagios plugins, passive checks with freshness, parent/child *unreachable* logic, multi-method host status |
+| Nagios Fusion | Combined tactical dashboard across several independent SNMPathy servers |
+| Nagios Log Server | Field-aware log search, filters, multi-query histograms, saved searches, Windows Event Log (NXLog) / GELF / JSON inputs |
+| Nagios Network Analyzer | NetFlow v5/v9, IPFIX and sFlow collection with top talkers, applications, conversations and bandwidth graphs |
 
 **Design goals:**
 
@@ -31,9 +36,9 @@ common jobs of several separate tools:
 3. Everything is available over a documented REST API.
 4. Small, readable codebase that is easy to extend (about 11.5k lines of Python, JS, CSS and HTML, plus about 1k lines of tests).
 
-**Non-goals** for this version: distributed or multi-site polling, NetFlow / sFlow,
-SNMP traps, configuration management (backing up device configs), multi-tenant RBAC,
-and horizontal scale-out beyond a single node (see §3.14).
+**Non-goals** for this version: SNMP traps, configuration management (backing up device
+configs), multi-tenant RBAC, and horizontal scale-out of one server's database beyond a
+single node (sites scale out with collectors and servers combine with Fusion; see §3.14).
 
 ---
 
@@ -54,7 +59,7 @@ covering test.
 | FR-SNMP-3 | M | Prefer 64-bit HC counters, convert counters to rates, and handle 32/64-bit wraparound and counter resets. | `snmp/poller.py::counter_delta` |
 | FR-SNMP-4 | M | Derive interface utilisation %, average CPU and SNMP response time. | `snmp/poller.py` |
 | FR-SNMP-5 | M | Detect device reboots (sysUpTime going backwards) and interface oper-status changes, recording them as events. | `snmp/poller.py`, `tests/test_snmp.py::test_reboot_and_interface_events` |
-| FR-SNMP-6 | M | Mark a device down when it stops answering and record the transition. | `snmp/poller.py::_mark_failure` |
+| FR-SNMP-6 | M | Track SNMP reachability as one availability source (down after `snmp_down_after` consecutive failed polls, backdated) and record the transition. | `snmp/poller.py::_mark_failure`, `tests/test_availability.py` |
 | FR-SNMP-7 | S | Re-discover periodically (6 h) and when credentials change; stop polling vanished series but keep their history. | `monitor.py`, `snmp/discovery.py::apply_discovery` |
 | FR-SNMP-8 | S | User-defined custom OIDs per device (gauge, counter, ratio, inverse ratio). | `services.py::add_custom_metric` |
 | FR-SNMP-9 | S | Test credentials without saving; CLI `get` / `walk` / `discover` tools that need no net-snmp. | `api.py::test_snmp`, `cli.py` |
@@ -84,6 +89,60 @@ covering test.
 | FR-UP-5 | M | Exclude maintenance windows from SLA figures, and exclude time before a check existed. | `reports.py`, `tests/test_reports.py` |
 | FR-UP-6 | S | 90-day per-day uptime bars and a public, unauthenticated status page of selected checks. | `reports.py::daily_bars`, `/status` |
 | FR-UP-7 | M | Automatically create a ping check for each new device (optional). | `services.py::create_device` |
+| FR-UP-8 | M | Nagios plugin checks: run a plugin by name from allowed plugin directories (never a path), map exit codes 0/1/2/3 to OK/WARNING/CRITICAL/UNKNOWN, substitute `$HOSTADDRESS$` / `$HOSTNAME$` / `$PORT$`, enforce a timeout, and store performance data as metrics on the linked device. | `checks/probes.py::nagios_plugin`, `checks/runner.py::store_perfdata` |
+| FR-UP-9 | M | Passive checks: accept results (NRDP-style: host + service or check id, state 0-3, output with perfdata, optional timestamp) and fail a check that receives nothing for an interval (freshness). | `api.py::submit_passive`, `monitor.py::_check_loop` |
+| FR-UP-10 | S | A WARNING state for checks that pass but need attention. | `checks/runner.py` |
+
+#### Device availability (online / offline rules)
+
+| ID | Pri | Requirement | Where |
+|---|---|---|---|
+| FR-AV-1 | M | Derive each device's status from all of its availability sources: SNMP polling and every enabled check linked to it that counts toward the device. | `availability.py::device_sources`, `tests/test_availability.py` |
+| FR-AV-2 | M | Per-device rule: online if **any** source responds (default), only if **all** respond, if at least **N** respond, SNMP only, or checks only. One failing method on an online device marks it *degraded*, not down. | `availability.py::combine` |
+| FR-AV-3 | M | Backdate a device outage to the failure that made the rule fail; keep device outages and report device-level availability. | `availability.py::evaluate_device`, `reports.py::device_availability`, `reporting.py` |
+| FR-AV-4 | M | Nagios-style *unreachable*: a failing device whose parent is down or unreachable, or whose collector is offline, is unreachable rather than down and does not raise the device-offline alert; children are re-evaluated when a parent changes. Parent loops are rejected. | `availability.py`, `services.py::_check_parent` |
+| FR-AV-5 | M | The device-offline alert follows the combined status; the check-down alert can skip checks on devices that are still online. | `alerting/engine.py` |
+| FR-AV-6 | S | Change SNMP credentials and other settings for many devices at once. | `api.py::bulk_devices`, `devices.html` |
+
+#### Network discovery (scanning)
+
+| ID | Pri | Requirement | Where |
+|---|---|---|---|
+| FR-SC-1 | M | Targets as CIDR blocks (IPv4/IPv6), short and full ranges, single addresses and host names, with exclusions and a 65,536-address cap per scan. | `scanner.py::expand_targets`, `tests/test_scanner.py` |
+| FR-SC-2 | M | Probe each host with ICMP, optional TCP ports and SNMP, trying several v2c communities and SNMPv3 users in order; record ping time, open ports, the credentials that worked, sysName, sysDescr, sysObjectID, vendor and reverse DNS. | `scanner.py::scan_host` |
+| FR-SC-3 | M | Mark hosts that are already monitored (by address, resolved host name or DNS name). | `scanner.py::ScanManager._match_existing` |
+| FR-SC-4 | M | Add results as devices automatically (hosts answering SNMP, or any responding host) or by selection, with the working credentials, tags, location, poll interval and online rule, a ping check for pingable hosts and a TCP check for port-only hosts; resolve name clashes. | `scanner.py::add_result`, `ScanManager.add` |
+| FR-SC-5 | M | Run scans in the background with live progress; cancel; repeat on a schedule; run from a remote collector. | `scanner.py::ScanManager`, `monitor.py::_collector_loop` |
+| FR-SC-6 | S | CLI `snmpathy scan` with optional adding to the database. | `cli.py::cmd_scan` |
+
+#### Remote collectors (distributed monitoring)
+
+| ID | Pri | Requirement | Where |
+|---|---|---|---|
+| FR-CO-1 | M | Register collectors with per-collector tokens (stored hashed, shown once, rotatable, revocable by disabling or deleting). | `collectors.py`, `collector_api.py`, `tests/test_collectors.py` |
+| FR-CO-2 | M | Collectors connect outbound only (HTTP(S) long polling); no inbound connection to the site is needed. | `collector_agent.py`, `collector_api.py::collector_poll` |
+| FR-CO-3 | M | Collectors pull their configuration (assigned devices with credentials and OIDs, assigned checks) and schedule polls and checks themselves; the server ingests the pushed results through the same poller and check state machine. | `collectors.py::CollectorHub.config / ingest` |
+| FR-CO-4 | M | Results are buffered on the collector (and spooled to disk) while the server is unreachable and replayed in order with original timestamps; stale or replayed results are ignored. | `collector_agent.py`, `collectors.py::ingest` |
+| FR-CO-5 | M | On-demand jobs relayed to a collector: SNMP get/walk (discovery, LLDP), check now, network-scan host probes, ping. | `collectors.py::CollectorHub.call`, `RemoteSnmpClient` |
+| FR-CO-6 | M | Freshness: a collector silent for `collector_offline_after` seconds is offline (event logged) and its devices become unreachable; they are re-evaluated when it returns. | `collectors.py::sweep / touch` |
+| FR-CO-7 | M | Download the collector from the main host: platform executables (from a downloads folder, or the running executable itself), a pip-installable package, and one-line install scripts that install a service on Windows (scheduled task), Linux (systemd) and macOS (launchd); Docker profile. | `collector_api.py`, `docker-compose.yml`, `deploy/systemd/snmpathy-collector.service` |
+
+#### Network map (topology)
+
+| ID | Pri | Requirement | Where |
+|---|---|---|---|
+| FR-MAP-1 | M | Discover layer-2 neighbours from LLDP-MIB and CISCO-CDP-MIB during discovery (also through collectors) and match them to known devices and interfaces. | `snmp/neighbors.py`, `tests/test_neighbors.py` |
+| FR-MAP-2 | M | Draw devices and links grouped by site (collector site or location prefix), with status, degraded/unreachable markers, link utilisation colour, link speed width, port labels and unmanaged neighbours. | `topology.py::build_graph`, `web/templates/map.html`, `tests/test_topology.py` |
+| FR-MAP-3 | M | Drag and save layouts per view; site and tag views; search; details panels. | `topology.py`, `map.html` |
+| FR-MAP-4 | S | Manual links; derive parent devices from the topology starting at a core device. | `topology.py::add_link / suggest_parents` |
+
+#### Fusion (multi-server view)
+
+| ID | Pri | Requirement | Where |
+|---|---|---|---|
+| FR-FU-1 | M | Each server exposes a compact summary (status counts, problems, firing alerts, top metrics) at `/api/fusion/summary`. | `fusion.py::summary`, `tests/test_fusion.py` |
+| FR-FU-2 | M | A Fusion server polls registered remote servers (URL + API token, TLS verification option) every minute and keeps the last good data, marking stale and failed servers. | `fusion.py::fetch_server / FusionPoller` |
+| FR-FU-3 | M | One tactical overview: aggregate tiles, per-server tiles, merged problems sorted by severity and age with links into each server, merged firing alerts, cross-server top CPU / memory / interfaces / worst availability. | `fusion.py::combined`, `web/templates/fusion.html` |
 
 #### Alerting and notification
 
@@ -169,11 +228,10 @@ covering test.
 ### 2.3 Out of scope / roadmap candidates
 
 * SNMP trap receiver (UDP 162) feeding the syslog / event pipeline
-* NetFlow / sFlow / IPFIX collection
-* Network topology discovery (LLDP / CDP) and maps
 * Vendor-specific MIB packs (BGP peers, optics dBm, PoE, wireless clients)
 * Users, roles and per-team permissions; SSO (OIDC / SAML)
-* Remote pollers for distributed sites
+* Layer-3 topology (routing tables, ARP/FDB-based placement of end hosts) on the map
+* Pushing collector upgrades from the server
 * PostgreSQL / TimescaleDB storage backend for large installations
 
 ---
@@ -210,6 +268,14 @@ flowchart LR
   end
   U[Browser] --> API
   G[Grafana] -- JSON data source --> API
+  subgraph Site["Remote site"]
+    CO[Collector: snmpathy collector] -- SNMP / ICMP / TCP / plugins --- SD[Site devices]
+  end
+  CO -- "HTTPS long poll: config, jobs, results (outbound only)" --> API
+  F[Other SNMPathy servers] -- "/api/fusion/summary" --> API
+  E[Flow exporters] -- "NetFlow / IPFIX / sFlow" --> FL[Flow collector]
+  WIN[Windows / apps via NXLog, GELF, JSON] --> S
+  FL --> DB
   A -- email / Slack / Teams / Discord / PagerDuty / webhook --> N[Notification targets]
   R -- scheduled reports --> N
 ```
@@ -229,6 +295,11 @@ SNMPathy is **one Python process** running one asyncio event loop:
 | `alert-engine` | `alert_eval_interval` (30 s), **or immediately** after a state change | evaluates all rules and sends notifications |
 | `housekeeping` | 60 s | 5-minute and hourly rollups, due scheduled reports; hourly retention |
 | syslog listeners + writer | continuous | UDP protocol and TCP server feed a bounded queue (100k); the writer batches up to 500 messages or 1 s per transaction |
+| structured log inputs | continuous | GELF over UDP (12201), JSON lines over TCP (5544), optional JSON over UDP; same queue and writer as syslog |
+| flow collector | continuous; flush every 10 s | NetFlow v5/v9, IPFIX and sFlow datagrams are decoded and aggregated per minute in memory, then written to `flows` |
+| `collectors` | 10 s | marks silent collectors offline (their devices become unreachable); starts recurring network scans that are due |
+| Fusion poller | 60 s | fetches `/api/fusion/summary` from each registered remote server |
+| network scans | on demand / schedule | `ScanManager` tasks probe hosts with bounded concurrency, locally or through a collector |
 
 A global semaphore (`poller_concurrency`, default 64) bounds simultaneous SNMP polls and
 checks. Every job is wrapped so a failure is logged and counted, never propagated.
@@ -259,9 +330,19 @@ checks. Every job is wrapped so a failure is logged and counted, never propagate
 | `services.py` | Validation and business logic shared by the API, UI and CLI; seeding; export / import |
 | `api.py` | REST API (Pydantic models) |
 | `web/` | Jinja templates, `app.js` (charts, dashboards, editor, syslog explorer), `app.css` |
+| `availability.py` | Combines a device's sources (SNMP + checks) under its rule; degraded / unreachable; device outages |
+| `scanner.py` | Target expansion, per-host probing (pure, runs on collectors too), `ScanManager` (background and recurring scans, matching, adding devices) |
+| `collectors.py` | Collector tokens, the `CollectorHub` (job relay, config builder, result ingest, freshness), `RemoteSnmpClient` |
+| `collector_api.py` | Collector-facing endpoints, collector management API, downloads (executables / package) and install scripts |
+| `collector_agent.py` | The collector process: config sync, local scheduler, buffered uploader with disk spool, job executor |
+| `snmp/neighbors.py` | LLDP / CDP neighbour discovery and link resolution |
+| `topology.py` | Map graph (sites, nodes, links, utilisation), layouts, manual links, parents from topology |
+| `fusion.py` | Server summary, remote fetching, combined multi-server view |
+| `flows/` | NetFlow / IPFIX / sFlow decoders, collector and aggregator, flow queries, analyzer pages, flow alerts and traffic report |
+| `syslog/structured.py` | GELF (incl. chunked / compressed), NXLog Windows Event Log and generic JSON inputs |
 | `monitor.py` | Scheduling and orchestration |
 | `app.py` | App factory, auth middleware, login, health check |
-| `cli.py` | `serve`, `demo`, `init-config`, `get`, `walk`, `discover`, `ping`, `send-syslog`, `add-device`, `export`, `import`, `grafana-export`, `version` |
+| `cli.py` | `serve`, `demo`, `init-config`, `get`, `walk`, `discover`, `ping`, `send-syslog`, `add-device`, `scan`, `collector`, `export`, `import`, `grafana-export`, `version` |
 | `demo.py` | Simulated agents (monotonic counters from an analytic traffic model), synthetic outages, a syslog generator, history backfill through the real code paths |
 
 ### 3.4 Key flows
@@ -326,6 +407,55 @@ stateDiagram-v2
 An alert's identity is its **fingerprint**: `r<rule>:m<metric>`, `r<rule>:c<check>`,
 `r<rule>:d<device>` or `r<rule>:h<host>`. At most one open alert exists per fingerprint.
 
+#### Device availability
+
+```mermaid
+flowchart LR
+  SNMP["SNMP source<br/>(up / down after snmp_down_after failures)"] --> R
+  C1["Ping check"] --> R
+  C2["TCP / HTTP / plugin checks<br/>(affects_device = 1)"] --> R
+  R{"Device rule<br/>any / all / at least N / SNMP only / checks only"} -->|enough up| UP["up (degraded if any failing)"]
+  R -->|not enough up| X{"parent down or<br/>collector offline?"}
+  X -->|yes| UN[unreachable]
+  X -->|no| DN[down]
+```
+
+`evaluate_device` runs whenever a poll finishes, a check changes state, the device or its
+checks are edited, a collector connects or disconnects, or the parent changes (children
+are re-evaluated recursively, loop-safe). A transition to down / unreachable opens a
+`device_outages` row backdated to the failure that broke the rule (for *any*: the last
+source to fail; for *all*: the first; for *N*: the failure that dropped the count below
+N). Device availability in reports uses those intervals minus maintenance.
+
+#### Remote collector
+
+```mermaid
+sequenceDiagram
+  participant A as Collector (site)
+  participant S as Server /api/collector/v1
+  participant H as CollectorHub
+  participant DB as SQLite
+  loop every ~25 s (long poll)
+    A->>S: GET /poll (token, version, backlog, config version)
+    S->>H: touch() - online, freshness
+    H-->>S: jobs queued for this collector (or wait)
+    S-->>A: config_version + jobs
+  end
+  A->>S: GET /config (when the version changed)
+  Note over A: scheduler polls SNMP OIDs and runs checks locally
+  A->>S: POST /results {results[], jobs[]} (batches, retried, spooled to disk)
+  S->>H: resolve(job answers), ingest(results)
+  H->>DB: poll_device(PrefetchedClient) / record_result (with original timestamps)
+  Note over H: discovery and "check now" use RemoteSnmpClient / call(): a job in the queue, answered in the next POST
+```
+
+#### Network scan
+
+`targets → expand_targets → per host (bounded concurrency): ICMP + TCP ports + SNMP GET
+(sysDescr / sysObjectID / sysName) for each credential until one answers → reverse DNS →
+scan_results row → match existing devices → optional auto-add (device + credentials + ping
+or TCP check)`. A scan bound to a collector sends each host as a `scan_host` job.
+
 ### 3.5 Data model
 
 ```mermaid
@@ -347,18 +477,25 @@ erDiagram
 
 | Table | Notes |
 |---|---|
-| `devices` | Identity, SNMP credentials (v3 keys write-only through the API), system info, status, poll timing |
+| `devices` | Identity, SNMP credentials (v3 keys write-only through the API), system info, poll timing, availability rule (`avail_mode`, `avail_min`, `snmp_down_after`), SNMP source state, combined status / reason / degraded, `parent_id`, `collector_id` |
 | `interfaces` | Per-ifIndex details and a live snapshot (oper status, in / out bps) |
 | `metrics` | One row per series: `(device, key, instance)` unique; kind (`gauge`, `counter`, `ratio`, `ratio_free`, `derived`); OIDs; unit / scale / counter width; last raw value and last computed value |
 | `samples` | `(metric_id, ts)` primary key, `WITHOUT ROWID`, about 15 to 20 bytes per point |
 | `rollups` | `(metric_id, period, bucket)` holding min / max / avg / count, for periods of 300 and 3600 seconds |
-| `checks`, `heartbeats`, `outages` | Availability definitions, every probe result, and state intervals |
+| `checks`, `heartbeats`, `outages` | Availability definitions (incl. `affects_device`, `collector_id`, `warning`), every probe result, and state intervals |
 | `syslog` (+ `syslog_fts`) | Parsed messages; external-content FTS5 index kept in sync by triggers |
 | `alert_rules`, `alerts`, `channels`, `notifications` | Alerting |
 | `maintenance` | Windows scoped globally, to a device or to a check |
 | `dashboards` | Name, slug and JSON config (`time`, `refresh`, `panels[]`) |
 | `report_schedules` | Report, period, frequency / hour / weekday / monthday, channels, last run and status |
 | `events` | Human-readable audit trail (state changes, reboots, discovery, alerts) |
+| `device_outages` | Device-level downtime intervals derived from the availability rule |
+| `scans`, `scan_results` | Scan definitions (targets, options incl. credentials to try, schedule, collector) and responsive hosts |
+| `collectors` | Name, site, hashed token, last contact, host / platform / version, results and backlog counters, online state |
+| `links`, `map_positions` | LLDP / CDP / manual adjacencies (resolved to devices and interfaces) and saved map layouts |
+| `fusion_servers` | Remote SNMPathy servers (URL, API token, TLS verification) and their last summary |
+| `flow_sources`, `flows` | Flow exporters and minute-aggregated flow records |
+| `saved_searches` | Saved log queries and filters |
 | `meta` | Schema version, seed markers, rollup watermarks |
 
 ### 3.6 Storage, rollups and retention
@@ -419,7 +556,8 @@ after the schedule was created, so nothing is back-filled on first start.
 * **Authentication:** optional single shared token (`api_token`). It is accepted as
   `Authorization: Bearer`, `X-API-Key`, `?token=`, or an HttpOnly SameSite=Lax cookie set
   by `/login`. It is compared with `hmac.compare_digest`. Public paths are `/status`,
-  `/api/status-page`, `/healthz`, `/login` and `/static/`.
+  `/api/status-page`, `/healthz`, `/login`, `/static/`, the collector endpoints (own
+  tokens) and `/collector/` downloads.
 * **Secrets:** SNMPv3 auth / priv keys are never returned by the API (only
   `has_v3_*_key` flags), and an empty value on update keeps the stored secret. Channel
   secrets (SMTP password, PagerDuty key) are masked and merged back on update.
@@ -427,6 +565,20 @@ after the schedule was created, so nothing is back-filled on first start.
   quoted FTS5 phrases, so users cannot inject FTS syntax errors. Templates auto-escape, and
   the JS escapes every interpolated value. `ping` runs through `exec` with an argument
   list, never a shell.
+* **Collectors:** each has its own random token (`col_…`), stored only as a SHA-256 hash,
+  shown once, rotatable; a disabled or deleted collector is refused. Collector endpoints
+  (`/api/collector/v1/*`) accept only collector tokens and only touch that collector's
+  devices and checks. Collectors receive the SNMP credentials of their devices, so the
+  server must be reached over HTTPS (reverse proxy) when collectors cross untrusted
+  networks; the agent verifies TLS by default (`--ca-file` for private CAs).
+* **Public download paths:** `/collector/*` (install scripts, executables, the Python
+  package) needs no login so a site machine can fetch it; it contains no secrets (tokens
+  are passed on the command line, never embedded).
+* **Nagios plugins** run only by bare name from configured plugin directories, through
+  `exec` with an argument list (no shell) and a timeout.
+* **Fusion** stores remote API tokens in the database to call remote servers; they are
+  never returned by the API. Data from remote servers is treated as untrusted (links must
+  be site-relative, values are validated and escaped).
 * **Least privilege:** the Docker image runs as UID 10001 with `NET_RAW` only. The systemd
   unit grants only `CAP_NET_RAW` and `CAP_NET_BIND_SERVICE` and enables `ProtectSystem=strict`.
 * **Recommendations:** put SNMPathy behind TLS (a reverse proxy) when you expose it
@@ -461,7 +613,33 @@ and additionally builds the Docker image and probes `/healthz`.
    `serve` and opens the browser. `snmpathy.yaml` and `snmpathy.db` sit next to the
    executable.
 5. **Behind a reverse proxy:** terminate TLS at nginx / Caddy / IIS and set
-   `public_url` so links in notifications and reports are correct.
+   `public_url` so links in notifications and reports are correct (also used in the
+   collector install commands).
+6. **Central server + collectors:** one server (usually behind HTTPS) and a collector per
+   site, installed with the one-line command from the Collectors page (Windows scheduled
+   task, systemd, launchd or `docker compose --profile collector`).
+7. **Fusion:** several independent servers (per region, customer or security zone), plus
+   one server whose Fusion page combines them; it needs only HTTPS access to each
+   server's API with a token.
+
+```mermaid
+flowchart LR
+  subgraph HQ
+    S1[SNMPathy server] --- HQD[HQ devices]
+  end
+  subgraph B1[Branch A]
+    C1[Collector] --- BD1[devices]
+  end
+  subgraph B2[Branch B]
+    C2[Collector] --- BD2[devices]
+  end
+  C1 -- HTTPS out --> S1
+  C2 -- HTTPS out --> S1
+  subgraph R2[Region 2]
+    S2[SNMPathy server]
+  end
+  S1 -- Fusion: /api/fusion/summary --> S2
+```
 
 ### 3.12 Extension points
 
@@ -483,6 +661,8 @@ and additionally builds the Docker image and probes `/healthz`.
 | Engines | discovery → poll → rates / events with `FakeSnmpClient`; check state machine; alert lifecycle, scope, staleness, maintenance, syslog counting |
 | I/O | real UDP / TCP syslog ingest on loopback; TCP / HTTP probes against local servers; ping in whatever mode the OS allows |
 | HTTP | the whole REST API, auth, Grafana protocol, export / import, and every UI page rendering (FastAPI `TestClient`) |
+| Distributed | collector hub config / ingest / freshness / job relay, collector HTTP API and token handling, downloads and install scripts; an end-to-end run with a real collector process and snmpd |
+| Discovery and map | target expansion, scanning with fake networks, auto-add, scan API; LLDP / CDP parsing and resolution; map graph, layouts, manual links, parents |
 | Live agent (opt-in) | `SNMPATHY_TEST_AGENT=host:port` (+ `SNMPATHY_TEST_V3=user:auth:priv`) runs v2c and v3 authPriv against a real snmpd |
 | Manual / E2E | `snmpathy demo` plus a headless browser for the dashboard editor, syslog explorer and responsive layout |
 
@@ -494,6 +674,11 @@ and additionally builds the Docker image and probes `/healthz`.
 * **Syslog timestamps without a timezone** (RFC 3164) are interpreted in the server's local
   timezone, as rsyslog does.
 * **One shared API token.** There are no per-user accounts or audit of UI actions yet.
+* **Collectors are not upgraded remotely.** Re-run the install command to update one.
+* **Topology is layer 2 from LLDP / CDP.** Devices that speak neither appear only through
+  manual links or parent relationships; end hosts are not placed from FDB / ARP tables.
+* **Flow data is aggregated per minute** on the 5-tuple plus interfaces; individual flow
+  records are not kept.
 * **SNMP traps are not received yet.** Use syslog from the devices, or the roadmap trap
   receiver.
 * **The demo** generates synthetic data only for hostnames ending in `.demo`; real
