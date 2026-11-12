@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status, icon %}
+{% block title %}Network scans{% endblock %}
+{% block crumbs %}<div class="crumbs"><a href="/devices">Devices</a> / Network scans</div>{% endblock %}
+{% block actions %}<button class="btn primary" data-action="modal" data-target="#scan-modal">{{ icon('plus') }} New scan</button>{% endblock %}
+{% block content %}
+<p class="muted small" style="margin-top:0">Sweep IP ranges with ping, TCP ports and SNMP (trying each community / SNMPv3 user), then add what answers as devices automatically or by hand. Scans can repeat on a schedule to pick up new devices, and can run from a remote collector to reach other sites.</p>
+<div class="card">
+  <div class="card-body flush table-wrap">
+    <table class="table">
+      <thead><tr><th>Scan</th><th>Targets</th><th>Runs from</th><th>State</th><th>Found</th><th>Added</th><th>Last run</th><th>Repeats</th><th></th></tr></thead>
+      <tbody>
+      {% for s in scans %}
+        <tr>
+          <td><a href="/scans/{{ s.id }}"><strong>{{ s.name }}</strong></a></td>
+          <td class="mono small" style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ s.targets }}">{{ s.targets }}</td>
+          <td>{{ s.collector_name or 'This server' }}</td>
+          <td>{{ status({'done': 'up', 'running': 'pending', 'queued': 'pending', 'failed': 'down', 'interrupted': 'warning', 'cancelled': 'unknown'}.get(s.state, 'unknown'), s.state) }}{% if s.state == 'running' %} <span class="small muted">{{ s.scanned }}/{{ s.total }}</span>{% endif %}</td>
+          <td class="num">{{ s.found }}</td>
+          <td class="num">{{ s.added }}</td>
+          <td class="nowrap">{{ s.finished_at|ts('ago')|safe }}</td>
+          <td>{{ (s.interval|duration) if s.interval else 'once' }}{% if s.interval and s.next_run %}<div class="small muted">next {{ s.next_run|ts('ago')|safe }}</div>{% endif %}</td>
+          <td class="nowrap"><button class="btn sm" data-action="api" data-url="/api/scans/{{ s.id }}/run" data-success="Scan started">Run now</button></td>
+        </tr>
+      {% else %}
+        <tr><td colspan="9"><div class="empty">No scans yet. Create one to discover the devices on a subnet.</div></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="modal-back hidden" id="scan-modal">
+  <div class="modal" style="max-width:860px">
+    <div class="card-head"><h2>New network scan</h2><button class="btn ghost" data-action="close-modal">&times;</button></div>
+    <form data-api="/api/scans" data-redirect="/scans/{id}" data-transform="scan" id="scan-form">
+      <div class="modal-body">
+        <div class="form-grid">
+          <label class="field wide">Targets <span class="hint">CIDR, ranges, addresses or names - separated by commas or spaces</span>
+            <textarea name="targets" rows="2" required placeholder="10.0.0.0/24, 10.0.1.1-50, 192.168.10.5" id="scan-targets"></textarea>
+            <span class="small muted" id="scan-count"></span></label>
+          <label class="field">Name<input name="name" placeholder="HQ LAN" data-empty="omit"></label>
+          <label class="field">Exclude <span class="hint">optional</span><input name="options.exclude" placeholder="10.0.0.1, 10.0.0.250-254"></label>
+          <label class="field">Run from<select name="collector_id" data-type="nullable"><option value="">This server</option>{% for col in collectors %}<option value="{{ col.id }}">Collector: {{ col.name }}{{ ' (' ~ col.site ~ ')' if col.site }}</option>{% endfor %}</select></label>
+          <label class="field">Repeat<select name="interval" data-type="int"><option value="0">Run once</option><option value="3600">Every hour</option><option value="21600">Every 6 hours</option><option value="86400">Daily</option><option value="604800">Weekly</option></select></label>
+        </div>
+        <fieldset><legend>Probes</legend>
+          <div class="form-grid">
+            <label class="field wide">SNMP communities to try <span class="hint">comma separated, in order</span><input name="options.communities" data-type="list" value="public"></label>
+            <label class="field">SNMP port<input name="options.snmp_port" type="number" data-type="int" value="161"></label>
+            <label class="field">TCP ports <span class="hint">optional</span><input name="options.tcp_ports" data-type="list" placeholder="22, 80, 443, 3389"></label>
+            <label class="field">Timeout (s)<input name="options.timeout" type="number" step="0.1" data-type="float" value="1.5"></label>
+            <label class="field">Parallel probes<input name="options.concurrency" type="number" data-type="int" value="64" min="1" max="512"></label>
+            <label class="check"><input type="checkbox" name="options.ping" checked> Ping (ICMP)</label>
+            <label class="check"><input type="checkbox" name="options.snmp" checked> SNMP</label>
+            <label class="check"><input type="checkbox" name="options.resolve_dns" checked> Reverse DNS names</label>
+            <label class="check"><input type="checkbox" name="options.snmp_only_if_alive"> Only try SNMP on hosts that answer ping/TCP <span class="muted small">(faster on sparse ranges)</span></label>
+          </div>
+          <details class="mt"><summary>SNMPv3 user to try</summary>
+            <div class="form-grid mt" id="scan-v3">
+              <label class="field">User<input data-v3="user" autocomplete="off"></label>
+              <label class="field">Auth protocol<select data-v3="auth_proto">{% for p in ['sha', 'sha256', 'sha384', 'sha512', 'sha224', 'md5', 'none'] %}<option>{{ p }}</option>{% endfor %}</select></label>
+              <label class="field">Auth passphrase<input data-v3="auth_key" type="password" autocomplete="new-password"></label>
+              <label class="field">Privacy protocol<select data-v3="priv_proto">{% for p in ['aes', 'aes192', 'aes256', 'des', '3des', 'none'] %}<option>{{ p }}</option>{% endfor %}</select></label>
+              <label class="field">Privacy passphrase<input data-v3="priv_key" type="password" autocomplete="new-password"></label>
+            </div>
+          </details>
+        </fieldset>
+        <fieldset><legend>Adding devices</legend>
+          <div class="form-grid">
+            <label class="field">Add automatically<select name="options.auto_add"><option value="none">No - I'll pick from the results</option><option value="snmp">Hosts that answer SNMP</option><option value="alive">Every host that answers</option></select></label>
+            <label class="field">Online rule for new devices<select name="options.avail_mode">{% for k, l in AVAIL_MODES.items() %}<option value="{{ k }}">{{ l }}</option>{% endfor %}</select></label>
+            <label class="field">Tags<input name="options.tags" data-type="list" value="discovered"></label>
+            <label class="field">Location<input name="options.location"></label>
+            <label class="field">Poll interval (s)<input name="options.poll_interval" type="number" data-type="int" value="300" min="10"></label>
+            <label class="check"><input type="checkbox" name="options.add_ping_check" checked> Add a ping check to hosts that answer ping</label>
+          </div>
+        </fieldset>
+      </div>
+      <div class="modal-foot"><button type="button" class="btn" data-action="close-modal">Cancel</button><button class="btn primary" type="submit">Start scan</button></div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  SP.transforms.scan = (b) => {
+    const user = SP.$("[data-v3=user]").value.trim();
+    b.options = b.options || {};
+    b.options.v3 = user ? [Object.fromEntries(SP.$$("[data-v3]").map((el) => [el.dataset.v3, el.value]))] : [];
+    b.options.tcp_ports = (b.options.tcp_ports || []).map((p) => parseInt(p, 10)).filter((p) => p > 0 && p < 65536);
+    if (b.collector_id === "") b.collector_id = null;
+    return b;
+  };
+  const targets = SP.$("#scan-targets"), out = SP.$("#scan-count");
+  let timer;
+  targets.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      if (!targets.value.trim()) { out.textContent = ""; return; }
+      try {
+        const r = await SP.api("POST", "/api/scans/preview", { targets: targets.value, exclude: SP.$("[name='options.exclude']").value });
+        out.textContent = `${r.count.toLocaleString()} addresses (${r.first.join(", ")}${r.count > 5 ? " … " + r.last.join(", ") : ""})`;
+      } catch (e) { out.textContent = e.message; }
+    }, 350);
+  });
+  if (new URLSearchParams(location.search).get("new")) SP.openModal(SP.$("#scan-modal"));
+});
+</script>
+{% endblock %}

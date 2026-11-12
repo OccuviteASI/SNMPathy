@@ -6,18 +6,19 @@ import json
 import time
 from typing import Any
 
+from .availability import evaluate_device
 from .db import Database, loads
 
 DEVICE_FIELDS = (
     "name", "hostname", "enabled", "snmp_enabled", "snmp_version", "snmp_port", "snmp_community",
     "v3_user", "v3_auth_proto", "v3_auth_key", "v3_priv_proto", "v3_priv_key", "v3_context",
-    "poll_interval", "location", "tags", "notes",
+    "poll_interval", "location", "tags", "notes", "avail_mode", "avail_min", "snmp_down_after", "collector_id", "parent_id",
 )
 CHECK_FIELDS = ("device_id", "name", "type", "target", "port", "interval", "timeout", "retries",
-                "options", "enabled", "public")
+                "options", "enabled", "public", "affects_device", "collector_id")
 RULE_FIELDS = ("name", "kind", "enabled", "severity", "device_id", "device_tag", "metric_key", "instance",
                "operator", "threshold", "for_seconds", "syslog_query", "syslog_severity", "window_seconds",
-               "count_threshold", "channels", "description")
+               "count_threshold", "skip_online_devices", "channels", "description")
 CHANNEL_FIELDS = ("name", "type", "config", "enabled")
 SECRET_FIELDS = ("v3_auth_key", "v3_priv_key")
 
@@ -49,21 +50,60 @@ def public_device(row: dict[str, Any]) -> dict[str, Any]:
     return d
 
 
-def create_device(db: Database, values: dict[str, Any], add_ping_check: bool = True) -> dict[str, Any]:
+def validate_device(data: dict[str, Any]) -> None:
+    from .availability import AVAIL_MODES
+
+    if "avail_mode" in data and data["avail_mode"] not in AVAIL_MODES:
+        raise ValidationError(f"avail_mode must be one of {', '.join(AVAIL_MODES)}")
+    for key, low, high in (("avail_min", 1, 20), ("snmp_down_after", 1, 20)):
+        if key in data and data[key] is not None and not low <= int(data[key]) <= high:
+            raise ValidationError(f"{key} must be between {low} and {high}")
+
+
+def _check_collector(db: Database, data: dict[str, Any]) -> None:
+    if data.get("collector_id") and not db.one("SELECT 1 FROM collectors WHERE id = ?", (data["collector_id"],)):
+        raise ValidationError(f"collector {data['collector_id']} does not exist")
+    if "collector_id" in data and not data["collector_id"]:
+        data["collector_id"] = None
+
+
+def _check_parent(db: Database, data: dict[str, Any], device_id: int | None = None) -> None:
+    if "parent_id" not in data:
+        return
+    parent = data["parent_id"] or None
+    data["parent_id"] = parent
+    seen = {device_id} if device_id else set()
+    while parent:
+        if parent in seen:
+            raise ValidationError("parent would create a loop")
+        seen.add(parent)
+        row = db.one("SELECT parent_id FROM devices WHERE id = ?", (parent,))
+        if not row:
+            raise ValidationError(f"parent device {parent} does not exist")
+        parent = row["parent_id"]
+
+
+def create_device(db: Database, values: dict[str, Any], add_ping_check: bool = True,
+                  extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Create a device. ``extra`` sets read-only columns such as sysName (used by network scans)."""
     now = time.time()
     data = _clean(values, DEVICE_FIELDS)
     if not data.get("name") or not data.get("hostname"):
         raise ValidationError("name and hostname are required")
+    validate_device(data)
+    _check_collector(db, data)
+    _check_parent(db, data)
     if db.one("SELECT 1 FROM devices WHERE name = ?", (data["name"],)):
         raise ValidationError(f"a device named {data['name']!r} already exists")
     data.update(created_at=now, updated_at=now)
+    data.update(extra or {})
     with db.transaction():
         device_id = db.insert("devices", data)
         if add_ping_check:
             db.insert("checks", {
                 "device_id": device_id, "name": f"{data['name']} ping", "type": "icmp",
                 "target": data["hostname"], "interval": 60, "timeout": 2, "retries": 2,
-                "created_at": now, "updated_at": now,
+                "collector_id": data.get("collector_id"), "created_at": now, "updated_at": now,
             })
         db.log_event("device.added", f"Device {data['name']} ({data['hostname']}) added", device_id=device_id)
     return db.one("SELECT * FROM devices WHERE id = ?", (device_id,))
@@ -74,6 +114,13 @@ def update_device(db: Database, device_id: int, values: dict[str, Any]) -> dict[
     if not current:
         raise KeyError(device_id)
     data = _clean(values, DEVICE_FIELDS)
+    validate_device(data)
+    _check_collector(db, data)
+    _check_parent(db, data, device_id)
+    if "collector_id" in data and data["collector_id"] != current["collector_id"]:
+        # Checks that followed the device's collector move with it.
+        db.execute("UPDATE checks SET collector_id = ? WHERE device_id = ? AND collector_id IS ?",
+                   (data["collector_id"], device_id, current["collector_id"]))
     for key in SECRET_FIELDS:
         # Secrets are write-only: an empty value means "keep the current one".
         if key in data and not data[key]:
@@ -86,12 +133,16 @@ def update_device(db: Database, device_id: int, values: dict[str, Any]) -> dict[
                  "v3_priv_key", "v3_auth_proto", "v3_priv_proto", "v3_context"}
     if any(k in data and data[k] != current[k] for k in snmp_keys):
         data["last_discovered"] = None  # credentials/host changed: rediscover on next poll
+    if "snmp_enabled" in data and int(data["snmp_enabled"]) != int(current["snmp_enabled"]):
+        # A stale SNMP state must not decide availability after SNMP is re-enabled.
+        data.update(snmp_status="unknown", snmp_since=None, snmp_fail_count=0)
     if "hostname" in data and data["hostname"] != current["hostname"]:
         # Keep the auto-created ping check pointing at the device.
         db.execute("UPDATE checks SET target = ? WHERE device_id = ? AND target = ?",
                    (data["hostname"], device_id, current["hostname"]))
     data["updated_at"] = time.time()
     db.update("devices", device_id, data)
+    evaluate_device(db, device_id)
     return db.one("SELECT * FROM devices WHERE id = ?", (device_id,))
 
 
@@ -153,6 +204,11 @@ def validate_check(data: dict[str, Any]) -> None:
         raise ValidationError(f"type must be one of {', '.join(CHECK_TYPES)}")
     if data.get("type") == "tcp" and not data.get("port"):
         raise ValidationError("TCP checks need a port")
+    if data.get("type") == "nagios":
+        opts = loads(data.get("options"), {}) if isinstance(data.get("options"), str) else (data.get("options") or {})
+        cmd = str(opts.get("command") or "")
+        if not cmd or "/" in cmd or "\\" in cmd or cmd.startswith("."):
+            raise ValidationError("Nagios plugin checks need options.command set to a plugin name such as check_disk")
     if "interval" in data and data["interval"] is not None and int(data["interval"]) < 5:
         raise ValidationError("interval must be at least 5 seconds")
 
@@ -164,26 +220,39 @@ def create_check(db: Database, values: dict[str, Any]) -> dict[str, Any]:
         raise ValidationError("type and target are required")
     data.setdefault("name", f"{data['type'].upper()} {data['target']}")
     validate_check(data)
+    _check_collector(db, data)
+    if not data.get("collector_id") and data.get("device_id"):
+        # By default a device's checks run from wherever the device is monitored.
+        data["collector_id"] = db.scalar("SELECT collector_id FROM devices WHERE id = ?", (data["device_id"],))
     data.update(created_at=now, updated_at=now)
     check_id = db.insert("checks", data)
+    if data.get("device_id"):
+        evaluate_device(db, data["device_id"])
     return db.one("SELECT * FROM checks WHERE id = ?", (check_id,))
 
 
 def update_check(db: Database, check_id: int, values: dict[str, Any]) -> dict[str, Any]:
-    if not db.one("SELECT 1 FROM checks WHERE id = ?", (check_id,)):
+    current = db.one("SELECT device_id FROM checks WHERE id = ?", (check_id,))
+    if not current:
         raise KeyError(check_id)
     data = _clean(values, CHECK_FIELDS)
     validate_check(data)
+    _check_collector(db, data)
     data["updated_at"] = time.time()
     db.update("checks", check_id, data)
+    for device_id in {current["device_id"], data.get("device_id")} - {None}:
+        evaluate_device(db, device_id)
     return db.one("SELECT * FROM checks WHERE id = ?", (check_id,))
 
 
 def delete_check(db: Database, check_id: int) -> None:
+    current = db.one("SELECT device_id FROM checks WHERE id = ?", (check_id,))
     with db.transaction():
         db.execute("DELETE FROM heartbeats WHERE check_id = ?", (check_id,))
         db.execute("DELETE FROM alerts WHERE check_id = ?", (check_id,))
         db.execute("DELETE FROM checks WHERE id = ?", (check_id,))
+        if current and current["device_id"]:
+            evaluate_device(db, current["device_id"])
 
 
 # -------------------------------------------------------------------- rules
@@ -267,10 +336,11 @@ def update_channel(db: Database, channel_id: int, values: dict[str, Any]) -> dic
 
 # ------------------------------------------------------------------ seeding
 DEFAULT_RULES = [
-    {"name": "Device unreachable (SNMP)", "kind": "device", "severity": "critical", "for_seconds": 120,
-     "description": "A device stopped answering SNMP requests."},
+    {"name": "Device offline", "kind": "device", "severity": "critical", "for_seconds": 120,
+     "description": "A device is offline according to its availability rule (ping, SNMP and checks combined)."},
     {"name": "Availability check down", "kind": "check", "severity": "critical", "for_seconds": 0,
-     "description": "A ping/TCP/HTTP/DNS/SNMP check has failed its retry budget."},
+     "description": "A ping/TCP/HTTP/DNS/SNMP check has failed its retry budget. Checks that count towards "
+                    "a device that is still online are skipped (the device shows as degraded instead)."},
     {"name": "High CPU", "kind": "metric", "severity": "warning", "metric_key": "cpu.avg", "operator": ">",
      "threshold": 90, "for_seconds": 600, "description": "Average CPU above 90% for 10 minutes."},
     {"name": "High memory usage", "kind": "metric", "severity": "warning", "metric_key": "mem.used_pct",
@@ -305,11 +375,14 @@ def export_config(db: Database) -> dict[str, Any]:
     devices = db.query("SELECT * FROM devices ORDER BY id")
     device_names = {d["id"]: d["name"] for d in devices}
     checks = db.query("SELECT * FROM checks ORDER BY id")
+    collector_names = {p["id"]: p["name"] for p in db.query("SELECT id, name FROM collectors")}
     return {
         "version": 1,
         "exported_at": time.time(),
         "devices": [
-            {**{k: d[k] for k in DEVICE_FIELDS}, "tags": loads(d["tags"], []),
+            {**{k: d[k] for k in DEVICE_FIELDS if k not in ("collector_id", "parent_id")},
+             "tags": loads(d["tags"], []), "collector": collector_names.get(d["collector_id"]),
+             "parent": device_names.get(d["parent_id"]),
              "custom_metrics": [
                  {k: m[k] for k in ("key", "instance", "label", "kind", "oid", "oid2", "unit", "scale", "counter_bits")}
                  for m in db.query("SELECT * FROM metrics WHERE device_id = ? AND custom = 1", (d["id"],))
@@ -317,7 +390,8 @@ def export_config(db: Database) -> dict[str, Any]:
             for d in devices
         ],
         "checks": [
-            {**{k: c[k] for k in CHECK_FIELDS if k != "device_id"}, "options": loads(c["options"], {}),
+            {**{k: c[k] for k in CHECK_FIELDS if k not in ("device_id", "collector_id")},
+             "options": loads(c["options"], {}), "collector": collector_names.get(c["collector_id"]),
              "device": device_names.get(c["device_id"])}
             for c in checks
         ],
@@ -332,20 +406,28 @@ def export_config(db: Database) -> dict[str, Any]:
 def import_config(db: Database, data: dict[str, Any]) -> dict[str, int]:
     """Merge an exported configuration. Existing objects with the same name are skipped."""
     counts = {"devices": 0, "checks": 0, "channels": 0, "rules": 0}
+    collectors = {p["name"]: p["id"] for p in db.query("SELECT id, name FROM collectors")}
     with db.transaction():
         for d in data.get("devices", []):
             if db.one("SELECT 1 FROM devices WHERE name = ?", (d["name"],)):
                 continue
-            device = create_device(db, d, add_ping_check=False)
+            values = {k: v for k, v in d.items() if k != "parent_id"}
+            device = create_device(db, {**values, "collector_id": collectors.get(d.get("collector"))},
+                                   add_ping_check=False)
             for m in d.get("custom_metrics", []):
                 add_custom_metric(db, device["id"], m)
             counts["devices"] += 1
         names = {r["name"]: r["id"] for r in db.query("SELECT id, name FROM devices")}
+        for d in data.get("devices", []):
+            if d.get("parent") in names and d["name"] in names:
+                db.execute("UPDATE devices SET parent_id = ? WHERE id = ? AND parent_id IS NULL",
+                           (names[d["parent"]], names[d["name"]]))
         existing_checks = {(r["name"], r["target"]) for r in db.query("SELECT name, target FROM checks")}
         for c in data.get("checks", []):
             if (c["name"], c["target"]) in existing_checks:
                 continue
-            create_check(db, {**c, "device_id": names.get(c.get("device"))})
+            create_check(db, {**c, "device_id": names.get(c.get("device")),
+                              "collector_id": collectors.get(c.get("collector"))})
             counts["checks"] += 1
         for ch in data.get("channels", []):
             if db.one("SELECT 1 FROM channels WHERE name = ?", (ch["name"],)):
@@ -367,6 +449,7 @@ def overview(db: Database) -> dict[str, Any]:
         "devices": {
             "total": q("SELECT COUNT(*) FROM devices"),
             "up": q("SELECT COUNT(*) FROM devices WHERE enabled = 1 AND status = 'up'"),
+            "degraded": q("SELECT COUNT(*) FROM devices WHERE enabled = 1 AND status = 'up' AND degraded = 1"),
             "down": q("SELECT COUNT(*) FROM devices WHERE enabled = 1 AND status = 'down'"),
             "unknown": q("SELECT COUNT(*) FROM devices WHERE enabled = 1 AND status = 'unknown'"),
             "disabled": q("SELECT COUNT(*) FROM devices WHERE enabled = 0"),

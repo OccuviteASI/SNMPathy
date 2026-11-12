@@ -1,0 +1,35 @@
+<script>
+(() => {
+  const hints = {
+    windows: "Run in an elevated PowerShell on the site machine. It downloads the collector from this server, saves the token in %ProgramData%\\SNMPathy Collector\\collector.yaml and registers a startup task that restarts on failure.",
+    linux: "Run on the site machine. It downloads the collector from this server (or installs the Python package), writes /etc/snmpathy/collector.yaml and enables a systemd service.",
+    macos: "Run in Terminal on the site Mac. It installs a launchd daemon that starts at boot.",
+    docker: "Host networking lets the collector reach the site's devices directly. Build the image from this repository first (docker build -t snmpathy .).",
+    manual: "Run the downloaded executable (or the snmpathy command) with these options. Add --insecure for a self-signed certificate, or --ca-file for a private CA.",
+  };
+  function copyButton(box) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "btn sm copy"; b.textContent = "Copy";
+    b.addEventListener("click", async () => {
+      const text = box.dataset.text;
+      try { await navigator.clipboard.writeText(text); SP.toast("Copied"); }
+      catch (e) { const r = document.createRange(); r.selectNodeContents(box); const s = getSelection(); s.removeAllRanges(); s.addRange(r); SP.toast("Press Ctrl+C to copy"); }
+    });
+    box.appendChild(b);
+  }
+  function setBox(box, text) { box.textContent = text; box.dataset.text = text; copyButton(box); }
+  SP.showCollectorToken = function (r, doneHref) {
+    const modal = SP.$("#token-modal");
+    setBox(SP.$("#tok-token"), r.token);
+    const show = (os) => {
+      SP.$$("#tok-tabs button").forEach((b) => b.classList.toggle("on", b.dataset.os === os));
+      setBox(SP.$("#tok-cmd"), r.install[os]);
+      SP.$("#tok-hint").textContent = hints[os];
+    };
+    SP.$$("#tok-tabs button").forEach((b) => (b.onclick = () => show(b.dataset.os)));
+    show(/Mac/.test(navigator.platform) ? "macos" : /Linux/.test(navigator.platform) ? "linux" : "windows");
+    SP.$("#tok-done").href = doneHref || location.pathname;
+    SP.openModal(modal);
+  };
+})();
+</script>

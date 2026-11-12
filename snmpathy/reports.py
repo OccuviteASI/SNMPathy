@@ -120,6 +120,49 @@ def availability(db: Database, check: dict[str, Any], start: float, end: float, 
     }
 
 
+def device_availability(db: Database, device: dict[str, Any], start: float, end: float,
+                        now: float | None = None) -> dict[str, Any]:
+    """Availability of a device as decided by its availability rule (all sources combined)."""
+    now = now or time.time()
+    end = min(end, now)
+    began = device.get("avail_started")
+    earliest = db.scalar("SELECT MIN(started_at) FROM device_outages WHERE device_id = ?", (device["id"],))
+    candidates = [x for x in (began, earliest) if x is not None]
+    if not candidates:
+        return _empty(start, end)
+    effective_start = max(start, min(candidates))
+    if effective_start >= end:
+        return _empty(start, end)
+    rows = db.query(
+        "SELECT starts_at, ends_at FROM maintenance WHERE ends_at > ? AND starts_at < ? AND "
+        "((device_id IS NULL AND check_id IS NULL) OR device_id = ?)",
+        (effective_start, end, device["id"]),
+    )
+    maint = merge(clip([(r["starts_at"], r["ends_at"]) for r in rows], effective_start, end))
+    outages = db.query(
+        "SELECT * FROM device_outages WHERE device_id = ? AND started_at < ? AND COALESCE(ended_at, ?) > ? "
+        "ORDER BY started_at", (device["id"], end, now, effective_start))
+    for o in outages:
+        o["effective_end"] = o["ended_at"] if o["ended_at"] is not None else now
+        o["duration"] = o["effective_end"] - o["started_at"]
+    down = subtract(clip([(o["started_at"], o["effective_end"]) for o in outages], effective_start, end), maint)
+    monitored = (end - effective_start) - total(maint)
+    downtime = total(down)
+    closed = [o for o in outages if o["ended_at"] is not None]
+    result = _empty(start, end)
+    result.update({
+        "monitored_seconds": monitored,
+        "downtime_seconds": downtime,
+        "maintenance_seconds": total(maint),
+        "uptime_pct": 100.0 if monitored <= 0 else max(0.0, 100.0 * (1 - downtime / monitored)),
+        "outages": len(outages),
+        "longest_outage": max((o["duration"] for o in outages), default=0.0),
+        "mttr": (sum(o["duration"] for o in closed) / len(closed)) if closed else None,
+        "mtbf": ((monitored - downtime) / len(outages)) if outages else None,
+    })
+    return result
+
+
 def _empty(start: float, end: float) -> dict[str, Any]:
     return {
         "start": start, "end": end, "monitored_seconds": 0, "downtime_seconds": 0, "maintenance_seconds": 0,

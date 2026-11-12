@@ -1,0 +1,15 @@
+<div class="modal-back hidden" id="token-modal" data-static="1">
+  <div class="modal" style="max-width:820px">
+    <div class="card-head"><h2>Install the collector</h2></div>
+    <div class="modal-body">
+      <div class="callout mb small"><strong>Copy the token now</strong> - it is shown only once. If it is lost, issue a new one from the collector's page.</div>
+      <div class="field mb"><span>Token</span><div class="codebox" id="tok-token"></div></div>
+      <div class="seg-tabs" id="tok-tabs">
+        <button type="button" data-os="windows" class="on">Windows</button><button type="button" data-os="linux">Linux</button><button type="button" data-os="macos">macOS</button><button type="button" data-os="docker">Docker</button><button type="button" data-os="manual">Manual</button>
+      </div>
+      <div class="codebox" id="tok-cmd"></div>
+      <p class="small muted" id="tok-hint"></p>
+    </div>
+    <div class="modal-foot"><a class="btn primary" id="tok-done" href="/collectors">Done</a></div>
+  </div>
+</div>

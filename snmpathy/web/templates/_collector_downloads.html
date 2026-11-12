@@ -1,0 +1,14 @@
+{% from "_macros.html" import icon %}
+<table class="table compact">
+  <thead><tr><th>File</th><th>For</th><th>Size</th><th>Source</th><th></th></tr></thead>
+  <tbody>
+  {% for d in downloads %}
+    <tr><td class="mono">{{ d.name }}</td><td>{{ {'windows': 'Windows', 'linux': 'Linux', 'macos': 'macOS', 'python': 'Any OS with Python 3.10+'}.get(d.platform, d.platform or '?') }}</td>
+      <td class="num">{{ d.size|bytes if d.size else '-' }}</td><td class="small muted">{{ d.source }}</td>
+      <td><a class="btn sm" href="/collector/download/{{ d.name|urlencode }}">{{ icon('download') }} Download</a></td></tr>
+  {% else %}
+    <tr><td colspan="5" class="muted">No collector executables available.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="small muted" style="margin-bottom:0">The install commands download the right file for the site's OS automatically. To offer prebuilt executables for every OS, put them in <code>{{ downloads_dir }}</code> (for example <code>SNMPathy-windows.exe</code>, <code>SNMPathy-linux</code>, <code>SNMPathy-macos</code> from <code>scripts/build_executable</code> or the CI artifacts); a server running from the executable always offers itself for its own OS. Without one, installers fall back to the Python package above.</p>

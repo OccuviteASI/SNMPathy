@@ -3,6 +3,9 @@
 #   docker compose up -d                      # SNMPathy only
 #   docker compose --profile grafana up -d    # plus Grafana with dashboards provisioned
 #
+# A remote site runs only the collector (see Collectors in the web UI for the token):
+#   docker compose --profile collector up -d  # with SNMPATHY_COLLECTOR_SERVER / _TOKEN in .env
+#
 # Optional settings go in a .env file next to this one, e.g.
 #   SNMPATHY_API_TOKEN=change-me
 #   SNMPATHY_PUBLIC_URL=https://monitor.example.com
@@ -17,6 +20,11 @@ services:
       - "8080:8080"          # web UI, API, Grafana data source
       - "514:5514/udp"       # syslog
       - "514:5514/tcp"
+      - "12201:12201/udp"    # GELF (Graylog senders, Docker gelf log driver, NXLog xm_gelf)
+      - "5544:5544/tcp"      # JSON lines (NXLog Windows Event Log, Fluent Bit, Vector)
+      - "2055:2055/udp"      # NetFlow v5/v9
+      - "4739:4739/udp"      # IPFIX
+      - "6343:6343/udp"      # sFlow
     volumes:
       - snmpathy-data:/data
     environment:
@@ -31,6 +39,23 @@ services:
     # Lets the unprivileged container user send ICMP echo without raw sockets.
     sysctls:
       net.ipv4.ping_group_range: "0 2147483647"
+    cap_add:
+      - NET_RAW
+
+  collector:
+    profiles: ["collector"]
+    image: snmpathy:latest
+    build: .
+    container_name: snmpathy-collector
+    restart: unless-stopped
+    # Host networking so the collector reaches the site's devices directly.
+    network_mode: host
+    command: ["snmpathy", "collector", "--state-dir", "/data"]
+    volumes:
+      - snmpathy-collector:/data
+    environment:
+      SNMPATHY_COLLECTOR_SERVER: ${SNMPATHY_COLLECTOR_SERVER:-}
+      SNMPATHY_COLLECTOR_TOKEN: ${SNMPATHY_COLLECTOR_TOKEN:-}
     cap_add:
       - NET_RAW
 
@@ -53,4 +78,5 @@ services:
 
 volumes:
   snmpathy-data:
+  snmpathy-collector:
   grafana-data:

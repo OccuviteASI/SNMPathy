@@ -3,6 +3,7 @@
 {% block title %}Devices{% endblock %}
 {% block actions %}
 <input type="search" placeholder="Filter devices…" data-filter="#device-table" value="{{ q }}" aria-label="Filter devices">
+<a class="btn" href="/scans">{{ icon('globe') }} Scan network</a>
 <a class="btn primary" href="/devices/new">{{ icon('plus') }} Add device</a>
 {% endblock %}
 {% block content %}
@@ -13,10 +14,16 @@
   {% for t in tags %}<a class="tag" href="/devices?tag={{ t|urlencode }}" style="{{ 'background:var(--accent-soft);color:var(--accent)' if tag == t }}">{{ t }}</a>{% endfor %}
 </div>
 {% endif %}
+<div class="row mb hidden" id="bulk-bar">
+  <strong id="bulk-count"></strong>
+  <button class="btn" data-action="modal" data-target="#bulk-modal">Edit SNMP / settings…</button>
+  <button class="btn danger" id="bulk-delete">Delete selected</button>
+</div>
 <div class="card">
   <div class="card-body flush table-wrap">
     <table class="table" id="device-table">
       <thead><tr>
+        <th style="width:28px"><input type="checkbox" id="bulk-all" aria-label="Select all devices"></th>
         <th class="sortable">Status</th><th class="sortable">Device</th><th class="sortable">Vendor / platform</th>
         <th class="sortable">Location</th><th class="sortable">Ports</th><th class="sortable">CPU</th><th class="sortable">Memory</th>
         <th class="sortable">Uptime</th><th class="sortable">Last polled</th>
@@ -25,7 +32,8 @@
       {% for d in devices %}
         {% set c = counts.get(d.id) %}
         <tr>
-          <td data-sort="{{ {'down': 0, 'unknown': 1, 'up': 2}.get(d.status, 3) }}">{% if not d.enabled %}{{ status('paused', 'disabled') }}{% else %}{{ status(d.status) }}{% endif %}</td>
+          <td><input type="checkbox" class="bulk-pick" value="{{ d.id }}" aria-label="Select {{ d.name }}"></td>
+          <td data-sort="{{ {'down': 0, 'unreachable': 1, 'unknown': 2, 'up': 3}.get(d.status, 4) - (0.5 if d.degraded else 0) }}" title="{{ d.status_reason }}">{% if not d.enabled %}{{ status('paused', 'disabled') }}{% else %}{{ status(d.status) }}{% if d.degraded %}<div>{{ status('warning', 'degraded') }}</div>{% endif %}{% endif %}</td>
           <td><a href="/devices/{{ d.id }}"><strong>{{ d.name }}</strong></a><div class="small muted">{{ d.hostname }}{% for t in d.tags %} <span class="tag">{{ t }}</span>{% endfor %}</div></td>
           <td><div>{{ d.vendor or '-' }}</div><div class="small muted" style="max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ d.sys_descr }}">{{ d.sys_descr }}</div></td>
           <td>{{ d.location or d.sys_location or '-' }}</td>
@@ -36,10 +44,86 @@
           <td class="nowrap" data-sort="{{ d.last_polled or 0 }}">{% if d.snmp_enabled %}{{ d.last_polled|ts('ago')|safe }}{% if d.last_poll_ms %}<div class="small muted">{{ '%.0f'|format(d.last_poll_ms) }} ms</div>{% endif %}{% else %}<span class="muted">SNMP off</span>{% endif %}</td>
         </tr>
       {% else %}
-        <tr><td colspan="9"><div class="empty">No devices yet. <a href="/devices/new">Add your first device</a>, or run <code>snmpathy demo</code> to explore with simulated ones.</div></td></tr>
+        <tr><td colspan="10"><div class="empty">No devices yet. <a href="/devices/new">Add your first device</a>, or run <code>snmpathy demo</code> to explore with simulated ones.</div></td></tr>
       {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
+<style>#bulk-form .field { display: flex; flex-direction: column; align-items: stretch; gap: 6px; } #bulk-form .field > label.check { margin: 0; }</style>
+<div class="modal-back hidden" id="bulk-modal">
+  <div class="modal">
+    <div class="card-head"><h2>Edit selected devices</h2><button class="btn ghost" data-action="close-modal">&times;</button></div>
+    <form id="bulk-form">
+      <div class="modal-body">
+        <p class="small muted" style="margin-top:0">Only the fields you tick are changed. Changing SNMP credentials triggers a rediscovery.</p>
+        <div class="form-grid" id="bulk-fields">
+          {% macro bf(name, label, input) %}<div class="field"><label class="check"><input type="checkbox" class="bulk-use" data-field="{{ name }}"> {{ label }}</label>{{ input|safe }}</div>{% endmacro %}
+          {{ bf('snmp_enabled', 'SNMP polling', '<select name="snmp_enabled" data-type="nullable"><option value="1">enabled</option><option value="0">disabled</option></select>') }}
+          {{ bf('snmp_version', 'SNMP version', '<select name="snmp_version"><option value="2c">v2c</option><option value="3">v3</option><option value="1">v1</option></select>') }}
+          {{ bf('snmp_community', 'Community', '<input name="snmp_community" autocomplete="off">') }}
+          {{ bf('snmp_port', 'SNMP port', '<input name="snmp_port" type="number" data-type="int" value="161">') }}
+          {{ bf('v3_user', 'v3 user', '<input name="v3_user" autocomplete="off">') }}
+          {{ bf('v3_auth_proto', 'v3 auth protocol', '<select name="v3_auth_proto"><option>sha</option><option>sha256</option><option>sha384</option><option>sha512</option><option>sha224</option><option>md5</option><option>none</option></select>') }}
+          {{ bf('v3_auth_key', 'v3 auth passphrase', '<input name="v3_auth_key" type="password" autocomplete="new-password">') }}
+          {{ bf('v3_priv_proto', 'v3 privacy protocol', '<select name="v3_priv_proto"><option>aes</option><option>aes192</option><option>aes256</option><option>des</option><option>3des</option><option>none</option></select>') }}
+          {{ bf('v3_priv_key', 'v3 privacy passphrase', '<input name="v3_priv_key" type="password" autocomplete="new-password">') }}
+          {{ bf('poll_interval', 'Poll interval (s)', '<input name="poll_interval" type="number" data-type="int" value="300" min="10">') }}
+          {{ bf('location', 'Location', '<input name="location">') }}
+          {{ bf('tags', 'Tags (replace)', '<input name="tags" data-type="list">') }}
+        </div>
+        <div class="form-grid">
+          <div class="field"><label class="check"><input type="checkbox" class="bulk-use" data-field="avail_mode"> Online rule</label><select name="avail_mode">{% for k, l in AVAIL_MODES.items() %}<option value="{{ k }}">{{ l }}</option>{% endfor %}</select></div>
+          <div class="field"><label class="check"><input type="checkbox" class="bulk-use" data-field="collector_id"> Monitored from</label><select name="collector_id" data-type="nullable"><option value="">This server</option>{% for col in collectors %}<option value="{{ col.id }}">Collector: {{ col.name }}</option>{% endfor %}</select></div>
+        </div>
+      </div>
+      <div class="modal-foot"><button type="button" class="btn" data-action="close-modal">Cancel</button><button class="btn primary" type="submit">Apply to selected</button></div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const picks = () => SP.$$(".bulk-pick").filter((c) => c.checked && c.closest("tr").style.display !== "none");
+  const sync = () => {
+    const n = picks().length;
+    SP.$("#bulk-bar").classList.toggle("hidden", !n);
+    SP.$("#bulk-count").textContent = n + " selected";
+  };
+  document.addEventListener("change", (e) => { if (e.target.classList.contains("bulk-pick")) sync(); });
+  SP.$("#bulk-all").addEventListener("change", (e) => {
+    SP.$$(".bulk-pick").forEach((c) => { if (c.closest("tr").style.display !== "none") c.checked = e.target.checked; });
+    sync();
+  });
+  const form = SP.$("#bulk-form");
+  const syncUse = () => SP.$$(".bulk-use", form).forEach((u) => {
+    const input = u.closest(".field").querySelector("[name]");
+    input.disabled = !u.checked;
+  });
+  form.addEventListener("change", (e) => { if (e.target.classList.contains("bulk-use")) syncUse(); });
+  syncUse();
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const values = SP.formData(form);
+    if (values.snmp_enabled != null) values.snmp_enabled = values.snmp_enabled === 1 || values.snmp_enabled === "1";
+    if (values.collector_id === "") values.collector_id = null;
+    if (!Object.keys(values).length) return SP.toast("Tick at least one field to change", "error");
+    try {
+      const r = await SP.api("POST", "/api/devices/bulk", { ids: picks().map((c) => +c.value), values });
+      SP.toast(`Updated ${r.updated} devices` + (r.errors.length ? `, ${r.errors.length} failed: ${r.errors[0].error}` : ""), r.errors.length ? "error" : undefined);
+      setTimeout(() => location.reload(), 700);
+    } catch (err) { SP.toast(err.message, "error"); }
+  });
+  SP.$("#bulk-delete").addEventListener("click", async () => {
+    const ids = picks().map((c) => +c.value);
+    if (!confirm(`Delete ${ids.length} devices and all of their history?`)) return;
+    try {
+      const r = await SP.api("POST", "/api/devices/bulk", { ids, action: "delete" });
+      SP.toast(`Deleted ${r.updated} devices`);
+      setTimeout(() => location.reload(), 600);
+    } catch (err) { SP.toast(err.message, "error"); }
+  });
+});
+</script>
 {% endblock %}

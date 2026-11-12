@@ -7,12 +7,13 @@ import socket
 import time
 from typing import Any, Awaitable, Callable
 
+from ..availability import evaluate_device
 from ..db import Database, loads
 from ..snmp.client import SnmpCredentials
 from . import probes
 from .probes import ProbeResult
 
-CHECK_TYPES = ("icmp", "tcp", "http", "snmp", "dns")
+CHECK_TYPES = ("icmp", "tcp", "http", "snmp", "dns", "nagios", "passive")
 
 ProbeFunc = Callable[[dict[str, Any], dict[str, Any] | None], Awaitable[ProbeResult]]
 
@@ -35,6 +36,15 @@ async def run_probe(check: dict[str, Any], device: dict[str, Any] | None = None)
                 community=options.get("community", "public"), port=int(check.get("port") or 161)
             )
             return await probes.snmp_check(target, creds, timeout)
+        if ctype == "nagios":
+            macros = {"HOSTADDRESS": target, "HOSTNAME": (device or {}).get("name") or target}
+            if check.get("port"):
+                macros["PORT"] = str(check["port"])
+            return await probes.nagios_plugin(options.get("command", ""), options.get("args", ""),
+                                              timeout, macros=macros)
+        if ctype == "passive":
+            # Passive checks are fed by submitted results; being "run" means the result went stale.
+            return ProbeResult(False, None, "no passive result received within the freshness interval")
         if ctype == "dns":
             start = time.perf_counter()
             loop = asyncio.get_running_loop()
@@ -75,9 +85,11 @@ def record_result(db: Database, check: dict[str, Any], result: ProbeResult, now:
         "last_checked": now,
         "last_latency_ms": result.latency_ms,
         "last_message": (result.message or "")[:500],
+        "warning": int(bool(result.ok and result.warning)),
         "updated_at": now,
     }
     transition = None
+    check = dict(check)
     with db.transaction():
         db.execute(
             "INSERT OR REPLACE INTO heartbeats (check_id, ts, ok, latency_ms, message) VALUES (?, ?, ?, ?, ?)",
@@ -108,16 +120,45 @@ def record_result(db: Database, check: dict[str, Any], result: ProbeResult, now:
                 })
                 transition = "down"
         db.update("checks", check["id"], changes)
+        if changes["warning"] and not check.get("warning"):
+            db.log_event("check.warning", f"{check['name']} is WARNING: {result.message}", "warning",
+                         device_id=check.get("device_id"), check_id=check["id"], ts=now)
+        if result.perfdata and check.get("device_id"):
+            store_perfdata(db, check, result.perfdata, now)
         if transition == "down":
             db.log_event("check.down", f"{check['name']} is DOWN: {result.message}", "error",
                          device_id=check.get("device_id"), check_id=check["id"], ts=now)
         elif transition == "up":
             db.log_event("check.up", f"{check['name']} is UP again ({result.message})", "info",
                          device_id=check.get("device_id"), check_id=check["id"], ts=now)
-    check = dict(check)
+        if transition and check.get("device_id"):
+            check["device_transition"] = evaluate_device(db, check["device_id"], now)
     check.update(changes)
     check["transition"] = transition
     return check
+
+
+def store_perfdata(db: Database, check: dict[str, Any], perfdata: list[dict[str, Any]], now: float) -> None:
+    """Keep Nagios performance data as metrics on the check's device so it can be graphed."""
+    import re
+
+    for p in perfdata:
+        label = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(p.get("label") or "value")).strip("_")[:60] or "value"
+        key = f"perf.{label}"
+        instance = f"c{check['id']}"
+        row = db.one("SELECT id FROM metrics WHERE device_id = ? AND key = ? AND instance = ?",
+                     (check["device_id"], key, instance))
+        if row:
+            metric_id = row["id"]
+        else:
+            metric_id = db.insert("metrics", {
+                "device_id": check["device_id"], "key": key, "instance": instance,
+                "label": f"{check['name']}: {p.get('label')}"[:200], "kind": "derived", "unit": p.get("unit") or "",
+                "custom": 1, "enabled": 1,
+            })
+        value = float(p["value"])
+        db.execute("INSERT OR REPLACE INTO samples (metric_id, ts, value) VALUES (?, ?, ?)", (metric_id, int(now), value))
+        db.execute("UPDATE metrics SET last_value = ?, last_ts = ? WHERE id = ?", (value, now, metric_id))
 
 
 async def execute_check(db: Database, check: dict[str, Any], probe: ProbeFunc | None = None) -> dict[str, Any]:

@@ -3,14 +3,21 @@
 **Self-hosted network monitoring: SNMP polling, syslog ingest, uptime checks, alerting,
 Grafana-style dashboards and reporting in one small Python service.**
 
-SNMPathy covers the everyday jobs of tools like Zabbix, Observium, PRTG, Uptime Robot
+SNMPathy covers the everyday jobs of tools like Zabbix, Observium, PRTG, Uptime Robot,
+Auvik, the Nagios family (distributed monitoring, Fusion, Log Server, Network Analyzer)
 and a lightweight ELK stack:
 
 | Area | What you get |
 |---|---|
 | **SNMP polling** (Observium / PRTG style) | v1, v2c and v3 (auth + priv). Auto-discovery of system info, vendor, every interface (64-bit counters when available), CPU, memory, storage and load averages. Custom OIDs per device. Traffic, utilisation, errors and discards per port. Reboot and port up/down detection. |
 | **Syslog** (ELK style) | UDP and TCP listeners (RFC 5424, RFC 3164, RFC 6587 framing, Cisco / Juniper / FortiGate variants). Full-text search, filters by host / app / severity / facility / time, volume histogram, top-N facets and live tail. |
-| **Uptime checks** (Uptime Robot style) | ICMP ping, TCP port, HTTP(S) (status code, keyword, TLS certificate expiry), DNS and SNMP checks with retry-before-down, outage history, 90-day uptime bars and a public status page. |
+| **Uptime checks** (Uptime Robot / Nagios style) | ICMP ping, TCP port, HTTP(S) (status code, keyword, TLS certificate expiry), DNS, SNMP, **Nagios plugins** (exit codes, perfdata graphed) and **passive checks** (results pushed in, NRDP-style, with freshness checking) with retry-before-down, outage history, 90-day uptime bars and a public status page. |
+| **Network discovery** | Scan CIDR blocks and ranges with ping, TCP ports and SNMP (several communities / SNMPv3 users), see what answers, and add devices automatically or with one click. Scans can repeat on a schedule and run from a remote site. |
+| **Online / offline rules** (Nagios style) | A device is judged on every method that watches it (SNMP polling, ping, TCP, HTTP, plugins): online if *any* responds (default), only if *all* respond, or if *N* respond. One failing method shows the device as *degraded*, not down. Parent devices make downstream devices *unreachable* instead of alerting for each. |
+| **Remote collectors** (Nagios distributed / PRTG remote probes / Auvik collectors) | Install a collector at each site with a one-line command (downloaded from your server). It connects out over HTTPS, polls and checks the site's devices locally, buffers results through WAN outages and runs network scans there. |
+| **Network map** (Auvik style) | Topology drawn from LLDP / CDP neighbours, grouped by site, with live device status and link utilisation, unmanaged neighbours, drag-and-save layouts and manual links. |
+| **Network Analyzer** (Nagios Network Analyzer style) | Built-in NetFlow v5/v9, IPFIX and sFlow collector: bandwidth by talker, application, protocol or exporter; top talkers, destinations, applications, conversations; per-host drill-down; bandwidth alerts and a traffic report, next to SNMP interface bandwidth. |
+| **Fusion** (Nagios Fusion style) | One tactical dashboard across several SNMPathy servers: totals, per-server health, merged problems and alerts, cross-server top metrics. |
 | **Alerting** (Zabbix style) | Threshold rules on any metric (with wildcards), device-unreachable, check-down and syslog pattern rules. Pending → firing → resolved lifecycle, "for" durations, acknowledgements, maintenance windows. Notifications via email, Slack / Mattermost, Microsoft Teams, Discord, PagerDuty and generic webhooks. |
 | **Dashboards** (Grafana style) | Built-in, editable dashboards with 13 panel types, a time-range picker, auto-refresh, light / dark themes, a kiosk / TV mode and a JSON model editor. Five dashboards ship ready to use. |
 | **Grafana integration** | A Grafana JSON data-source endpoint at `/grafana`, plus five pre-built Grafana dashboards that are provisioned automatically by the Docker Compose stack. |
@@ -146,6 +153,149 @@ detection (40+ vendors), ifTable / ifXTable, HOST-RESOURCES CPU and storage, and
 load and memory. **Custom metrics:** on a device's *Metrics* tab, add any numeric OID as
 a gauge, counter (converted to a rate) or ratio.
 
+### Change SNMP settings later
+
+Open the device and click **Edit** (or **Change SNMP settings** next to the SNMP line on
+the device page). The **Community string** field sits next to **Version** for v1 / v2c;
+with v3 it is replaced by the user, auth and privacy fields. Saving new credentials
+triggers a fresh discovery. To change many devices at once (for example after rotating a
+community), tick them in the **Devices** list and use **Edit SNMP / settings…**: only the
+fields you tick are changed.
+
+### Scan the network and add devices automatically
+
+**Devices → Scan network → New scan**. Enter targets such as `10.0.0.0/24, 10.0.1.1-50,
+192.168.5.10` (plus optional exclusions), the SNMP communities and/or SNMPv3 user to try,
+and optionally TCP ports (e.g. `22, 443, 3389`) so hosts that block ping are still found.
+Each responding host is listed with its ping time, open ports, SNMP version, sysName,
+vendor and description; hosts you already monitor are marked.
+
+* **Add automatically**: *Hosts that answer SNMP* or *Every host that answers*. New
+  devices get the credentials that worked, the scan's tags, location and online rule,
+  a ping check if they answered ping (or a TCP check if only a port answered).
+* **Pick by hand**: tick results and click **Add selected as devices**.
+* **Repeat**: hourly, every 6 hours, daily or weekly, so new devices appear on their own.
+* **Run from**: this server, or a remote collector to scan another site's network.
+
+From the command line (prints results; `--add snmp|alive` also adds them to the database):
+
+```bash
+snmpathy scan 10.0.0.0/24 -c public -c s3cret --tcp 22,443 --add snmp --tag lab
+```
+
+### Online / offline rules: one failing method is not an outage
+
+A device is watched by SNMP polling and by every check linked to it (ping, TCP, HTTP,
+plugins). **Edit device → Online / offline rule** decides how they combine:
+
+| Rule | Online when |
+|---|---|
+| Any method responds (default) | at least one of SNMP, ping, … answers. A device that pings but whose SNMP agent hangs (or that blocks ICMP but answers SNMP) stays **online** and is flagged **degraded** |
+| Every method responds | all of them answer |
+| At least N methods respond | N or more answer |
+| SNMP only / checks only | just that kind of method decides |
+
+Also per device: *SNMP failures before SNMP counts as down*. Per check: *Counts toward the
+linked device's online/offline status* (untick for, say, a web check on a server whose
+website being down is not the server being down).
+
+The device page shows each method with its state, the overall verdict and the 30-day
+device uptime; uptime and health reports include **availability by device**. The
+**Device offline** alert fires only when the rule says the device is offline, and the
+**Availability check down** rule skips checks on devices that are still online (untick
+*Ignore failing checks on devices that are still online* on the rule to be told anyway).
+
+**Parents (Nagios-style unreachable):** set a device's **Parent device** (its upstream
+switch or router, or let **Network map → Set parents…** fill them in from the topology).
+When the parent is down, its children are shown as **unreachable** rather than down and
+do not raise their own alerts. Devices behind an offline collector are unreachable too.
+
+### Remote sites: collectors
+
+A **collector** is SNMPathy running at another site (Windows, Linux, macOS or Docker).
+It connects *out* to the main server over HTTP(S), so the site needs no inbound firewall
+rules or VPN, then:
+
+* pulls the devices and checks assigned to it, polls SNMP and runs checks on their own
+  schedules (like Nagios distributed monitoring with passive results),
+* keeps results on disk while the main server is unreachable and replays them with their
+  original timestamps, so graphs and uptime have no gaps,
+* runs discovery, *check now* and network scans for the main server.
+
+**Install one:** **Collectors → Add collector** shows a token (once) and copy-paste install
+commands. Each downloads the collector **from your SNMPathy server** and sets it up as a
+service:
+
+```powershell
+# Windows (elevated PowerShell): scheduled task at startup, restarts on failure
+& ([scriptblock]::Create((iwr -UseBasicParsing 'https://nms.example.com/collector/install.ps1').Content)) -Token 'col_...'
+```
+
+```bash
+# Linux (systemd) or macOS (launchd)
+curl -fsSL https://nms.example.com/collector/install.sh | sudo bash -s -- --token col_...
+# Docker
+docker run -d --name snmpathy-collector --restart unless-stopped --network host \
+  -e SNMPATHY_COLLECTOR_SERVER=https://nms.example.com -e SNMPATHY_COLLECTOR_TOKEN=col_... \
+  snmpathy collector --state-dir /data
+# Anything else
+snmpathy collector --server https://nms.example.com --token col_...
+```
+
+The **Downloads** list on the Collectors page serves the files directly from the main host
+at `/collector/download/…`. A server started from the standalone executable offers itself
+for its own OS; put the executables for other platforms (from `scripts/build_executable`
+or the CI artifacts, named e.g. `SNMPathy-windows.exe`, `SNMPathy-linux`, `SNMPathy-macos`)
+in the `downloads` folder next to the database (or set `downloads_dir`). Without a
+prebuilt executable the installers fall back to the Python package the server also
+serves (`snmpathy-<version>.tar.gz`, needs Python 3.10+ at the site).
+
+Then set **Monitored from** on devices (or run a scan from the collector). Checks follow
+their device's collector unless you choose otherwise. A collector that stops reporting
+for 90 s (`collector_offline_after`) is marked offline and an event is logged; its devices
+become unreachable until it returns. Use HTTPS (a reverse proxy) when collectors cross
+the internet: the token and SNMP credentials travel over that connection. `--insecure`
+and `--ca-file` cover self-signed and private-CA certificates.
+
+### Network map
+
+**Network map** draws devices and the links between them from LLDP and CDP neighbour
+tables (collected during SNMP discovery; enable LLDP/CDP on switches and routers).
+Devices are grouped by site: the collector's site, or the first part of the location
+(`HQ / MDF rack A1` belongs to `HQ`). Node rings show status (green up, amber degraded or
+unreachable, red down); links are coloured by utilisation from SNMP counters and drawn
+thicker for faster links. Neighbours that are not monitored appear dashed, ready to add.
+Drag nodes and **Save layout**, filter by site or tag, search, toggle port labels, click a
+node or link for details, **Add link** for connections LLDP cannot see (WAN circuits,
+unmanaged switches), and **Set parents…** to derive parent devices from the topology.
+
+### Network Analyzer (NetFlow / IPFIX / sFlow)
+
+Point flow exporters at the SNMPathy host: **NetFlow v5/v9 → UDP 2055**, **IPFIX → UDP 4739**,
+**sFlow → UDP 6343** (any of these ports accepts every format; set a port to 0 to disable it).
+Exporters appear automatically under **Network analyzer → Exporters**, where you can name
+them, link them to devices, override the sampling rate or disable them. The analyzer shows
+total / average / peak traffic, stacked bandwidth by top talkers, applications, protocols,
+destinations or exporters, and top-N tables you can click to filter (IP, CIDR, port or
+service name, protocol, exporter) or drill into one host. The **Exporter setup guide** on
+the page has copy-paste configs for Cisco, Juniper, MikroTik, pfSense / OPNsense, Linux
+(softflowd / pmacct) and HPE / Aruba sFlow.
+
+Alert on traffic with a **Traffic (flow) bandwidth** rule (for example filter `dport=443`
+or `cidr=10.1.0.0/16 proto=udp`, threshold in bits/s, averaged over a window; add `by=src`
+for one alert per talker). The **Traffic** report summarises talkers, applications,
+conversations and exporters for any period. Flow records are aggregated per minute and
+kept for 14 days (`retention_flow_days`).
+
+### Fusion: several servers on one screen
+
+On the server you want as the "master", open **Fusion → Manage servers** and add each other
+SNMPathy server's URL and API token. Every minute it fetches each server's summary and shows
+one tactical overview: servers reporting, hosts up / down / unreachable, checks OK /
+warning / critical, firing alerts, one merged problems list (each linking into the server
+that owns it), and the highest CPU, memory, busiest interfaces and worst availability
+across all servers. A server that cannot be reached keeps its last data, marked stale.
+
 ### Syslog
 
 Point your devices at the SNMPathy host on port **5514** (UDP or TCP). Port 514 needs
@@ -162,9 +312,25 @@ set system syslog host 192.0.2.10 any any port 5514
 
 To test it: `snmpathy send-syslog "hello from the CLI" --severity 3`.
 
-Search syntax: plain words match anywhere, `"exact phrase"`, `-exclude`, `prefix*`,
-and `AND` / `OR` / `NOT`. Filter by host (wildcards allowed), app, minimum severity,
-facility and time range. You can click any facet value to filter by it.
+**Other log sources:** Windows Event Logs via NXLog (JSON lines to TCP **5544**, or GELF),
+Graylog / Docker `--log-driver gelf` senders (GELF on UDP **12201**, compressed and
+chunked), and Fluent Bit / Vector / Filebeat JSON. Extra fields (EventID, user names, …)
+become searchable fields. **Logs → Sources** shows what is listening, which hosts are
+sending, and copy-paste setup for rsyslog, syslog-ng, journald, NXLog on Windows, network
+vendors, Docker, Fluent Bit and Vector.
+
+**Log explorer** (Nagios Log Server / Kibana style): a field sidebar with counts and top
+values (click + / − to include or exclude), filter pills, several colour-coded queries on
+one histogram, expandable events showing every field, saved searches, CSV export, live
+tail and *Create alert* from the current query. Query language:
+
+| Example | Meaning |
+|---|---|
+| `error`, `"changed state"`, `fail*` | words, phrases, wildcards (full-text) |
+| `-x`, `NOT x`, `a OR b`, `(a b)` | exclude, combine, group (operators in capitals) |
+| `host:core-sw*`, `host:10.0.0.0/8`, `app:sshd` | host name or source IP (wildcards / CIDR), application |
+| `severity:<=warning`, `severity:err`, `facility:local7` | severity / facility by name or number, with comparisons |
+| `EventID:4625`, `user.name:bob`, `bytes:>1000`, `field:*` | any structured field (JSON from GELF / NXLog / JSON inputs) |
 
 ### Uptime checks
 
@@ -177,6 +343,22 @@ facility and time range. You can click any facet value to filter by it.
 | `http` | URL | method, expected status (`200-399`, `200,204`, `2xx`), keyword present / absent, TLS verification, certificate-expiry warning (days) |
 | `dns` | name | expected address |
 | `snmp` | host | uses the device's credentials |
+| `nagios` | host (`$HOSTADDRESS$`) | plugin name (e.g. `check_disk`) and arguments; exit code 0 OK, 1 WARNING, 2 CRITICAL, 3 UNKNOWN; performance data is stored as graphable metrics on the linked device |
+| `passive` | source name | no probing: results are submitted to `POST /api/passive` (see below) and the check fails if none arrive within interval × (retries + 1) |
+
+**Nagios plugins** are looked up by name (never by path) in `plugins/` next to the
+database/executable and the usual locations (`/usr/lib/nagios/plugins`,
+`/usr/local/nagios/libexec`, `C:\Program Files\NSClient++\scripts`, …) or the folders in
+`SNMPATHY_PLUGIN_DIRS`. A plugin check assigned to a collector runs on the collector,
+like NRPE.
+
+**Passive results** (NRDP / NSCA style), authenticated with the API token:
+
+```bash
+curl -X POST https://nms.example.com/api/passive -H "Authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"results": [{"host": "backup01", "service": "Nightly backup", "state": 0, "output": "OK - 42 GB | size=42GB"}]}'
+```
 
 A check is marked down only after *retries + 1* consecutive failures. While it is failing
 it is probed faster. Outages are backdated to the first failure, so the downtime figures

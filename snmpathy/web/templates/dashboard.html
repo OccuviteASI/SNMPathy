@@ -43,7 +43,7 @@
         <div class="empty">{{ status('ok', 'Everything is operating normally') }}</div>
       {% endif %}
       {% for d in down_devices %}
-        <div class="alert-row">{{ status('down', '') }}<div class="body"><div class="subject"><a href="/devices/{{ d.id }}">{{ d.name }}</a> is not responding to SNMP</div><div class="msg">{{ d.last_error }}</div><div class="small muted">down for {{ d.status_since|ago|replace(' ago','') }}</div></div></div>
+        <div class="alert-row">{{ status(d.status, '') }}<div class="body"><div class="subject"><a href="/devices/{{ d.id }}">{{ d.name }}</a> is {{ 'unreachable' if d.status == 'unreachable' else 'offline' }}</div><div class="msg">{{ d.status_reason or d.last_error }}</div><div class="small muted">down for {{ d.status_since|ago|replace(' ago','') }}</div></div></div>
       {% endfor %}
       {% for c in down_checks %}
         <div class="alert-row">{{ status('down', '') }}<div class="body"><div class="subject"><a href="/checks/{{ c.id }}">{{ c.name }}</a> is down</div><div class="msg">{{ c.type|upper }} {{ c.target }}: {{ c.last_message }}</div><div class="small muted">down for {{ c.state_since|ago|replace(' ago','') }}</div></div></div>

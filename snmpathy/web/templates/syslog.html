@@ -1,54 +1,828 @@
 {% extends "base.html" %}
-{% block title %}Syslog{% endblock %}
+{% from "_macros.html" import icon %}
+{% block title %}Logs{% endblock %}
 {% block actions %}
-<span id="log-count" class="muted small"></span>
-<button class="btn" id="log-live">Live tail</button>
+<span id="log-count" class="muted small lx-hide-sm-btn" aria-live="polite"></span>
+<button class="btn" id="log-live" type="button" aria-pressed="false" title="Show new messages as they arrive">Live tail</button>
+<div class="lx-menu" id="lx-saved">
+  <button class="btn" id="lx-saved-btn" type="button" aria-haspopup="true" aria-expanded="false">Saved <span aria-hidden="true">▾</span></button>
+  <div class="lx-pop hidden" id="lx-saved-pop" role="dialog" aria-label="Saved searches">
+    <div class="lx-pop-head">Saved searches</div>
+    <div id="lx-saved-list" class="small muted">Loading…</div>
+    <form id="lx-save-form" class="lx-save-form" autocomplete="off">
+      <input name="name" placeholder="Name for the current search" maxlength="128" required aria-label="Saved search name">
+      <button class="btn sm primary" type="submit">Save</button>
+    </form>
+  </div>
+</div>
+<a class="btn" id="lx-export" href="/api/logs/export.csv" title="Download the current results as CSV (up to 100,000 rows)">{{ icon('download') }}<span class="lx-hide-sm">Export CSV</span></a>
+<a class="btn" id="lx-alert" href="/alerts?tab=rules" title="Create an alert rule from this query">{{ icon('alert') }}<span class="lx-hide-sm">Create alert</span></a>
+<a class="btn ghost lx-hide-sm-btn" href="/logs/sources" title="Inputs and setup instructions">Sources</a>
 {% endblock %}
 {% block content %}
-<div id="syslog-root">
-  <div class="card mb"><div class="card-body">
-    <form class="searchbar" autocomplete="off">
-      <input class="q" name="q" type="search" placeholder='Search messages: words, "exact phrase", -exclude, prefix*' value="{{ params.q or '' }}" aria-label="Search">
-      <input name="host" placeholder="Host (wildcards ok)" value="{{ params.host or '' }}" style="width:170px" aria-label="Host">
-      <input name="app" placeholder="App" value="{{ params.app or '' }}" style="width:120px" aria-label="App">
-      <select name="severity" aria-label="Minimum severity">
-        <option value="">Any severity</option>
-        {% for s in SEVERITIES %}<option value="{{ loop.index0 }}" {{ 'selected' if params.severity == loop.index0|string }}>{{ s }} and worse</option>{% endfor %}
-      </select>
-      <select name="device_id" aria-label="Device">
-        <option value="">Any device</option>
-        {% for d in devices %}<option value="{{ d.id }}" {{ 'selected' if params.device_id == d.id|string }}>{{ d.name }}</option>{% endfor %}
-      </select>
-      <button class="btn primary" type="submit">Search</button>
-    </form>
-    <div class="row mt" id="log-time"></div>
-  </div></div>
+<style>
+  .lx-q-card .card-body { padding: 12px 16px; }
+  .lx-qrow { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .lx-qkey { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 12px; color: var(--text-2); flex: none; width: 28px; }
+  .lx-qkey::before { content: ""; width: 10px; height: 10px; border-radius: 3px; background: var(--qc, var(--s1)); flex: none; }
+  .lx-q { flex: 1; min-width: 0; font-family: var(--mono); font-size: 13px; }
+  .lx-hits { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--muted); min-width: 64px; text-align: right; white-space: nowrap; }
+  .lx-qdel { padding: 3px 8px; }
+  .lx-qbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .lx-qbar .spacer { flex: 1; }
+  .lx-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+  .lx-filters input[name=host] { width: 170px; }
+  .lx-filters input[name=app] { width: 130px; }
+  .lx-time { margin-top: 10px; }
+  .lx-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; align-items: center; }
+  .lx-pill { display: inline-flex; align-items: center; border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent); border-radius: 14px; font-size: 12.5px; max-width: 100%; min-width: 0; }
+  .lx-pill.neg { border-color: var(--critical); background: var(--critical-soft); color: var(--critical-text); }
+  .lx-pill button { border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; line-height: 20px; }
+  .lx-pill .lx-pill-label { padding: 2px 4px 2px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 420px; }
+  .lx-pill .lx-pill-x { padding: 2px 9px 2px 4px; font-weight: 700; }
+  .lx-pill button:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; border-radius: 12px; }
+  #lx-addpill { width: 200px; font-size: 12.5px; padding: 3px 10px; border-radius: 14px; }
+  .lx-help { margin-top: 8px; font-size: 12.5px; }
+  .lx-help table { width: auto; margin-top: 6px; }
+  .lx-help td { padding: 2px 14px 2px 0; vertical-align: top; color: var(--text-2); }
+  .lx-help td:first-child { white-space: nowrap; }
 
-  <div class="grid grid-12">
-    <div class="stack" style="grid-column: span 3">
-      <div class="card"><div class="card-head"><h3>Hosts</h3></div><div class="card-body" id="facet-host"></div></div>
-      <div class="card"><div class="card-head"><h3>Applications</h3></div><div class="card-body" id="facet-app"></div></div>
-      <div class="card"><div class="card-head"><h3>Severity</h3></div><div class="card-body" id="facet-sev"></div></div>
-      <div class="card"><div class="card-body small muted" id="listen-hint">
-        {% if listening %}Listening on {% for proto, addr in listening.items() %}<strong>{{ proto|upper }} {{ addr }}</strong>{{ ', ' if not loop.last }}{% endfor %}.
-        Test with <code>snmpathy send-syslog "hello"</code>.{% else %}The syslog listener is not running.{% endif %}
-      </div></div>
+  .lx-body { display: grid; grid-template-columns: 270px minmax(0, 1fr); gap: 16px; align-items: start; margin-top: 16px; }
+  .lx-side { position: sticky; top: 76px; max-height: calc(100vh - 92px); overflow-y: auto; }
+  .lx-side .card-body { padding: 10px 12px; }
+  #lx-field-filter { width: 100%; margin-bottom: 6px; font-size: 12.5px; padding: 4px 9px; }
+  .lx-group { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding: 10px 2px 4px; }
+  .lx-field { border-bottom: 1px solid var(--border); }
+  .lx-field:last-child { border-bottom: 0; }
+  .lx-frow { display: flex; align-items: center; gap: 4px; }
+  .lx-fname { display: flex; flex: 1; min-width: 0; gap: 8px; align-items: center; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; padding: 5px 2px; cursor: pointer; text-align: left; border-radius: 5px; }
+  .lx-fname:hover .nm, .lx-field.open .lx-fname .nm { color: var(--accent); }
+  .lx-fname .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lx-ficon { font-family: var(--mono); font-size: 10.5px; color: var(--muted); width: 16px; text-align: center; flex: none; }
+  .lx-top { display: none; padding: 2px 0 10px 24px; }
+  .lx-field.open .lx-top { display: block; }
+  .lx-tv { display: flex; gap: 4px; align-items: center; font-size: 12px; padding: 2px 0; }
+  .lx-tv .lab { flex: 1; min-width: 0; }
+  .lx-tv .nm { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lx-tv .bar { display: block; height: 3px; border-radius: 2px; background: var(--accent); opacity: .55; margin-top: 2px; }
+  .lx-tv .num { font-size: 11.5px; color: var(--muted); min-width: 34px; }
+  .lx-ib { border: 1px solid var(--border); background: var(--surface); color: var(--text-2); width: 22px; height: 22px; border-radius: 5px; cursor: pointer; font: inherit; font-size: 13px; line-height: 1; padding: 0; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+  .lx-ib:hover, .lx-ib:focus-visible { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+  .lx-ib.neg:hover, .lx-ib.neg:focus-visible { background: var(--critical-soft); color: var(--critical-text); border-color: var(--critical); }
+  .lx-ib.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+
+  .lx-main { min-width: 0; }
+  .lx-hist-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .log-table tr.lx-row { cursor: pointer; }
+  .log-table tr.lx-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .lx-caret { display: inline-block; width: 12px; color: var(--muted); transition: transform .15s; }
+  .log-table tr.expanded .lx-caret { transform: rotate(90deg); }
+  .log-table tr.lx-detail > td { background: var(--surface-2); padding: 10px 14px 14px; cursor: default; }
+  .log-table td.lx-extra { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lx-kv { width: 100%; font-size: 12.5px; border-collapse: collapse; }
+  .lx-kv th { text-align: left; font-weight: 600; color: var(--text-2); width: 1%; white-space: nowrap; padding: 4px 14px 4px 0; vertical-align: top; font-family: var(--mono); font-size: 12px; text-transform: none; letter-spacing: 0; background: transparent; position: static; }
+  .lx-kv td { padding: 4px 0; vertical-align: top; border: 0; }
+  .lx-kv tr + tr > * { border-top: 1px solid var(--border); }
+  .lx-kv td.v { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-word; color: var(--text); }
+  .lx-kv td.acts { white-space: nowrap; width: 1%; padding-left: 10px; }
+  .lx-kv .grp th { color: var(--muted); font-family: inherit; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; padding-top: 10px; }
+  @media (hover: hover) { .lx-kv td.acts { opacity: .3; } .lx-kv tr:hover td.acts, .lx-kv td.acts:focus-within { opacity: 1; } }
+  .lx-detail-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  mark.lx-hl { background: var(--warning-soft); color: inherit; border-radius: 2px; box-shadow: 0 0 0 1px var(--warning); }
+  .lx-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+  .lx-menu { position: relative; }
+  .lx-pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; width: 320px; max-width: calc(100vw - 32px); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 10px 30px rgba(0, 0, 0, .18); padding: 10px 12px 12px; }
+  .lx-pop-head { font-weight: 600; margin-bottom: 6px; }
+  #lx-saved-list { max-height: 260px; overflow-y: auto; margin-bottom: 10px; }
+  .lx-saved-item { display: flex; gap: 6px; align-items: center; }
+  .lx-saved-item .load { flex: 1; min-width: 0; text-align: left; border: 0; background: transparent; color: var(--accent); cursor: pointer; font: inherit; font-size: 13px; padding: 5px 6px; border-radius: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lx-saved-item .load:hover { background: var(--accent-soft); }
+  .lx-save-form { display: flex; gap: 6px; }
+  .lx-save-form input { flex: 1; min-width: 0; font-size: 12.5px; padding: 4px 9px; }
+  .lx-only-sm { display: none !important; }
+  .btn .lx-hide-sm { display: inline; }
+
+  @media (max-width: 900px) {
+    .lx-body { grid-template-columns: minmax(0, 1fr); }
+    .lx-side { display: none; position: static; max-height: 60vh; }
+    .lx.fields-open .lx-side { display: block; }
+    .lx-only-sm { display: inline-flex !important; }
+  }
+  .lx-side { scroll-margin-top: 80px; }
+  @media (max-width: 600px) {
+    .topbar { position: static; }
+    .lx-hide-sm-btn { display: none !important; }
+    .btn .lx-hide-sm { display: none; }
+    .lx-filters input, .lx-filters select { flex: 1 1 140px; width: auto !important; }
+    .lx-hits { min-width: 0; }
+    .log-table td.msg { min-width: 220px; }
+    .log-table .lx-app, .log-table .lx-extra { display: none; }
+    #lx-addpill { flex: 1 1 160px; }
+  }
+</style>
+
+<div id="syslog-root" class="lx">
+  <div class="card lx-q-card">
+    <div class="card-body">
+      <form id="lx-form" autocomplete="off">
+        <div id="lx-queries">
+          <div class="lx-qrow"><span class="lx-qkey">A</span><input class="lx-q" name="q" type="search" value="{{ params.q or '' }}" aria-label="Query A"></div>
+        </div>
+        <div class="lx-qbar">
+          <button type="button" class="btn sm" id="lx-add-query" title="Compare another query on the histogram">+ add query</button>
+          <button type="button" class="btn sm ghost" id="lx-help-btn" aria-expanded="false" aria-controls="lx-help">Query syntax</button>
+          <span class="spacer"></span>
+          <button class="btn primary" type="submit">Search</button>
+        </div>
+        <div class="lx-help hidden" id="lx-help">
+          <table>
+            <tr><td><code>error</code> <code>"link down"</code> <code>fail*</code></td><td>words, exact phrases and wildcards in the message, host or app</td></tr>
+            <tr><td><code>-debug</code> <code>NOT (a OR b)</code></td><td>exclude; <code>OR</code>, <code>AND</code> and brackets (operators in capitals)</td></tr>
+            <tr><td><code>host:core-sw1</code> <code>app:sshd</code> <code>msgid:4625</code></td><td>field values (case-insensitive, <code>*</code> wildcards)</td></tr>
+            <tr><td><code>severity:err</code> <code>severity:&lt;=3</code></td><td>exact severity, or err and worse (lower numbers are more severe)</td></tr>
+            <tr><td><code>facility:local7</code> <code>source_ip:10.0.0.0/8</code></td><td>facility by name, source address by CIDR</td></tr>
+            <tr><td><code>EventID:4625</code> <code>user.name:bob</code> <code>bytes:&gt;1000</code></td><td>any structured (JSON / GELF / NXLog) field; <code>field:*</code> = field is present</td></tr>
+          </table>
+        </div>
+        <div class="lx-filters">
+          <select name="severity" aria-label="Minimum severity">
+            <option value="">Any severity</option>
+            {% for s in SEVERITIES %}<option value="{{ loop.index0 }}" {{ 'selected' if params.severity == loop.index0|string or params.severity == s }}>{{ s }} and worse</option>{% endfor %}
+          </select>
+          <select name="device_id" aria-label="Device">
+            <option value="">Any device</option>
+            {% for d in devices %}<option value="{{ d.id }}" {{ 'selected' if params.device_id == d.id|string }}>{{ d.name }}</option>{% endfor %}
+          </select>
+          <input name="host" placeholder="Host (wildcards ok)" value="{{ params.host or '' }}" aria-label="Host">
+          <input name="app" placeholder="App" value="{{ params.app or '' }}" aria-label="App">
+        </div>
+        <div class="lx-time" id="log-time"></div>
+        <div class="lx-pills" id="lx-pills" aria-label="Filters">
+          <input id="lx-addpill" placeholder="+ filter, e.g. host:sw1" aria-label="Add filter (field:value, prefix - to exclude)">
+        </div>
+      </form>
     </div>
-    <div class="stack" style="grid-column: span 9">
-      <div class="card"><div class="card-body"><div id="log-hist" data-height="150"></div></div></div>
+  </div>
+
+  <div class="lx-body">
+    <aside class="card lx-side" id="lx-side" aria-label="Fields">
+      <div class="card-head"><h3>Fields</h3><button type="button" class="btn ghost sm lx-only-sm" id="lx-fields-close">Hide</button></div>
+      <div class="card-body">
+        <input id="lx-field-filter" type="search" placeholder="Filter fields" aria-label="Filter fields">
+        <div id="lx-fields"><div class="muted small">Loading…</div></div>
+      </div>
+      <div class="card-body small muted" id="listen-hint" style="border-top:1px solid var(--border)">
+        {% if listening %}Syslog on {% for proto, addr in listening.items() %}<strong>{{ proto|upper }} {{ addr }}</strong>{{ ', ' if not loop.last }}{% endfor %}.
+        {% else %}The syslog listener is not running.{% endif %}
+        <a href="/logs/sources">Inputs &amp; setup</a> · test with <code>snmpathy send-syslog "hello"</code>.
+      </div>
+    </aside>
+
+    <div class="lx-main stack">
+      <div class="card">
+        <div class="card-head lx-hist-head">
+          <h3 id="lx-hist-title">Messages over time</h3>
+          <div class="seg hidden" id="lx-hist-mode" role="group" aria-label="Histogram mode">
+            <button type="button" data-mode="stacked">Stacked</button><button type="button" data-mode="line">Overlay</button>
+          </div>
+          <button type="button" class="btn sm lx-only-sm" id="lx-fields-btn" aria-controls="lx-side">Fields</button>
+        </div>
+        <div class="card-body"><div id="log-hist" data-height="170"></div></div>
+      </div>
       <div class="card">
         <div class="card-body flush table-wrap">
           <table class="table compact log-table">
-            <thead><tr><th>Time</th><th>Host</th><th>Severity</th><th>Facility</th><th>App</th><th>Message</th></tr></thead>
+            <thead id="log-head"><tr><th>Time</th><th>Host</th><th>Severity</th><th class="lx-app">App</th><th>Message</th></tr></thead>
             <tbody id="log-body"></tbody>
           </table>
         </div>
-        <div class="card-body"><button class="btn hidden" id="log-more">Load older messages</button></div>
+        <div class="card-body lx-foot">
+          <button class="btn hidden" id="log-more" type="button">Load older messages</button>
+          <span class="muted small" id="lx-shown"></span>
+        </div>
       </div>
     </div>
   </div>
 </div>
 {% endblock %}
 {% block scripts %}
-<script>document.addEventListener("DOMContentLoaded", () => SP.syslogExplorer(SP.$("#syslog-root")));</script>
+<script>
+{% raw %}
+document.addEventListener("DOMContentLoaded", () => {
+  "use strict";
+  const $ = SP.$, $$ = SP.$$, esc = SP.esc;
+  const root = $("#syslog-root");
+  const form = $("#lx-form");
+  const tbody = $("#log-body");
+  const SEV = ["emerg", "alert", "crit", "err", "warning", "notice", "info", "debug"];
+  const FAC = ["kern", "user", "mail", "daemon", "auth", "syslog", "lpr", "news", "uucp", "cron", "authpriv", "ftp", "ntp",
+    "security", "console", "solaris-cron", "local0", "local1", "local2", "local3", "local4", "local5", "local6", "local7"];
+  const LETTERS = "ABCDEFGH";
+  const PAGE = 100;
+  const MAX_ROWS = 2000;
+
+  // Logs are kept for 30 days by default: offer 15m .. 30d plus a custom range.
+  SP.RANGES = SP.RANGES.filter(([v]) => SP.rangeSeconds(v) <= 30 * 86400);
+
+  // ------------------------------------------------------------------ state
+  const url = new URLSearchParams(location.search);
+  const parseJSON = (s, d) => { try { const v = JSON.parse(s); return v == null ? d : v; } catch (e) { return d; } };
+  const pairs = (s) => (Array.isArray(parseJSON(s, [])) ? parseJSON(s, []) : []).filter((p) => Array.isArray(p) && p.length === 2);
+  const S = {
+    queries: url.getAll("q").length ? url.getAll("q").slice(0, 8) : [""],
+    pills: [...pairs(url.get("must")).map(([f, v]) => ({ field: f, value: v, neg: false })),
+            ...pairs(url.get("must_not")).map(([f, v]) => ({ field: f, value: v, neg: true }))],
+    time: SP.urlState({ range: "24h" }),
+    cols: (url.get("cols") || "").split(",").map((c) => c.trim()).filter(Boolean).slice(0, 6),
+    histMode: url.get("hist") === "line" ? "line" : "stacked",
+    fields: [], openFields: new Set(), tops: new Map(), total: null,
+  };
+  if (!SP.RANGES.some(([v]) => v === S.time.range) && !S.time.start) S.time.range = "24h";
+  let gen = 0, oldest = null, newest = null, live = false, liveTimer = null, liveTicks = 0;
+  const rowsById = new Map();
+
+  const field = (name) => form.elements[name];
+  const combinedQuery = () => {
+    const qs = S.queries.map((q) => q.trim());
+    if (qs.some((q) => !q)) return "";
+    return qs.length === 1 ? qs[0] : qs.map((q) => "(" + q + ")").join(" OR ");
+  };
+  const baseParams = (withTime = true) => {
+    const p = new URLSearchParams();
+    ["host", "app", "severity", "device_id"].forEach((k) => { const v = (field(k).value || "").trim(); if (v) p.set(k, v); });
+    if (withTime) {
+      const b = SP.rangeBounds(S.time);
+      p.set("start", Math.floor(b.start));
+      if (S.time.start) p.set("end", Math.ceil(S.time.end));
+    }
+    const must = S.pills.filter((x) => !x.neg).map((x) => [x.field, x.value]);
+    const mustNot = S.pills.filter((x) => x.neg).map((x) => [x.field, x.value]);
+    if (must.length) p.set("must", JSON.stringify(must));
+    if (mustNot.length) p.set("must_not", JSON.stringify(mustNot));
+    return p;
+  };
+  const withQ = (p, q) => { if (q) p.set("q", q); return p; };
+
+  // ------------------------------------------------------------ formatting
+  const fmtField = (name, value) => {
+    if (value == null) return "(missing)";
+    const n = Number(value);
+    if (name === "severity" && Number.isInteger(n) && SEV[n]) return SEV[n];
+    if (name === "facility" && Number.isInteger(n) && FAC[n]) return FAC[n];
+    return String(value);
+  };
+  const quote = (v) => '"' + String(v).replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
+  const structuredOf = (r) => {
+    if (r._s !== undefined) return r._s;
+    let out = {};
+    const s = r.structured || "";
+    if (s.startsWith("{")) out = parseJSON(s, {});
+    else if (s.startsWith("[")) {
+      // RFC 5424 structured data: [id key="value" ...]
+      const re = /([^\s=\]\[]+)="((?:[^"\\]|\\.)*)"/g;
+      let m;
+      while ((m = re.exec(s))) out[m[1]] = m[2].replace(/\\(["\\\]])/g, "$1");
+    }
+    r._s = out && typeof out === "object" && !Array.isArray(out) ? out : {};
+    return r._s;
+  };
+  const COLUMN_NAMES = ["host", "source_ip", "app", "severity", "facility", "procid", "msgid", "message", "device_id", "id"];
+  const valueOf = (r, name) => (COLUMN_NAMES.includes(name) ? r[name] : structuredOf(r)[name]);
+
+  // Highlight free-text search terms in messages.
+  let hl = null;
+  const buildHighlight = () => {
+    const terms = [];
+    S.queries.forEach((q) => {
+      const re = /(^|\s|\()([-!])?((?:[A-Za-z_@][\w.@-]*):)?("(?:[^"\\]|\\.)*"?|[^\s()]+)/g;
+      let m;
+      while ((m = re.exec(q))) {
+        if (m[2] || (m[3] && !/^(message|msg):$/i.test(m[3]))) continue;
+        let t = m[4];
+        if (/^(OR|AND|NOT|\|\||&&)$/.test(t)) continue;
+        const phrase = t.startsWith('"');
+        t = phrase ? t.replace(/^"|"$/g, "").replace(/\\(.)/g, "$1") : t;
+        if (!t.replace(/\*/g, "")) continue;
+        let src = t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        if (!phrase) src = src.replace(/\\\*/g, "\\S*");
+        terms.push(src);
+      }
+    });
+    hl = terms.length ? new RegExp(terms.slice(0, 20).join("|"), "gi") : null;
+  };
+  const highlight = (text) => {
+    text = String(text == null ? "" : text);
+    if (!hl) return esc(text);
+    let out = "", last = 0, m;
+    hl.lastIndex = 0;
+    while ((m = hl.exec(text))) {
+      if (!m[0]) { hl.lastIndex++; continue; }
+      out += esc(text.slice(last, m.index)) + '<mark class="lx-hl">' + esc(m[0]) + "</mark>";
+      last = m.index + m[0].length;
+    }
+    return out + esc(text.slice(last));
+  };
+
+  // ------------------------------------------------------------ query rows
+  const renderQueries = () => {
+    const box = $("#lx-queries");
+    box.innerHTML = S.queries.map((q, i) => `<div class="lx-qrow" data-i="${i}">
+      <span class="lx-qkey" style="--qc: var(--s${i + 1})" title="Query ${LETTERS[i]}">${LETTERS[i]}</span>
+      <input class="lx-q" type="search" value="${esc(q)}" aria-label="Query ${LETTERS[i]}" spellcheck="false"
+        placeholder='Search: words, "phrase", host:sw1, severity:<=3, EventID:4625, -exclude, a OR b'>
+      <span class="lx-hits" data-hits="${i}"></span>
+      ${S.queries.length > 1 ? `<button type="button" class="btn ghost sm lx-qdel" data-del="${i}" aria-label="Remove query ${LETTERS[i]}">×</button>` : ""}
+    </div>`).join("");
+    $("#lx-add-query").disabled = S.queries.length >= 8;
+    $("#lx-hist-mode").classList.toggle("hidden", S.queries.length < 2);
+    $$("#lx-hist-mode button").forEach((b) => b.classList.toggle("on", b.dataset.mode === S.histMode));
+  };
+  const readQueries = () => { S.queries = $$(".lx-q", form).map((el) => el.value); };
+
+  // ------------------------------------------------------------------ pills
+  const pillsBox = $("#lx-pills");
+  const renderPills = () => {
+    $$(".lx-pill", pillsBox).forEach((el) => el.remove());
+    const input = $("#lx-addpill");
+    S.pills.forEach((p, i) => {
+      const span = document.createElement("span");
+      span.className = "lx-pill" + (p.neg ? " neg" : "");
+      span.dataset.i = i;
+      const label = (p.neg ? "NOT " : "") + p.field + ": " + fmtField(p.field, p.value);
+      span.innerHTML = `<button type="button" class="lx-pill-label" title="${esc(label)} (click to ${p.neg ? "include" : "exclude"})">${esc(label.length > 90 ? label.slice(0, 88) + "…" : label)}</button><button type="button" class="lx-pill-x" aria-label="Remove filter ${esc(label)}">×</button>`;
+      pillsBox.insertBefore(span, input);
+    });
+  };
+  const addPill = (fieldName, value, neg) => {
+    value = value == null ? null : String(value);
+    const existing = S.pills.find((p) => p.field === fieldName && p.value === value);
+    if (existing) existing.neg = neg;
+    else S.pills.push({ field: fieldName, value, neg });
+    renderPills();
+    run();
+  };
+
+  // ------------------------------------------------------------------ table
+  const renderHead = () => {
+    $("#log-head").innerHTML = `<tr><th>Time</th><th>Host</th><th>Severity</th><th class="lx-app">App</th>${S.cols.map((c) => `<th class="lx-extra" title="${esc(c)}">${esc(c)} <button type="button" class="lx-ib" data-act="col" data-f="${esc(c)}" aria-label="Remove column ${esc(c)}" title="Remove column">×</button></th>`).join("")}<th>Message</th></tr>`;
+  };
+  const colspan = () => 5 + S.cols.length;
+  const rowHtml = (r) => `<tr class="lx-row sev-${esc(r.severity)}" data-id="${r.id}" tabindex="0" aria-expanded="false">
+    <td class="nowrap small" title="${esc(SP.fmtTime(r.ts, "full"))}"><span class="lx-caret" aria-hidden="true">▸</span>${esc(SP.fmtTime(r.ts))}</td>
+    <td class="nowrap">${r.device_id ? `<a href="/devices/${esc(r.device_id)}">${esc(r.host)}</a>` : esc(r.host)}</td>
+    <td><span class="badge ${esc(r.severity_name)}">${esc(r.severity_name || "-")}</span></td>
+    <td class="nowrap lx-app">${esc(r.app)}</td>
+    ${S.cols.map((c) => { const v = valueOf(r, c); return `<td class="small lx-extra" title="${esc(v == null ? "" : fmtField(c, v))}">${esc(v == null ? "" : fmtField(c, v))}</td>`; }).join("")}
+    <td class="msg">${highlight(r.message)}</td></tr>`;
+  const emptyRow = () => `<tr><td colspan="${colspan()}" class="empty">No messages match. ${$("#listen-hint") ? $("#listen-hint").innerHTML : ""}</td></tr>`;
+
+  const actionButtons = (name, value) => {
+    const v = esc(JSON.stringify(value == null ? null : String(value)));
+    const f = esc(name);
+    return `<button type="button" class="lx-ib" data-act="must" data-f="${f}" data-v="${v}" title="Filter for this value" aria-label="Filter for ${f}">+</button>
+      <button type="button" class="lx-ib neg" data-act="not" data-f="${f}" data-v="${v}" title="Filter out this value" aria-label="Filter out ${f}">−</button>
+      <button type="button" class="lx-ib ${S.cols.includes(name) ? "on" : ""}" data-act="col" data-f="${f}" title="Toggle column" aria-label="Toggle column ${f}">⊞</button>`;
+  };
+  const detailHtml = (r) => {
+    const rows = [];
+    const add = (label, value, shown, filter = true) => rows.push(
+      `<tr><th scope="row">${esc(label)}</th><td class="v">${shown != null ? shown : esc(value == null ? "" : value)}</td><td class="acts">${filter ? actionButtons(label, value) : ""}</td></tr>`);
+    add("time", null, esc(SP.fmtTime(r.ts, "full") + "  ·  " + new Date(r.ts * 1000).toISOString()), false);
+    if (r.received_at && Math.abs(r.received_at - r.ts) >= 1) add("received_at", null, esc(SP.fmtTime(r.received_at, "full")), false);
+    add("host", r.host);
+    add("source_ip", r.source_ip);
+    if (r.device_id) add("device_id", r.device_id, `<a href="/devices/${esc(r.device_id)}">${esc(r.device_id)}</a>`);
+    add("severity", r.severity, esc(r.severity_name ? `${r.severity_name} (${r.severity})` : r.severity));
+    add("facility", r.facility, esc(r.facility_name ? `${r.facility_name} (${r.facility})` : r.facility));
+    add("app", r.app);
+    if (r.procid) add("procid", r.procid);
+    if (r.msgid) add("msgid", r.msgid);
+    add("message", r.message, highlight(r.message));
+    const sd = structuredOf(r);
+    const keys = Object.keys(sd);
+    if (keys.length) {
+      rows.push(`<tr class="grp"><th colspan="3">Structured fields</th></tr>`);
+      keys.sort((a, b) => a.localeCompare(b)).forEach((k) => {
+        const v = sd[k];
+        add(k, v == null ? null : typeof v === "object" ? JSON.stringify(v) : v);
+      });
+    } else if (r.structured) {
+      add("structured", r.structured, null, false);
+    }
+    add("id", r.id, null, false);
+    const like = String(r.message || "").split(/\s+/).filter((w) => /\w/.test(w)).slice(0, 8)
+      .map((w) => (/[:"()\\]/.test(w) || /^(OR|AND|NOT)$/.test(w) || /^[-!]/.test(w) ? quote(w.replace(/"/g, "")) : w)).join(" ");
+    return `<tr class="lx-detail"><td colspan="${colspan()}"><table class="lx-kv">${rows.join("")}</table>
+      <div class="lx-detail-actions">
+        <button type="button" class="btn sm" data-surround="${r.id}">Surrounding messages (same host, ±5 min)</button>
+        <a class="btn sm" href="/alerts?tab=rules&syslog_query=${encodeURIComponent(like)}">Alert on messages like this</a>
+        <button type="button" class="btn sm ghost" data-copy="${r.id}">Copy as JSON</button>
+      </div></td></tr>`;
+  };
+  const toggleRow = (tr) => {
+    const next = tr.nextElementSibling;
+    if (next && next.classList.contains("lx-detail")) { next.remove(); tr.classList.remove("expanded"); tr.setAttribute("aria-expanded", "false"); return; }
+    const r = rowsById.get(+tr.dataset.id);
+    if (!r) return;
+    tr.classList.add("expanded");
+    tr.setAttribute("aria-expanded", "true");
+    tr.insertAdjacentHTML("afterend", detailHtml(r));
+  };
+  const rerenderRows = () => {
+    const open = new Set($$("tr.lx-row.expanded", tbody).map((tr) => +tr.dataset.id));
+    const ids = $$("tr.lx-row", tbody).map((tr) => +tr.dataset.id);
+    renderHead();
+    if (!ids.length) { if ($("td.empty", tbody)) tbody.innerHTML = emptyRow(); return; }
+    tbody.innerHTML = ids.map((id) => (rowsById.has(id) ? rowHtml(rowsById.get(id)) : "")).join("");
+    $$("tr.lx-row", tbody).forEach((tr) => { if (open.has(+tr.dataset.id)) toggleRow(tr); });
+  };
+  const updateShown = () => {
+    const n = $$("tr.lx-row", tbody).length;
+    $("#lx-shown").textContent = n ? `Showing ${n.toLocaleString()}${S.total != null ? " of " + S.total.toLocaleString() : ""} messages, newest first` : "";
+  };
+
+  async function loadEvents(append, g) {
+    const p = withQ(baseParams(), combinedQuery());
+    p.set("limit", PAGE);
+    if (append && oldest) p.set("before_id", oldest);
+    const rows = await SP.api("GET", "/api/syslog?" + p);
+    if (g !== gen) return;
+    if (!append) { tbody.innerHTML = ""; rowsById.clear(); oldest = null; newest = rows.length ? rows[0].id : null; }
+    rows.forEach((r) => rowsById.set(r.id, r));
+    tbody.insertAdjacentHTML("beforeend", rows.map(rowHtml).join(""));
+    if (rows.length) oldest = rows[rows.length - 1].id;
+    $("#log-more").classList.toggle("hidden", rows.length < PAGE);
+    if (!append && !rows.length) tbody.innerHTML = emptyRow();
+    updateShown();
+  }
+
+  // ------------------------------------------------------------ histogram
+  const trunc = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+  async function loadStats(g) {
+    const hist = $("#log-hist");
+    const cq = combinedQuery();
+    if (S.queries.length > 1) {
+      const mp = baseParams();
+      S.queries.forEach((q) => mp.append("q", q.trim()));
+      mp.set("buckets", "90");
+      const [h, c] = await Promise.all([SP.api("GET", "/api/logs/histogram-multi?" + mp), SP.api("GET", "/api/syslog/count?" + withQ(baseParams(), cq))]);
+      if (g !== gen) return;
+      const series = h.series.map((s, i) => ({ name: `${LETTERS[i]} · ${trunc(s.q || "*", 48)}`, points: s.points }));
+      SP.chart(hist, series, { type: S.histMode === "line" ? "line" : "stacked", unit: "msgs", start: h.start, end: h.end, height: 170, legend: "list" });
+      h.series.forEach((s, i) => { const el = $(`[data-hits="${i}"]`, form); if (el) el.textContent = s.count.toLocaleString() + " hits"; });
+      S.total = c.count;
+    } else {
+      const p = withQ(baseParams(), cq);
+      const [c, h] = await Promise.all([SP.api("GET", "/api/syslog/count?" + p), SP.api("GET", "/api/syslog/histogram?buckets=90&" + p)]);
+      if (g !== gen) return;
+      const series = [["error", "err and worse", "red"], ["warning", "warning", "orange"], ["info", "notice / info / debug", "blue"]]
+        .map(([k, n, col]) => ({ name: n, color: col, points: h.buckets.map((x) => [x.ts, x[k]]) }));
+      SP.chart(hist, series, { type: "stacked", unit: "msgs", start: h.start, end: h.end, height: 170, legend: "list" });
+      const el = $('[data-hits="0"]', form);
+      if (el) el.textContent = c.count.toLocaleString() + " hits";
+      S.total = c.count;
+    }
+    $("#log-count").textContent = S.total.toLocaleString() + " messages";
+    updateShown();
+  }
+
+  // ---------------------------------------------------------------- fields
+  const fieldBox = $("#lx-fields");
+  const topHtml = (name) => {
+    const values = S.tops.get(name);
+    if (!values) return `<div class="muted small">Loading…</div>`;
+    if (!values.length) return `<div class="muted small">No values</div>`;
+    const max = Math.max(1, ...values.map((v) => v.count));
+    return values.map((v) => {
+      const label = v.value == null || v.value === "" ? "(empty)" : v.label || fmtField(name, v.value);
+      const pct = S.total ? (100 * v.count / S.total) : (100 * v.count / max);
+      return `<div class="lx-tv"><span class="lab"><span class="nm" title="${esc(label)}">${esc(label)}</span><span class="bar" style="width:${Math.max(2, 100 * v.count / max).toFixed(1)}%"></span></span>
+        <span class="num" title="${v.count.toLocaleString()} messages">${S.total ? pct.toFixed(pct < 10 ? 1 : 0) + "%" : v.count.toLocaleString()}</span>
+        <button type="button" class="lx-ib" data-act="must" data-f="${esc(name)}" data-v="${esc(JSON.stringify(v.value == null || v.value === "" ? null : String(v.value)))}" aria-label="Filter for ${esc(label)}" title="Filter for this value">+</button>
+        <button type="button" class="lx-ib neg" data-act="not" data-f="${esc(name)}" data-v="${esc(JSON.stringify(v.value == null || v.value === "" ? null : String(v.value)))}" aria-label="Filter out ${esc(label)}" title="Filter out this value">−</button></div>`;
+    }).join("");
+  };
+  const renderFields = () => {
+    const filter = ($("#lx-field-filter").value || "").toLowerCase();
+    const list = S.fields.filter((f) => !filter || f.name.toLowerCase().includes(filter));
+    if (!S.fields.length) { fieldBox.innerHTML = `<div class="muted small">No fields: nothing matches.</div>`; return; }
+    const item = (f) => `<div class="lx-field ${S.openFields.has(f.name) ? "open" : ""}" data-field="${esc(f.name)}">
+      <div class="lx-frow"><button type="button" class="lx-fname" aria-expanded="${S.openFields.has(f.name)}" title="${esc(f.name)}: in ${f.pct}% of the sampled messages">
+        <span class="lx-ficon" aria-hidden="true">${f.kind === "structured" ? "{}" : "t"}</span><span class="nm">${esc(f.name)}</span><span class="num muted small">${f.pct}%</span></button>
+        <button type="button" class="lx-ib ${S.cols.includes(f.name) ? "on" : ""}" data-act="col" data-f="${esc(f.name)}" title="Toggle column" aria-label="Toggle column ${esc(f.name)}">⊞</button></div>
+      <div class="lx-top">${S.openFields.has(f.name) ? topHtml(f.name) : ""}</div></div>`;
+    const cols = list.filter((f) => f.kind === "column"), sd = list.filter((f) => f.kind !== "column");
+    fieldBox.innerHTML = (cols.length ? `<div class="lx-group">Fields</div>` + cols.map(item).join("") : "") +
+      (sd.length ? `<div class="lx-group">Structured</div>` + sd.map(item).join("") : "") ||
+      `<div class="muted small">No field matches “${esc(filter)}”.</div>`;
+  };
+  async function loadTop(name, g) {
+    const p = withQ(baseParams(), combinedQuery());
+    p.set("field", name);
+    p.set("limit", "8");
+    try {
+      const res = await SP.api("GET", "/api/logs/field-top?" + p);
+      if (g !== gen) return;
+      S.tops.set(name, res.values);
+    } catch (e) {
+      S.tops.set(name, []);
+      SP.toast(e.message, "error");
+    }
+    renderFields();
+  }
+  async function loadFields(g) {
+    const p = withQ(baseParams(), combinedQuery());
+    p.set("sample", "1000");
+    const res = await SP.api("GET", "/api/logs/fields?" + p);
+    if (g !== gen) return;
+    S.fields = res.fields;
+    S.tops = new Map();
+    renderFields();
+    S.openFields.forEach((name) => loadTop(name, g));
+  }
+
+  // ------------------------------------------------------------ links / URL
+  const alertQuery = () => {
+    const parts = [];
+    const cq = combinedQuery();
+    if (cq) parts.push(cq);
+    S.pills.forEach((p) => {
+      if (!/^[A-Za-z_@][\w.@-]*$/.test(p.field)) return;
+      if (p.value == null) parts.push((p.neg ? "" : "-") + p.field + ":*");
+      else parts.push((p.neg ? "-" : "") + p.field + ":" + quote(p.value));
+    });
+    const host = field("host").value.trim(), app = field("app").value.trim();
+    if (host) parts.push("host:" + (host.includes("*") && !/[\s"]/.test(host) ? host : quote(host)));
+    if (app) parts.push("app:" + (app.includes("*") && !/[\s"]/.test(app) ? app : quote(app)));
+    if (field("severity").value) parts.push("severity:<=" + field("severity").value);
+    if (field("device_id").value) parts.push("device_id:" + field("device_id").value);
+    if (cq && S.queries.length > 1 && parts.length > 1) parts[0] = "(" + cq + ")";
+    return parts.join(" ");
+  };
+  const syncUrl = () => {
+    const p = new URLSearchParams();
+    if (S.time.start) { p.set("start", Math.floor(S.time.start)); p.set("end", Math.ceil(S.time.end)); } else p.set("range", S.time.range);
+    if (S.queries.length > 1 || S.queries[0].trim()) S.queries.forEach((q) => p.append("q", q));
+    ["host", "app", "severity", "device_id"].forEach((k) => { const v = field(k).value.trim(); if (v) p.set(k, v); });
+    const b = baseParams(false);
+    ["must", "must_not"].forEach((k) => b.get(k) && p.set(k, b.get(k)));
+    if (S.cols.length) p.set("cols", S.cols.join(","));
+    if (S.histMode !== "stacked") p.set("hist", S.histMode);
+    history.replaceState(null, "", location.pathname + "?" + p);
+    $("#lx-export").href = "/api/logs/export.csv?" + withQ(baseParams(), combinedQuery());
+    $("#lx-alert").href = "/alerts?tab=rules&syslog_query=" + encodeURIComponent(alertQuery() || "*");
+  };
+
+  // ------------------------------------------------------------------- run
+  function run() {
+    readQueries();
+    const g = ++gen;
+    buildHighlight();
+    syncUrl();
+    S.total = null;
+    $$("[data-hits]", form).forEach((el) => (el.textContent = "…"));
+    const fail = (e) => { if (g === gen) SP.toast(e.message, "error"); };
+    loadEvents(false, g).catch(fail);
+    loadStats(g).catch(fail);
+    loadFields(g).catch(fail);
+  }
+
+  // --------------------------------------------------------------- events
+  form.addEventListener("submit", (e) => { e.preventDefault(); run(); });
+  $$("select", form).forEach((s) => s.addEventListener("change", run));
+  $("#lx-add-query").addEventListener("click", () => {
+    readQueries();
+    if (S.queries.length >= 8) return;
+    S.queries.push("");
+    renderQueries();
+    const inputs = $$(".lx-q", form);
+    inputs[inputs.length - 1].focus();
+  });
+  $("#lx-help-btn").addEventListener("click", (e) => {
+    const open = $("#lx-help").classList.toggle("hidden") === false;
+    e.currentTarget.setAttribute("aria-expanded", String(open));
+  });
+  $("#lx-hist-mode").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-mode]");
+    if (!b) return;
+    S.histMode = b.dataset.mode;
+    renderQueries();
+    readQueries();
+    syncUrl();
+    loadStats(gen).catch((err) => SP.toast(err.message, "error"));
+  });
+  $("#lx-addpill").addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    const raw = e.target.value.trim();
+    const m = /^([-!])?([A-Za-z_@][\w.@-]*):(.*)$/.exec(raw);
+    if (!m || !m[3].trim()) { SP.toast("Use field:value, e.g. host:sw1 or -app:cron", "error"); return; }
+    let v = m[3].trim();
+    if (/^".*"$/.test(v)) v = v.slice(1, -1);
+    e.target.value = "";
+    addPill(m[2], v, !!m[1]);
+  });
+  $("#lx-field-filter").addEventListener("input", renderFields);
+  const toggleSide = (open) => {
+    root.classList.toggle("fields-open", open);
+    $("#lx-fields-btn").setAttribute("aria-expanded", String(open));
+    if (open) $("#lx-side").scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  $("#lx-fields-btn").addEventListener("click", () => toggleSide(!root.classList.contains("fields-open")));
+  $("#lx-fields-close").addEventListener("click", () => toggleSide(false));
+
+  const toggleCol = (name) => {
+    const i = S.cols.indexOf(name);
+    if (i >= 0) S.cols.splice(i, 1);
+    else if (S.cols.length < 6) S.cols.push(name);
+    else return SP.toast("Up to 6 extra columns", "error");
+    readQueries();
+    syncUrl();
+    rerenderRows();
+    renderFields();
+  };
+
+  root.addEventListener("click", (e) => {
+    const act = e.target.closest("[data-act]");
+    if (act) {
+      e.preventDefault();
+      e.stopPropagation();
+      const name = act.dataset.f;
+      if (act.dataset.act === "col") return toggleCol(name);
+      return addPill(name, parseJSON(act.dataset.v, null), act.dataset.act === "not");
+    }
+    const del = e.target.closest("[data-del]");
+    if (del) { readQueries(); S.queries.splice(+del.dataset.del, 1); renderQueries(); return run(); }
+    const pill = e.target.closest(".lx-pill");
+    if (pill) {
+      const i = +pill.dataset.i;
+      if (e.target.closest(".lx-pill-x")) S.pills.splice(i, 1);
+      else if (S.pills[i]) S.pills[i].neg = !S.pills[i].neg;
+      renderPills();
+      return run();
+    }
+    const fname = e.target.closest(".lx-fname");
+    if (fname) {
+      const name = fname.closest(".lx-field").dataset.field;
+      if (S.openFields.has(name)) S.openFields.delete(name);
+      else { S.openFields.add(name); if (!S.tops.has(name)) loadTop(name, gen); }
+      return renderFields();
+    }
+    const sur = e.target.closest("[data-surround]");
+    if (sur) {
+      const r = rowsById.get(+sur.dataset.surround);
+      if (!r) return;
+      S.queries = [""];
+      S.pills = [{ field: "host", value: r.host || r.source_ip, neg: false }];
+      ["host", "app", "severity", "device_id"].forEach((k) => (field(k).value = ""));
+      S.time.start = r.ts - 300;
+      S.time.end = r.ts + 300;
+      SP.timePicker($("#log-time"), S.time, run);
+      renderQueries();
+      renderPills();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return run();
+    }
+    const copy = e.target.closest("[data-copy]");
+    if (copy) {
+      const r = Object.assign({}, rowsById.get(+copy.dataset.copy));
+      delete r._s;
+      const sd = structuredOf(rowsById.get(+copy.dataset.copy));
+      if (Object.keys(sd).length) r.structured = sd;
+      navigator.clipboard.writeText(JSON.stringify(r, null, 2)).then(() => SP.toast("Copied"), () => SP.toast("Copy failed", "error"));
+      return;
+    }
+    const tr = e.target.closest("tr.lx-row");
+    if (tr && !e.target.closest("a") && !(window.getSelection && String(window.getSelection()).length)) toggleRow(tr);
+  });
+  tbody.addEventListener("keydown", (e) => {
+    const tr = e.target.closest("tr.lx-row");
+    if (tr && (e.key === "Enter" || e.key === " ") && e.target === tr) { e.preventDefault(); toggleRow(tr); }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "/" && !e.target.closest("input, textarea, select, [contenteditable]")) { e.preventDefault(); $(".lx-q", form).focus(); }
+  });
+  $("#log-more").addEventListener("click", () => loadEvents(true, gen).catch((e) => SP.toast(e.message, "error")));
+
+  // ------------------------------------------------------------- live tail
+  const liveBtn = $("#log-live");
+  async function poll() {
+    if (document.hidden) return;
+    const g = gen;
+    const p = withQ(baseParams(false), combinedQuery());
+    p.set("limit", "200");
+    const rows = await SP.api("GET", "/api/syslog?" + p);
+    if (g !== gen || !live) return;
+    const fresh = rows.filter((r) => newest == null || r.id > newest);
+    if (fresh.length) {
+      newest = fresh[0].id;
+      if ($("td.empty", tbody)) tbody.innerHTML = "";
+      fresh.forEach((r) => rowsById.set(r.id, r));
+      tbody.insertAdjacentHTML("afterbegin", fresh.map(rowHtml).join(""));
+      const all = $$("tr.lx-row", tbody);
+      all.slice(MAX_ROWS).forEach((tr) => {
+        const next = tr.nextElementSibling;
+        if (next && next.classList.contains("lx-detail")) next.remove();
+        rowsById.delete(+tr.dataset.id);
+        tr.remove();
+      });
+      if (all.length > MAX_ROWS) { oldest = +all[MAX_ROWS - 1].dataset.id; $("#log-more").classList.remove("hidden"); }
+      updateShown();
+    }
+    if (++liveTicks % 8 === 0) loadStats(g).catch(() => {});
+  }
+  liveBtn.addEventListener("click", async () => {
+    live = !live;
+    liveBtn.classList.toggle("primary", live);
+    liveBtn.setAttribute("aria-pressed", String(live));
+    liveBtn.textContent = live ? "Live tail on" : "Live tail";
+    clearInterval(liveTimer);
+    if (!live) return;
+    if (S.time.start) {
+      // Live tail follows the present: switch from a fixed range back to a relative one.
+      S.time.start = null; S.time.end = null;
+      SP.timePicker($("#log-time"), S.time, run);
+      run();
+    }
+    if (newest == null) {
+      try { const last = await SP.api("GET", "/api/syslog?limit=1"); newest = last.length ? last[0].id : 0; } catch (e) { newest = 0; }
+    }
+    liveTimer = setInterval(() => poll().catch(() => {}), 2000);
+  });
+
+  // ---------------------------------------------------------- saved searches
+  const savedBtn = $("#lx-saved-btn"), savedPop = $("#lx-saved-pop"), savedList = $("#lx-saved-list");
+  let saved = [];
+  const renderSaved = () => {
+    savedList.innerHTML = saved.length ? saved.map((s) => `<div class="lx-saved-item">
+      <button type="button" class="load" data-load="${s.id}" title="${esc(s.query || "(all messages)")}">${esc(s.name)}</button>
+      <button type="button" class="lx-ib neg" data-delsaved="${s.id}" aria-label="Delete saved search ${esc(s.name)}" title="Delete">×</button></div>`).join("")
+      : `<div class="muted small">Nothing saved yet.</div>`;
+  };
+  const loadSaved = async () => { saved = await SP.api("GET", "/api/logs/saved"); renderSaved(); };
+  const closeSaved = () => { savedPop.classList.add("hidden"); savedBtn.setAttribute("aria-expanded", "false"); };
+  savedBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = savedPop.classList.toggle("hidden") === false;
+    savedBtn.setAttribute("aria-expanded", String(open));
+    if (open) { loadSaved().catch((err) => SP.toast(err.message, "error")); setTimeout(() => $("input", savedPop).focus(), 30); }
+  });
+  document.addEventListener("click", (e) => { if (!e.target.closest("#lx-saved")) closeSaved(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSaved(); });
+  savedPop.addEventListener("click", async (e) => {
+    const load = e.target.closest("[data-load]");
+    if (load) {
+      const s = saved.find((x) => x.id === +load.dataset.load);
+      if (!s) return;
+      const f = s.filters || {};
+      S.queries = (Array.isArray(f.queries) && f.queries.length ? f.queries : [s.query || ""]).slice(0, 8).map(String);
+      S.pills = Array.isArray(f.pills) ? f.pills.filter((p) => p && p.field).map((p) => ({ field: String(p.field), value: p.value == null ? null : String(p.value), neg: !!p.neg })) : [];
+      ["host", "app", "severity", "device_id"].forEach((k) => (field(k).value = f[k] == null ? "" : String(f[k])));
+      S.cols = Array.isArray(f.cols) ? f.cols.slice(0, 6).map(String) : [];
+      S.time.range = f.range || S.time.range;
+      S.time.start = f.start || null;
+      S.time.end = f.end || null;
+      SP.timePicker($("#log-time"), S.time, run);
+      renderQueries();
+      renderPills();
+      renderHead();
+      closeSaved();
+      SP.toast("Loaded “" + s.name + "”");
+      return run();
+    }
+    const del = e.target.closest("[data-delsaved]");
+    if (del) {
+      const s = saved.find((x) => x.id === +del.dataset.delsaved);
+      if (!s || !confirm("Delete saved search “" + s.name + "”?")) return;
+      try { await SP.api("DELETE", "/api/logs/saved/" + s.id); await loadSaved(); } catch (err) { SP.toast(err.message, "error"); }
+    }
+  });
+  $("#lx-save-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    readQueries();
+    const name = e.target.elements.name.value.trim();
+    if (!name) return;
+    const filters = {
+      queries: S.queries, pills: S.pills, cols: S.cols,
+      range: S.time.range, start: S.time.start || null, end: S.time.end || null,
+    };
+    ["host", "app", "severity", "device_id"].forEach((k) => (filters[k] = field(k).value.trim()));
+    try {
+      await SP.api("POST", "/api/logs/saved", { name, query: combinedQuery(), filters });
+      e.target.elements.name.value = "";
+      SP.toast("Saved “" + name + "”");
+      await loadSaved();
+    } catch (err) { SP.toast(err.message, "error"); }
+  });
+
+  // ------------------------------------------------------------------ boot
+  renderQueries();
+  renderPills();
+  renderHead();
+  SP.timePicker($("#log-time"), S.time, run);
+  run();
+});
+{% endraw %}
+</script>
 {% endblock %}

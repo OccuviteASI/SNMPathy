@@ -35,6 +35,19 @@ class ProbeResult:
     ok: bool
     latency_ms: float | None = None
     message: str = ""
+    # Nagios-style WARNING: the check passes but needs attention.
+    warning: bool = False
+    # Parsed Nagios performance data: [{label, value, unit, warn, crit, min, max}]
+    perfdata: list[dict[str, Any]] | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"ok": self.ok, "latency_ms": self.latency_ms, "message": self.message,
+                "warning": self.warning, "perfdata": self.perfdata}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ProbeResult":
+        return cls(ok=bool(data.get("ok")), latency_ms=data.get("latency_ms"), message=str(data.get("message") or ""),
+                   warning=bool(data.get("warning")), perfdata=data.get("perfdata") or None)
 
 
 # ---------------------------------------------------------------- helpers
@@ -380,3 +393,139 @@ async def snmp_check(host: str, creds: Any, timeout: float = 2.0) -> ProbeResult
     if values.get(mibs.SYS_UPTIME) is None:
         return ProbeResult(False, None, "SNMP: no sysUpTime")
     return ProbeResult(True, (time.perf_counter() - start) * 1000, "SNMP agent responding")
+
+
+# ------------------------------------------------------------ Nagios plugins
+NAGIOS_STATES = {0: "OK", 1: "WARNING", 2: "CRITICAL", 3: "UNKNOWN"}
+_PERF_RE = re.compile(r"""('(?:[^']|'')+'|[^\s=]+)=([-+]?[\d.]+(?:[eE][-+]?\d+)?)([^;\s]*)((?:;[^;\s]*){0,4})""")
+
+
+def parse_perfdata(text: str) -> list[dict[str, Any]]:
+    """Parse Nagios plugin performance data (``'label'=value[UOM];warn;crit;min;max ...``)."""
+    out = []
+    for m in _PERF_RE.finditer(text or ""):
+        label = m.group(1).strip("'").replace("''", "'")
+        try:
+            value = float(m.group(2))
+        except ValueError:
+            continue
+        extra = (m.group(4) or "").split(";")[1:]
+        extra += [""] * (4 - len(extra))
+
+        def num(x: str) -> float | None:
+            try:
+                return float(x.split(":")[-1]) if x else None
+            except ValueError:
+                return None
+
+        out.append({"label": label[:100], "value": value, "unit": (m.group(3) or "")[:10],
+                    "warn": num(extra[0]), "crit": num(extra[1]), "min": num(extra[2]), "max": num(extra[3])})
+    return out[:50]
+
+
+def parse_plugin_output(stdout: str, returncode: int) -> ProbeResult:
+    """Map a plugin's exit code and output to a result (0 OK, 1 WARNING, 2 CRITICAL, 3 UNKNOWN)."""
+    text = (stdout or "").strip()
+    first, _, rest = text.partition("\n")
+    message, _, perf = first.partition("|")
+    # Long output may carry more perfdata after a '|' on a later line.
+    if "|" in rest:
+        perf += " " + rest.split("|", 1)[1]
+    state = NAGIOS_STATES.get(returncode, "UNKNOWN")
+    message = message.strip() or f"plugin exited with {state} ({returncode}) and no output"
+    return ProbeResult(ok=returncode in (0, 1), message=message[:480], warning=returncode == 1,
+                       perfdata=parse_perfdata(perf) or None)
+
+
+def find_plugin(command: str, plugin_dirs: list[str]) -> str:
+    """Resolve a plugin name inside the allowed plugin directories (like NRPE's command definitions).
+
+    Only bare names are accepted, so a check can never run an arbitrary path.
+    """
+    name = (command or "").strip()
+    if not name or os.sep in name or "/" in name or name.startswith("."):
+        raise ValueError("plugin must be a bare name such as check_disk (no paths)")
+    for folder in plugin_dirs:
+        for candidate in (name, name + ".exe", name + ".bat", name + ".cmd", name + ".ps1", name + ".py", name + ".sh"):
+            path = os.path.join(os.path.expanduser(folder), candidate)
+            if os.path.isfile(path):
+                return path
+    raise ValueError(f"plugin {name!r} not found in {', '.join(plugin_dirs) or 'no plugin directories'}")
+
+
+def plugin_argv(path: str, args: str) -> list[str]:
+    import shlex
+
+    argv = shlex.split(args or "", posix=os.name != "nt")
+    low = path.lower()
+    if low.endswith(".ps1"):
+        return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path, *argv]
+    if low.endswith(".py"):
+        return [sys.executable if not getattr(sys, "frozen", False) else "python", path, *argv]
+    if low.endswith((".bat", ".cmd")):
+        return ["cmd", "/c", path, *argv]
+    return [path, *argv]
+
+
+async def nagios_plugin(command: str, args: str = "", timeout: float = 30.0, plugin_dirs: list[str] | None = None,
+                        macros: dict[str, str] | None = None) -> ProbeResult:
+    """Run a Nagios-compatible plugin and interpret its exit code and perfdata."""
+    try:
+        path = find_plugin(command, plugin_dirs or default_plugin_dirs())
+    except ValueError as exc:
+        return ProbeResult(False, None, f"UNKNOWN: {exc}")
+    for key, value in (macros or {}).items():
+        args = (args or "").replace(f"${key}$", value)
+    start = time.perf_counter()
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *plugin_argv(path, args), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+            stdin=asyncio.subprocess.DEVNULL, start_new_session=not IS_WINDOWS)
+    except OSError as exc:
+        return ProbeResult(False, None, f"UNKNOWN: cannot run {command}: {exc}")
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout)
+    except asyncio.TimeoutError:
+        _kill_tree(proc)
+        try:
+            await asyncio.wait_for(proc.wait(), 5)
+        except asyncio.TimeoutError:
+            pass
+        return ProbeResult(False, None, f"CRITICAL: plugin timed out after {timeout:g}s")
+    result = parse_plugin_output(out.decode("utf-8", "replace")[:16384], proc.returncode)
+    result.latency_ms = (time.perf_counter() - start) * 1000
+    return result
+
+
+def _kill_tree(proc: asyncio.subprocess.Process) -> None:
+    """Kill a plugin and anything it started (scripts often spawn helpers)."""
+    try:
+        if IS_WINDOWS:
+            import subprocess
+
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, timeout=5)
+        else:
+            import signal
+
+            os.killpg(proc.pid, signal.SIGKILL)
+    except (OSError, ProcessLookupError, Exception):
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+
+
+def default_plugin_dirs() -> list[str]:
+    """Where Nagios plugins are looked up: SNMPATHY_PLUGIN_DIRS, then common install locations."""
+    env = os.environ.get("SNMPATHY_PLUGIN_DIRS")
+    if env:
+        return [d for d in env.split(os.pathsep) if d]
+    from ..config import app_dir
+
+    dirs = [str(app_dir() / "plugins")]
+    if os.name == "nt":
+        dirs += [r"C:\Program Files\NSClient++\scripts", r"C:\Program Files\Nagios\plugins"]
+    else:
+        dirs += ["/usr/lib/nagios/plugins", "/usr/lib64/nagios/plugins", "/usr/local/nagios/libexec",
+                 "/usr/local/lib/nagios/plugins", "/opt/homebrew/lib/nagios/plugins", "/usr/local/sbin"]
+    return dirs

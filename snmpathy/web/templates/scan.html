@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status, icon %}
+{% block title %}{{ scan.name }}{% endblock %}
+{% block crumbs %}<div class="crumbs"><a href="/devices">Devices</a> / <a href="/scans">Network scans</a></div>{% endblock %}
+{% block actions %}
+<button class="btn" id="scan-cancel" data-action="api" data-url="/api/scans/{{ scan.id }}/cancel" data-then="none" data-success="Cancelling…">Cancel</button>
+<button class="btn" data-action="api" data-url="/api/scans/{{ scan.id }}/run" data-success="Scan started">{{ icon('refresh') }} Run again</button>
+<button class="btn danger" data-action="api" data-method="DELETE" data-url="/api/scans/{{ scan.id }}" data-confirm="Delete this scan and its results? Devices already added are kept." data-redirect="/scans">Delete</button>
+{% endblock %}
+{% block content %}
+<div class="grid grid-4 mb">
+  <div class="card stat"><div class="card-body"><div class="muted small">State</div><div id="s-state" class="big"></div><div class="progress mt"><span id="s-bar"></span></div></div></div>
+  <div class="card stat"><div class="card-body"><div class="muted small">Addresses scanned</div><div class="big num" id="s-scanned"></div></div></div>
+  <div class="card stat"><div class="card-body"><div class="muted small">Responding hosts</div><div class="big num" id="s-found"></div></div></div>
+  <div class="card stat"><div class="card-body"><div class="muted small">Devices added</div><div class="big num" id="s-added"></div></div></div>
+</div>
+<p class="small muted">Targets <code>{{ scan.targets }}</code> · runs from <strong>{{ collector.name if collector else 'this server' }}</strong> · {{ ('repeats every ' ~ (scan.interval|duration)) if scan.interval else 'runs once' }} · communities tried: {{ (scan.options.communities or [])|length }}{% if scan.options.v3 %} + {{ scan.options.v3|length }} SNMPv3 user(s){% endif %}{% if scan.options.auto_add != 'none' %} · adds {{ 'SNMP hosts' if scan.options.auto_add == 'snmp' else 'every responding host' }} automatically{% endif %}</p>
+<div class="row mb">
+  <button class="btn primary" id="add-selected" disabled>Add selected as devices</button>
+  <button class="btn" id="select-new">Select all new</button>
+  <button class="btn" id="select-snmp">Select new with SNMP</button>
+  <input type="search" placeholder="Filter results…" data-filter="#results" aria-label="Filter results">
+  <span class="small muted" id="s-error"></span>
+</div>
+<div class="card">
+  <div class="card-body flush table-wrap">
+    <table class="table" id="results">
+      <thead><tr><th style="width:28px"></th><th class="sortable">Address</th><th class="sortable">Name</th><th class="sortable">Ping</th><th>Open ports</th><th class="sortable">SNMP</th><th class="sortable">Vendor / description</th><th class="sortable">Status</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const id = {{ scan.id }};
+  const body = SP.$("#results tbody");
+  const picked = new Set();
+  const stateClass = { done: "up", running: "pending", queued: "pending", failed: "down", interrupted: "warning", cancelled: "unknown", idle: "unknown" };
+  const rowStatus = (r) => r.status === "existing" ? `<span class="status info">monitored</span> <a href="/devices/${r.device_id}">${SP.esc(r.device_name || "")}</a>`
+    : r.status === "added" ? `<span class="status up">added</span> <a href="/devices/${r.device_id}">${SP.esc(r.device_name || "")}</a>`
+    : r.status === "error" ? `<span class="status down" title="${SP.esc(r.message)}">error</span> <span class="small muted">${SP.esc(r.message)}</span>`
+    : `<span class="status unknown">new</span>`;
+  function render(d) {
+    SP.$("#s-state").innerHTML = `<span class="status ${stateClass[d.state] || "unknown"}">${d.state}</span>`;
+    SP.$("#s-scanned").textContent = `${d.scanned.toLocaleString()} / ${d.total.toLocaleString()}`;
+    SP.$("#s-found").textContent = d.found;
+    SP.$("#s-added").textContent = d.added;
+    SP.$("#s-bar").style.width = (d.total ? Math.round(d.scanned / d.total * 100) : 0) + "%";
+    SP.$("#s-error").textContent = d.error || "";
+    SP.$("#scan-cancel").classList.toggle("hidden", !d.running);
+    body.innerHTML = d.results.map((r) => `<tr>
+      <td>${r.status === "new" || r.status === "error" ? `<input type="checkbox" class="pick" value="${SP.esc(r.ip)}" data-snmp="${r.snmp}" ${picked.has(r.ip) ? "checked" : ""} aria-label="Select ${SP.esc(r.ip)}">` : ""}</td>
+      <td class="mono" data-sort="${r.ip.split(".").map((x) => x.padStart(3, "0")).join(".")}">${SP.esc(r.ip)}</td>
+      <td><strong>${SP.esc(r.sys_name || r.dns_name || "")}</strong>${r.sys_name && r.dns_name ? `<div class="small muted">${SP.esc(r.dns_name)}</div>` : ""}</td>
+      <td class="num" data-sort="${r.ping_ms == null ? 99999 : r.ping_ms}">${r.ping_ms == null ? '<span class="muted">-</span>' : r.ping_ms.toFixed(1) + " ms"}</td>
+      <td class="small">${(r.open_ports || []).join(", ") || '<span class="muted">-</span>'}</td>
+      <td>${r.snmp ? `<span class="status up">v${SP.esc(r.snmp_version)}</span>` : '<span class="muted">-</span>'}</td>
+      <td><div>${SP.esc(r.vendor || "")}</div><div class="small muted" style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${SP.esc(r.sys_descr)}">${SP.esc(r.sys_descr || "")}</div></td>
+      <td>${rowStatus(r)}</td></tr>`).join("") || `<tr><td colspan="8"><div class="empty">${d.running ? "Scanning… responding hosts appear here as they are found." : "No hosts responded."}</div></td></tr>`;
+    sync();
+    return d.running || d.state === "queued" || d.state === "running";
+  }
+  function sync() { SP.$("#add-selected").disabled = !picked.size; SP.$("#add-selected").textContent = picked.size ? `Add ${picked.size} selected as devices` : "Add selected as devices"; }
+  body.addEventListener("change", (e) => { if (!e.target.classList.contains("pick")) return; e.target.checked ? picked.add(e.target.value) : picked.delete(e.target.value); sync(); });
+  const selectWhere = (fn) => { SP.$$(".pick", body).forEach((c) => { if (fn(c)) { c.checked = true; picked.add(c.value); } }); sync(); };
+  SP.$("#select-new").addEventListener("click", () => selectWhere(() => true));
+  SP.$("#select-snmp").addEventListener("click", () => selectWhere((c) => c.dataset.snmp === "1"));
+  SP.$("#add-selected").addEventListener("click", async (e) => {
+    e.target.disabled = true;
+    try {
+      const r = await SP.api("POST", `/api/scans/${id}/add`, { ips: [...picked] });
+      SP.toast(`Added ${r.added} devices. Discovery starts on their first poll.`);
+      picked.clear();
+      render(await SP.api("GET", `/api/scans/${id}`));
+    } catch (err) { SP.toast(err.message, "error"); }
+  });
+  async function refresh() {
+    let again = false;
+    try { again = render(await SP.api("GET", `/api/scans/${id}`)); } catch (e) { again = true; }
+    if (again) setTimeout(refresh, 1500);
+  }
+  refresh();
+});
+</script>
+{% endblock %}

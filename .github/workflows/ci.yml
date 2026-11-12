@@ -71,8 +71,17 @@ jobs:
           exe=dist/SNMPathy; [ -f dist/SNMPathy.exe ] && exe=dist/SNMPathy.exe
           "$exe" version
           "$exe" ping 127.0.0.1 -n 1
+      - name: Name the executable for the collector downloads folder
+        shell: bash
+        run: |
+          mkdir -p downloads
+          case "${{ runner.os }}" in
+            Windows) cp dist/SNMPathy.exe downloads/SNMPathy-windows.exe ;;
+            macOS)   cp dist/SNMPathy downloads/SNMPathy-macos ;;
+            Linux)   cp dist/SNMPathy downloads/SNMPathy-linux ;;
+          esac
       - uses: actions/upload-artifact@v4
         with:
           name: SNMPathy-${{ runner.os }}
-          path: dist/SNMPathy*
+          path: downloads/*
           if-no-files-found: error

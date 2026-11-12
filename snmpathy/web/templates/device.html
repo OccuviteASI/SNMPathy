@@ -2,7 +2,7 @@
 {% from "_macros.html" import status, icon, meter %}
 {% block title %}{{ device.name }}{% endblock %}
 {% block crumbs %}<div class="crumbs"><a href="/devices">Devices</a> / {{ device.hostname }}</div>{% endblock %}
-{% block heading %}{{ device.name }} {% if not device.enabled %}{{ status('paused', 'disabled') }}{% else %}{{ status(device.status) }}{% endif %}{% endblock %}
+{% block heading %}{{ device.name }} {% if not device.enabled %}{{ status('paused', 'disabled') }}{% else %}{{ status(device.status) }}{% if device.degraded %} {{ status('warning', 'degraded') }}{% endif %}{% endif %}{% endblock %}
 {% block actions %}
 {% if device.snmp_enabled %}
 <button class="btn" data-action="api" data-url="/api/devices/{{ device.id }}/poll" data-success="Polled: {samples} samples in {duration_ms} ms">{{ icon('refresh') }} Poll now</button>
@@ -29,7 +29,7 @@
         <dt>Uptime</dt><dd>{{ device.sys_uptime|duration if device.sys_uptime else '-' }}</dd>
         <dt>Location</dt><dd>{{ device.location or device.sys_location or '-' }}</dd>
         <dt>Contact</dt><dd>{{ device.sys_contact or '-' }}</dd>
-        <dt>SNMP</dt><dd>{% if device.snmp_enabled %}v{{ device.snmp_version }} · port {{ device.snmp_port }} · every {{ device.poll_interval|duration }}{% else %}disabled{% endif %}</dd>
+        <dt>SNMP</dt><dd>{% if device.snmp_enabled %}v{{ device.snmp_version }}{% if device.snmp_version == '3' %} · user {{ device.v3_user or '-' }}{% else %} · community <code>{{ device.snmp_community }}</code>{% endif %} · port {{ device.snmp_port }} · every {{ device.poll_interval|duration }}{% else %}disabled{% endif %} · <a href="/devices/{{ device.id }}/edit#snmp">Change SNMP settings</a></dd>
         <dt>Last poll</dt><dd>{{ device.last_polled|ts('ago')|safe }}{% if device.last_poll_ms %} · {{ '%.0f'|format(device.last_poll_ms) }} ms{% endif %}</dd>
         {% if device.last_error %}<dt>Last error</dt><dd class="status down" style="white-space:normal">{{ device.last_error }}</dd>{% endif %}
         {% if device.tags %}<dt>Tags</dt><dd>{% for t in device.tags %}<a class="tag" href="/devices?tag={{ t|urlencode }}">{{ t }}</a>{% endfor %}</dd>{% endif %}
@@ -38,6 +38,25 @@
     </div>
   </div>
   <div class="stack" style="grid-column: span 7">
+    <div class="card">
+      <div class="card-head"><h2>Availability</h2><span class="small muted">{{ avail.rule }}</span></div>
+      <div class="card-body">
+        <div class="row mb">{{ status(device.status) }}{% if device.degraded %} {{ status('warning', 'degraded') }}{% endif %}
+          <span class="small muted">since {{ device.status_since|ts('ago')|safe }} · 30-day uptime <strong>{{ uptime_30d|pct(3) }}</strong></span></div>
+        {% if device.status_reason %}<p class="small" style="margin-top:0">{{ device.status_reason }}</p>{% endif %}
+        <table class="table compact">
+          <thead><tr><th>Method</th><th>State</th><th>Since</th><th>Detail</th></tr></thead>
+          <tbody>
+          {% for s in avail.sources %}
+            <tr><td>{% if s.check_id %}<a href="/checks/{{ s.check_id }}">{{ s.name }}</a>{% else %}{{ s.name }}{% endif %} <span class="small muted">{{ s.kind|upper }}</span></td>
+              <td>{{ status(s.state) }}</td><td class="nowrap">{{ s.since|ts('ago')|safe }}</td><td class="small muted">{{ s.message }}</td></tr>
+          {% else %}<tr><td colspan="4" class="muted">No availability methods. Enable SNMP or add a ping/TCP/HTTP check.</td></tr>{% endfor %}
+          </tbody>
+        </table>
+        {% if collector %}<p class="small muted" style="margin:8px 0 0">Monitored from collector <a href="/collectors/{{ collector.id }}">{{ collector.name }}</a> {{ status('up' if collector.status == 'online' else ('down' if collector.status == 'offline' else 'unknown'), collector.status) }}</p>{% endif %}
+        {% if parent %}<p class="small muted" style="margin:8px 0 0">Parent: <a href="/devices/{{ parent.id }}">{{ parent.name }}</a> {{ status(parent.status) }}</p>{% endif %}
+      </div>
+    </div>
     {% if alerts %}
     <div class="card">
       <div class="card-head"><h2>Firing alerts</h2></div>

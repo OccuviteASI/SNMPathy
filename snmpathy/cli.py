@@ -88,7 +88,8 @@ async def _open_browser_when_ready(server, url: str) -> None:
         await asyncio.sleep(0.1)
 
 
-async def _serve(settings, snmp_factory=None, probe=None, setup=None, open_browser: bool = False) -> None:
+async def _serve(settings, snmp_factory=None, probe=None, setup=None, open_browser: bool = False,
+                 on_app=None) -> None:
     import uvicorn
 
     from .app import create_app
@@ -100,6 +101,8 @@ async def _serve(settings, snmp_factory=None, probe=None, setup=None, open_brows
         if asyncio.iscoroutine(result):
             await result
     app = create_app(settings, db=db, snmp_factory=snmp_factory, probe=probe)
+    if on_app:
+        on_app(app)
     config = uvicorn.Config(app, host=settings.http_host, port=settings.http_port, log_level="info",
                             access_log=False, lifespan="on")
     server = uvicorn.Server(config)
@@ -132,7 +135,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 
 def cmd_demo(args: argparse.Namespace) -> int:
-    from .demo import demo_probe, demo_snmp_factory, demo_syslog_sender, populate_demo
+    from .demo import demo_flow_sender, demo_probe, demo_snmp_factory, demo_syslog_sender, populate_demo
 
     settings = _settings(args)
     if args.database is None:
@@ -140,12 +143,19 @@ def cmd_demo(args: argparse.Namespace) -> int:
         settings.database = str(Path(settings.database).with_name("snmpathy-demo.db"))
     async def run() -> None:
         sender = asyncio.create_task(demo_syslog_sender(settings))
+        flows: list[asyncio.Task] = []
+
+        def start_flows(app) -> None:
+            monitor = lambda: app.state.monitor.flows if app.state.monitor else None  # noqa: E731
+            flows.append(asyncio.create_task(demo_flow_sender(monitor)))
         try:
             await _serve(settings, snmp_factory=demo_snmp_factory, probe=demo_probe,
                          setup=lambda db: populate_demo(db, settings, days=args.days),
-                         open_browser=getattr(args, "open", False))
+                         open_browser=getattr(args, "open", False), on_app=start_flows)
         finally:
             sender.cancel()
+            for task in flows:
+                task.cancel()
 
     _run(run())
     return 0
@@ -366,6 +376,96 @@ def _server_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--open", action="store_true", help="open the web UI in a browser once started")
 
 
+def cmd_collector(args: argparse.Namespace) -> int:
+    """Run as a remote collector for a central SNMPathy server."""
+    import os
+
+    from .collector_agent import CollectorAgent, load_collector_config
+
+    try:
+        conf = load_collector_config(args.config)
+    except FileNotFoundError:
+        print(f"error: config file {args.config} not found", file=sys.stderr)
+        return 2
+    server = args.server or os.environ.get("SNMPATHY_COLLECTOR_SERVER") or conf.get("server")
+    token = args.token or os.environ.get("SNMPATHY_COLLECTOR_TOKEN") or conf.get("token")
+    if not server or not token:
+        print("error: --server and --token are required (or a collector.yaml with server: and token:).\n"
+              "Create a collector in the SNMPathy web UI (Collectors) to get a token and install command.",
+              file=sys.stderr)
+        return 2
+    verify: bool | str = True
+    if args.insecure or str(conf.get("verify_tls", "true")).lower() in ("false", "0", "no"):
+        verify = False
+    if args.ca_file or conf.get("ca_file"):
+        verify = args.ca_file or conf["ca_file"]
+    state_dir = args.state_dir or conf.get("state_dir") or "."
+    agent = CollectorAgent(server, token, verify=verify, state_dir=state_dir,
+                           concurrency=int(args.concurrency or conf.get("concurrency") or 32),
+                           name=conf.get("name") or "")
+    _run(agent.run())
+    return 0
+
+
+def cmd_scan(args: argparse.Namespace) -> int:
+    """Sweep IP ranges for devices and optionally add them to the database."""
+    from .checks.runner import run_probe
+    from .scanner import ScanOptions, TargetError, default_client_factory, expand_targets, scan_host
+
+    opts = ScanOptions.from_dict({
+        "communities": args.community or ["public"], "snmp_port": args.port, "ping": not args.no_ping,
+        "tcp_ports": [int(p) for p in (args.tcp or "").split(",") if p.strip()], "timeout": args.timeout,
+        "concurrency": args.concurrency, "resolve_dns": not args.no_dns, "exclude": args.exclude or "",
+        "v3": ([{"user": args.user, "auth_proto": args.auth_proto, "auth_key": args.auth_key or "",
+                 "priv_proto": args.priv_proto, "priv_key": args.priv_key or ""}] if args.user else []),
+        "auto_add": args.add, "tags": args.tag or ["discovered"],
+    })
+    try:
+        hosts = expand_targets(" ".join(args.targets), opts.exclude)
+    except TargetError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(f"Scanning {len(hosts)} addresses ...", file=sys.stderr)
+
+    async def go():
+        sem = asyncio.Semaphore(opts.concurrency)
+        found = []
+
+        async def one(h):
+            async with sem:
+                r = await scan_host(h, opts, run_probe, default_client_factory)
+                if r:
+                    found.append(r)
+                    if not args.json:
+                        ports = ",".join(map(str, r["open_ports"])) or "-"
+                        ping = f"{r['ping_ms']:.1f}ms" if r["ping_ms"] is not None else "-"
+                        snmp = f"v{r['snmp_version']}" if r["snmp"] else "-"
+                        print(f"{r['ip']:<16} {ping:>8}  snmp={snmp:<4} ports={ports:<12} "
+                              f"{r['sys_name'] or r['dns_name']}  {r['vendor']}")
+        await asyncio.gather(*(one(h) for h in hosts))
+        return found
+
+    found = _run(go()) or []
+    if args.json:
+        print(json.dumps(found, indent=2))
+    print(f"{len(found)} hosts responded", file=sys.stderr)
+    if args.add != "none" and found:
+        from .db import Database
+        from .scanner import ScanManager
+
+        db = Database(_settings(args).database)
+        manager = ScanManager(db)
+        scan = manager.create({"name": "CLI scan " + " ".join(args.targets)[:150], "targets": " ".join(args.targets),
+                               "options": opts.to_dict()})
+        for r in found:
+            manager._store(scan["id"], r)
+        added = manager.add(scan["id"], mode=args.add)
+        db.update("scans", scan["id"], {"state": "done", "found": len(found), "scanned": len(hosts),
+                                        "finished_at": time.time(), "started_at": time.time()})
+        print(f"added {len(added)} devices to {db.path}", file=sys.stderr)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="snmpathy", description="SNMP polling, syslog ingest and uptime monitoring")
     parser.add_argument("--log-level", default="info")
@@ -448,6 +548,39 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--token", help="API token to put in the data source (default: ${SNMPATHY_API_TOKEN})")
     p.set_defaults(func=cmd_grafana_export)
 
+    p = sub.add_parser("scan", help="scan IP ranges for devices (ping, TCP, SNMP) and optionally add them")
+    p.add_argument("targets", nargs="+", help="10.0.0.0/24, 10.0.1.1-50, 192.168.1.10, host names")
+    p.add_argument("-c", "--community", action="append", help="community to try (repeatable; default public)")
+    p.add_argument("-p", "--port", type=int, default=161, help="SNMP port")
+    p.add_argument("-u", "--user", help="SNMPv3 user to try as well")
+    p.add_argument("-a", "--auth-proto", default="sha")
+    p.add_argument("-A", "--auth-key")
+    p.add_argument("-x", "--priv-proto", default="aes")
+    p.add_argument("-X", "--priv-key")
+    p.add_argument("--tcp", help="TCP ports to probe, e.g. 22,80,443,3389")
+    p.add_argument("--exclude", help="addresses/ranges to skip")
+    p.add_argument("--no-ping", action="store_true")
+    p.add_argument("--no-dns", action="store_true", help="skip reverse DNS lookups")
+    p.add_argument("-t", "--timeout", type=float, default=1.5)
+    p.add_argument("--concurrency", type=int, default=64)
+    p.add_argument("--add", choices=["none", "snmp", "alive"], default="none",
+                   help="add hosts to the database: those answering SNMP, or any that answered")
+    p.add_argument("--tag", action="append")
+    p.add_argument("--json", action="store_true", help="print results as JSON")
+    p.add_argument("--config")
+    p.add_argument("--db", dest="database")
+    p.set_defaults(func=cmd_scan)
+
+    p = sub.add_parser("collector", help="run as a remote collector (probe) for a central SNMPathy server")
+    p.add_argument("--server", help="central server URL, e.g. https://nms.example.com")
+    p.add_argument("--token", help="collector token (created in the web UI under Collectors)")
+    p.add_argument("--config", help="collector.yaml with server/token/verify_tls/ca_file/state_dir")
+    p.add_argument("--insecure", action="store_true", help="do not verify the server's TLS certificate")
+    p.add_argument("--ca-file", help="CA bundle for a server with a private certificate")
+    p.add_argument("--state-dir", help="where buffered results are kept while the server is unreachable")
+    p.add_argument("--concurrency", type=int)
+    p.set_defaults(func=cmd_collector)
+
     p = sub.add_parser("version", help="print version information")
     p.set_defaults(func=cmd_version)
     return parser
@@ -459,8 +592,11 @@ def main(argv: list[str] | None = None) -> int:
     _setup_logging(args.log_level)
     if not getattr(args, "func", None):
         # No sub-command: run the server. A double-clicked executable also opens the browser.
-        from .config import is_frozen
+        from .config import app_dir, is_frozen
 
+        if is_frozen() and (app_dir() / "collector.yaml").exists() and not (app_dir() / "snmpathy.yaml").exists():
+            # A collector install: the executable sits next to its collector.yaml.
+            return int(cmd_collector(build_parser().parse_args(["collector"])) or 0)
         extra = ["--open"] if is_frozen() else []
         # Only top-level options (e.g. --log-level) can be present here, so they go first.
         args = parser.parse_args([*(argv if argv is not None else sys.argv[1:]), "serve", *extra])

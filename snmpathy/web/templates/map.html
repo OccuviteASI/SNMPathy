@@ -1,0 +1,302 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon %}
+{% block title %}Network map{% endblock %}
+{% block actions %}
+<select id="map-site" aria-label="Site"><option value="">All sites</option></select>
+{% if tags %}<select id="map-tag" aria-label="Tag"><option value="">All tags</option>{% for t in tags %}<option {{ 'selected' if tag == t }}>{{ t }}</option>{% endfor %}</select>{% endif %}
+<input type="search" id="map-search" placeholder="Find device…" aria-label="Find device">
+{% endblock %}
+{% block content %}
+<style>
+  .map-wrap { position: relative; height: calc(100vh - 170px); min-height: 460px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); overflow: hidden; }
+  .map-wrap svg { width: 100%; height: 100%; display: block; cursor: grab; user-select: none; touch-action: none; }
+  .map-wrap svg.panning { cursor: grabbing; }
+  .map-toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px; }
+  .map-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--muted); margin-left: auto; }
+  .map-legend i { display: inline-block; width: 18px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 4px; }
+  .map-legend b { display: inline-block; width: 9px; height: 9px; border-radius: 50%; vertical-align: middle; margin-right: 4px; }
+  .map-node text { font-size: 11px; fill: var(--text); paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
+  .map-node .sub { fill: var(--muted); font-size: 10px; }
+  .map-node { cursor: pointer; }
+  .map-node.dim, .map-edge.dim { opacity: .18; }
+  .map-node.hit circle.ring { stroke-width: 5; }
+  .map-edge { cursor: pointer; }
+  .map-edge text { font-size: 9.5px; fill: var(--text-2); paint-order: stroke; stroke: var(--surface); stroke-width: 3px; }
+  .map-site rect { fill: var(--surface-2); stroke: var(--border); }
+  .map-site text { font-size: 12px; font-weight: 650; fill: var(--text-2); }
+  .map-panel { position: absolute; top: 10px; right: 10px; width: 300px; max-width: calc(100% - 20px); max-height: calc(100% - 20px); overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.12); padding: 12px 14px; font-size: 13px; }
+  .map-panel h3 { margin: 0 0 6px; font-size: 15px; }
+  .map-panel dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 8px 0; }
+  .map-panel dt { color: var(--muted); }
+  .map-tip { position: absolute; pointer-events: none; background: var(--text); color: var(--surface); padding: 5px 8px; border-radius: 6px; font-size: 12px; max-width: 280px; z-index: 3; }
+  .map-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 30px; color: var(--muted); pointer-events: none; }
+  @media (max-width: 700px) { .map-wrap { height: 70vh; } .map-legend { margin-left: 0; } }
+</style>
+<div class="map-toolbar">
+  <button class="btn sm" id="map-fit">Fit</button>
+  <button class="btn sm" id="map-relayout" title="Discard saved positions and lay out again">Auto layout</button>
+  <button class="btn sm" id="map-save">Save layout</button>
+  <button class="btn sm" data-action="modal" data-target="#link-modal">Add link</button>
+  <button class="btn sm" data-action="modal" data-target="#parents-modal">Set parents…</button>
+  <label class="check small"><input type="checkbox" id="map-unmanaged" checked> Unmanaged neighbours</label>
+  <label class="check small"><input type="checkbox" id="map-ports"> Port labels</label>
+  <div class="map-legend">
+    <span><b style="background:var(--good)"></b>up</span><span><b style="background:var(--warning)"></b>degraded / unreachable</span><span><b style="background:var(--critical)"></b>down</span>
+    <span><i style="background:var(--good)"></i>&lt;50%</span><span><i style="background:var(--warning)"></i>50-80%</span><span><i style="background:var(--critical)"></i>&gt;80%</span><span><i style="background:var(--border-strong)"></i>no data</span>
+  </div>
+</div>
+<div class="map-wrap" id="map-wrap">
+  <svg id="map-svg" role="img" aria-label="Network topology map"><g id="map-view"><g id="map-sites"></g><g id="map-edges"></g><g id="map-nodes"></g></g></svg>
+  <div class="map-empty hidden" id="map-empty"><div><strong>No links discovered yet.</strong><br>Links come from LLDP and CDP neighbour tables during SNMP discovery (enable LLDP/CDP on your switches and routers, then Rediscover). You can also draw links by hand with <em>Add link</em>, or set parent devices.</div></div>
+  <div class="map-tip hidden" id="map-tip"></div>
+  <div class="map-panel hidden" id="map-panel"></div>
+</div>
+
+<div class="modal-back hidden" id="link-modal">
+  <div class="modal">
+    <div class="card-head"><h2>Add a link</h2><button class="btn ghost" data-action="close-modal">&times;</button></div>
+    <form data-api="/api/map/links" data-transform="maplink">
+      <div class="modal-body"><div class="form-grid">
+        <label class="field">From device<select name="device_id" data-type="int">{% for d in devices %}<option value="{{ d.id }}">{{ d.name }}</option>{% endfor %}</select></label>
+        <label class="field">Port <span class="hint">optional</span><input name="local_port" placeholder="Gi1/0/48"></label>
+        <label class="field">To device<select name="remote_device_id" data-type="int">{% for d in devices %}<option value="{{ d.id }}">{{ d.name }}</option>{% endfor %}</select></label>
+        <label class="field">Port <span class="hint">optional</span><input name="remote_port" placeholder="ge-0/0/1"></label>
+      </div><p class="small muted">Use this for links LLDP/CDP cannot see (WAN circuits, unmanaged switches, wireless bridges). With port names, link utilisation is shown from SNMP counters.</p></div>
+      <div class="modal-foot"><button type="button" class="btn" data-action="close-modal">Cancel</button><button class="btn primary" type="submit">Add link</button></div>
+    </form>
+  </div>
+</div>
+<div class="modal-back hidden" id="parents-modal">
+  <div class="modal">
+    <div class="card-head"><h2>Set parents from the topology</h2><button class="btn ghost" data-action="close-modal">&times;</button></div>
+    <div class="modal-body">
+      <p class="small muted" style="margin-top:0">Pick your core device (or the device closest to SNMPathy). Every device reachable from it over discovered links gets the next device towards the core as its parent, so an outage upstream shows downstream devices as <em>unreachable</em> instead of raising an alert for each.</p>
+      <div class="form-grid">
+        <label class="field">Core / root device<select id="parents-root">{% for d in devices %}<option value="{{ d.id }}">{{ d.name }}</option>{% endfor %}</select></label>
+        <label class="check"><input type="checkbox" id="parents-overwrite"> Replace parents that are already set</label>
+      </div>
+      <div id="parents-preview" class="small mt"></div>
+    </div>
+    <div class="modal-foot"><button type="button" class="btn" id="parents-preview-btn">Preview</button><button type="button" class="btn primary" id="parents-apply">Apply</button></div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = SP.$("#map-svg"), view = SP.$("#map-view"), gSites = SP.$("#map-sites"), gEdges = SP.$("#map-edges"), gNodes = SP.$("#map-nodes");
+  const tip = SP.$("#map-tip"), panel = SP.$("#map-panel"), wrap = SP.$("#map-wrap");
+  const params = new URLSearchParams(location.search);
+  let site = params.get("site") || "", tag = params.get("tag") || "";
+  let data = null, pos = {}, zoom = { k: 1, x: 0, y: 0 }, dirty = false, selected = null;
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const statusColor = (n) => n.status === "down" ? css("--critical") : n.status === "unreachable" || n.degraded ? css("--warning")
+    : n.status === "up" ? css("--good") : css("--muted");
+  const utilColor = (e) => e.down ? css("--critical") : e.util == null ? css("--border-strong") : e.util >= 80 ? css("--critical") : e.util >= 50 ? css("--warning") : css("--good");
+  const width = (e) => !e.speed ? 1.6 : e.speed >= 1e10 ? 4 : e.speed >= 1e9 ? 2.8 : e.speed >= 1e8 ? 1.8 : 1.3;
+  const ICONS = {
+    switch: "M-7 -3h14v6h-14z M-4 0h.01 M-1 0h.01 M2 0h.01 M5 0h.01",
+    router: "M-7 0a7 7 0 1 0 14 0a7 7 0 1 0 -14 0 M-4 -3l3 3 -3 3 M4 -3l-3 3 3 3",
+    firewall: "M-7 -5h14v10h-14z M-7 0h14 M-2 -5v5 M2 0v5",
+    wireless: "M0 4h.01 M-3 1a4 4 0 0 1 6 0 M-6 -2a8 8 0 0 1 12 0",
+    server: "M-6 -6h12v5h-12z M-6 1h12v5h-12z M-3 -3.5h.01 M-3 3.5h.01",
+    printer: "M-5 -2v-4h10v4 M-7 -2h14v6h-14z M-4 2h8v4h-8z",
+    ups: "M-6 -6h12v12h-12z M1 -4l-3 4h4l-3 4",
+    storage: "M-6 -4a6 2 0 1 0 12 0a6 2 0 1 0 -12 0 M-6 -4v8a6 2 0 0 0 12 0v-8",
+    device: "M-6 -5h12v10h-12z",
+  };
+  const el = (tag, attrs, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
+  const fmtBps = (b) => b == null ? "-" : SP.fmtBps ? SP.fmtBps(b) : (b >= 1e9 ? (b / 1e9).toFixed(2) + " Gbps" : b >= 1e6 ? (b / 1e6).toFixed(1) + " Mbps" : b >= 1e3 ? (b / 1e3).toFixed(0) + " kbps" : Math.round(b) + " bps");
+  const fmtSpeed = (s) => !s ? "unknown speed" : s >= 1e9 ? (s / 1e9) + "G" : s >= 1e6 ? (s / 1e6) + "M" : s + "";
+
+  // ---------------------------------------------------------------- layout
+  function layout(force) {
+    const nodes = data.nodes, W = wrap.clientWidth || 900, H = wrap.clientHeight || 600;
+    const sites = [...new Set(nodes.map((n) => n.site))];
+    const sizes = {}; nodes.forEach((n) => (sizes[n.site] = (sizes[n.site] || 0) + 1));
+    const biggest = Math.max(1, ...Object.values(sizes));
+    const cols = Math.ceil(Math.sqrt(sites.length)), cell = Math.max(260, Math.sqrt(biggest) * 150);
+    const centre = {};
+    sites.sort((a, b) => (sizes[b] || 0) - (sizes[a] || 0)).forEach((s, i) => (centre[s] = [(i % cols) * cell * 1.15 + cell / 2, Math.floor(i / cols) * cell * 1.05 + cell / 2]));
+    const fresh = nodes.filter((n) => force || !pos[n.id]);
+    fresh.forEach((n, i) => { const c = centre[n.site]; const a = i * 2.39996; const r = 30 + 14 * Math.sqrt(i); pos[n.id] = [c[0] + r * Math.cos(a), c[1] + r * Math.sin(a)]; });
+    if (!fresh.length) return;
+    const movable = new Set(fresh.map((n) => n.id));
+    const edges = data.edges.filter((e) => pos[e.source] && pos[e.target]);
+    for (let it = 0; it < 300; it++) {
+      const t = 1 - it / 300, disp = {};
+      nodes.forEach((n) => (disp[n.id] = [0, 0]));
+      for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i], b = nodes[j]; let dx = pos[a.id][0] - pos[b.id][0], dy = pos[a.id][1] - pos[b.id][1];
+        let d2 = dx * dx + dy * dy || 0.01; if (d2 > 250000) continue;
+        const f = (a.site === b.site ? 5200 : 7000) / d2; dx *= f; dy *= f;
+        disp[a.id][0] += dx; disp[a.id][1] += dy; disp[b.id][0] -= dx; disp[b.id][1] -= dy;
+      }
+      edges.forEach((e) => { const a = pos[e.source], b = pos[e.target]; const dx = b[0] - a[0], dy = b[1] - a[1]; const d = Math.sqrt(dx * dx + dy * dy) || 1; const f = (d - 110) * 0.05;
+        disp[e.source][0] += dx / d * f; disp[e.source][1] += dy / d * f; disp[e.target][0] -= dx / d * f; disp[e.target][1] -= dy / d * f; });
+      nodes.forEach((n) => { const c = centre[n.site]; disp[n.id][0] += (c[0] - pos[n.id][0]) * 0.012; disp[n.id][1] += (c[1] - pos[n.id][1]) * 0.012; });
+      nodes.forEach((n) => { if (!movable.has(n.id)) return; const d = disp[n.id]; const m = Math.sqrt(d[0] * d[0] + d[1] * d[1]) || 1; const s = Math.min(m, 30 * t + 1) / m; pos[n.id][0] += d[0] * s; pos[n.id][1] += d[1] * s; });
+    }
+  }
+
+  // ---------------------------------------------------------------- render
+  function render() {
+    gSites.innerHTML = gEdges.innerHTML = gNodes.innerHTML = "";
+    const bySite = {};
+    data.nodes.forEach((n) => (bySite[n.site] = bySite[n.site] || []).push(n));
+    if (!site && Object.keys(bySite).length > 1) Object.entries(bySite).forEach(([name, ns]) => {
+      const xs = ns.map((n) => pos[n.id][0]), ys = ns.map((n) => pos[n.id][1]);
+      const x0 = Math.min(...xs) - 60, y0 = Math.min(...ys) - 60, x1 = Math.max(...xs) + 60, y1 = Math.max(...ys) + 60;
+      const g = el("g", { class: "map-site" }, gSites);
+      el("rect", { x: x0, y: y0, width: x1 - x0, height: y1 - y0, rx: 18 }, g);
+      const s = data.sites.find((x) => x.name === name) || {};
+      const t = el("text", { x: x0 + 14, y: y0 + 20 }, g); t.textContent = `${name} · ${s.devices || ns.length} devices${s.down ? ` · ${s.down} down` : ""}${s.unreachable ? ` · ${s.unreachable} unreachable` : ""}`;
+      g.addEventListener("dblclick", () => setSite(name));
+    });
+    const showPorts = SP.$("#map-ports").checked;
+    data.edges.forEach((e) => {
+      if (!pos[e.source] || !pos[e.target]) return;
+      const [x1, y1] = pos[e.source], [x2, y2] = pos[e.target];
+      const g = el("g", { class: "map-edge", "data-id": e.id }, gEdges);
+      el("line", { x1, y1, x2, y2, stroke: "transparent", "stroke-width": 12 }, g);
+      el("line", { x1, y1, x2, y2, stroke: e.parent ? css("--border-strong") : utilColor(e), "stroke-width": width(e),
+        "stroke-dasharray": e.parent ? "2 5" : e.manual ? "8 4" : e.down ? "4 3" : "", "stroke-linecap": "round" }, g);
+      if (showPorts && !e.parent) {
+        const lab = (txt, f) => { if (!txt) return; const t = el("text", { x: x1 + (x2 - x1) * f, y: y1 + (y2 - y1) * f - 3, "text-anchor": "middle" }, g); t.textContent = txt; };
+        lab(e.source_port, 0.22); lab(e.target_port, 0.78);
+      }
+      g.addEventListener("mousemove", (ev) => showTip(ev, edgeText(e)));
+      g.addEventListener("mouseleave", hideTip);
+      g.addEventListener("click", (ev) => { ev.stopPropagation(); showEdge(e); });
+    });
+    data.nodes.forEach((n) => {
+      const [x, y] = pos[n.id];
+      const g = el("g", { class: "map-node", transform: `translate(${x},${y})`, "data-id": n.id }, gNodes);
+      const c = statusColor(n);
+      el("circle", { r: 17, fill: css("--surface"), stroke: c, "stroke-width": 3, class: "ring", "stroke-dasharray": n.managed ? (n.status === "unreachable" ? "5 3" : "") : "3 3" }, g);
+      el("path", { d: ICONS[n.kind] || ICONS.device, fill: "none", stroke: n.managed ? css("--text-2") : css("--muted"), "stroke-width": 1.6, "stroke-linecap": "round", "stroke-linejoin": "round" }, g);
+      if (n.status === "down") el("circle", { r: 5, cx: 13, cy: -13, fill: css("--critical") }, g);
+      const t = el("text", { y: 31, "text-anchor": "middle" }, g); t.textContent = n.name.length > 26 ? n.name.slice(0, 25) + "…" : n.name;
+      if (n.ip && n.ip !== n.name) { const s = el("text", { y: 43, "text-anchor": "middle", class: "sub" }, g); s.textContent = n.ip; }
+      g.addEventListener("pointerdown", (ev) => startDrag(ev, n));
+      g.addEventListener("mousemove", (ev) => showTip(ev, `${n.name} · ${n.managed ? n.status : "not monitored"}${n.degraded ? " (degraded)" : ""}${n.reason ? "\n" + n.reason : ""}`));
+      g.addEventListener("mouseleave", hideTip);
+    });
+    SP.$("#map-empty").classList.toggle("hidden", data.edges.length > 0 || !data.nodes.length);
+    applyZoom();
+    highlight();
+  }
+  const edgeText = (e) => e.parent ? "Parent relationship" : `${nameOf(e.source)} ${e.source_port || ""} ↔ ${nameOf(e.target)} ${e.target_port || ""}\n${fmtSpeed(e.speed)} · ${e.util == null ? "no utilisation data" : e.util.toFixed(1) + "% utilised"}${e.down ? " · port down" : ""} · ${e.protocols.join("/")}`;
+  const nameOf = (id) => (data.nodes.find((n) => n.id === id) || {}).name || id;
+  function showTip(ev, text) { const r = wrap.getBoundingClientRect(); tip.textContent = text; tip.style.whiteSpace = "pre-line"; tip.style.left = (ev.clientX - r.left + 14) + "px"; tip.style.top = (ev.clientY - r.top + 14) + "px"; tip.classList.remove("hidden"); }
+  function hideTip() { tip.classList.add("hidden"); }
+
+  function showNode(n) {
+    selected = n.id;
+    const links = data.edges.filter((e) => !e.parent && (e.source === n.id || e.target === n.id));
+    panel.innerHTML = `<div class="row" style="justify-content:space-between"><h3>${SP.esc(n.name)}</h3><button class="btn ghost sm" id="panel-close">&times;</button></div>
+      <span class="status ${n.managed ? (n.status === "paused" ? "paused" : n.status) : "unknown"}">${n.managed ? n.status : "not monitored"}</span>${n.degraded ? ' <span class="status warning">degraded</span>' : ""}
+      ${n.reason ? `<p class="small muted">${SP.esc(n.reason)}</p>` : ""}
+      <dl><dt>Address</dt><dd>${SP.esc(n.ip || "-")}</dd><dt>Type</dt><dd>${n.kind}</dd><dt>Vendor</dt><dd>${SP.esc(n.vendor || "-")}</dd><dt>Site</dt><dd>${SP.esc(n.site)}</dd>${n.collector ? `<dt>Collector</dt><dd>${SP.esc(n.collector)}</dd>` : ""}</dl>
+      ${n.descr ? `<p class="small muted">${SP.esc(n.descr)}</p>` : ""}
+      <strong class="small">Links (${links.length})</strong>
+      <table class="table compact small">${links.map((e) => { const mine = e.source === n.id; return `<tr><td>${SP.esc((mine ? e.source_port : e.target_port) || "?")}</td><td>→ ${SP.esc(nameOf(mine ? e.target : e.source))} ${SP.esc((mine ? e.target_port : e.source_port) || "")}</td><td class="nowrap">${e.util == null ? "" : e.util.toFixed(0) + "%"}</td></tr>`; }).join("") || '<tr><td class="muted">none</td></tr>'}</table>
+      ${n.device_id ? `<div class="row mt"><a class="btn sm primary" href="/devices/${n.device_id}">Open device</a><a class="btn sm" href="/devices/${n.device_id}?tab=interfaces">Interfaces</a></div>` : `<p class="small muted">Seen as an LLDP/CDP neighbour but not monitored. <a href="/devices/new">Add it as a device</a> or <a href="/scans?new=1">scan</a> for it.</p>`}`;
+    panel.classList.remove("hidden");
+    SP.$("#panel-close").onclick = () => { panel.classList.add("hidden"); selected = null; highlight(); };
+    highlight();
+  }
+  function showEdge(e) {
+    panel.innerHTML = `<div class="row" style="justify-content:space-between"><h3>Link</h3><button class="btn ghost sm" id="panel-close">&times;</button></div>
+      <dl><dt>From</dt><dd>${SP.esc(nameOf(e.source))} ${SP.esc(e.source_port || "")}</dd><dt>To</dt><dd>${SP.esc(nameOf(e.target))} ${SP.esc(e.target_port || "")}</dd>
+      <dt>Speed</dt><dd>${fmtSpeed(e.speed)}</dd><dt>Utilisation</dt><dd>${e.util == null ? "-" : e.util.toFixed(1) + "%"}</dd><dt>In / out</dt><dd>${fmtBps(e.in_bps)} / ${fmtBps(e.out_bps)}</dd>
+      <dt>Learned by</dt><dd>${e.protocols.join(", ")}</dd>${e.down ? "<dt>Port</dt><dd class='status down'>down</dd>" : ""}</dl>
+      ${e.manual ? `<button class="btn sm danger" id="del-link">Delete manual link</button>` : ""}`;
+    panel.classList.remove("hidden");
+    SP.$("#panel-close").onclick = () => panel.classList.add("hidden");
+    const del = SP.$("#del-link");
+    if (del) del.onclick = async () => { await SP.api("DELETE", `/api/map/links/${e.link_id}`); panel.classList.add("hidden"); load(); };
+  }
+  function highlight() {
+    const q = SP.$("#map-search").value.trim().toLowerCase();
+    const focus = new Set();
+    if (selected) { focus.add(selected); data.edges.forEach((e) => { if (e.source === selected) focus.add(e.target); if (e.target === selected) focus.add(e.source); }); }
+    SP.$$(".map-node", gNodes).forEach((g) => {
+      const n = data.nodes.find((x) => x.id === g.dataset.id);
+      const hit = q && (n.name.toLowerCase().includes(q) || (n.ip || "").includes(q));
+      g.classList.toggle("hit", !!hit);
+      g.classList.toggle("dim", (q && !hit) || (selected && !focus.has(n.id)));
+    });
+    SP.$$(".map-edge", gEdges).forEach((g) => { const e = data.edges.find((x) => x.id === g.dataset.id); g.classList.toggle("dim", !!selected && e.source !== selected && e.target !== selected); });
+  }
+
+  // ------------------------------------------------------------ interaction
+  function applyZoom() { view.setAttribute("transform", `translate(${zoom.x},${zoom.y}) scale(${zoom.k})`); }
+  function fit() {
+    const pts = Object.entries(pos).filter(([id]) => data.nodes.some((n) => n.id === id)).map(([, p]) => p);
+    if (!pts.length) return;
+    const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+    const x0 = Math.min(...xs) - 80, x1 = Math.max(...xs) + 80, y0 = Math.min(...ys) - 80, y1 = Math.max(...ys) + 80;
+    const W = wrap.clientWidth, H = wrap.clientHeight;
+    zoom.k = Math.min(2, W / (x1 - x0), H / (y1 - y0));
+    zoom.x = (W - (x1 - x0) * zoom.k) / 2 - x0 * zoom.k; zoom.y = (H - (y1 - y0) * zoom.k) / 2 - y0 * zoom.k;
+    applyZoom();
+  }
+  const toWorld = (ev) => { const r = svg.getBoundingClientRect(); return [(ev.clientX - r.left - zoom.x) / zoom.k, (ev.clientY - r.top - zoom.y) / zoom.k]; };
+  let drag = null;
+  function startDrag(ev, n) { ev.stopPropagation(); const [wx, wy] = toWorld(ev); drag = { n, dx: pos[n.id][0] - wx, dy: pos[n.id][1] - wy, moved: false }; svg.setPointerCapture(ev.pointerId); }
+  svg.addEventListener("pointerdown", (ev) => { if (drag) return; drag = { pan: true, x: ev.clientX - zoom.x, y: ev.clientY - zoom.y, moved: false }; svg.classList.add("panning"); svg.setPointerCapture(ev.pointerId); });
+  svg.addEventListener("pointermove", (ev) => {
+    if (!drag) return;
+    drag.moved = true;
+    if (drag.pan) { zoom.x = ev.clientX - drag.x; zoom.y = ev.clientY - drag.y; applyZoom(); return; }
+    const [wx, wy] = toWorld(ev); pos[drag.n.id] = [wx + drag.dx, wy + drag.dy]; dirty = true; render();
+  });
+  svg.addEventListener("pointerup", () => {
+    if (drag && !drag.moved) { if (drag.n) showNode(drag.n); else { panel.classList.add("hidden"); selected = null; highlight(); } }
+    drag = null; svg.classList.remove("panning");
+    SP.$("#map-save").classList.toggle("primary", dirty);
+  });
+  svg.addEventListener("wheel", (ev) => { ev.preventDefault(); const r = svg.getBoundingClientRect(); const mx = ev.clientX - r.left, my = ev.clientY - r.top;
+    const k = Math.max(0.15, Math.min(4, zoom.k * (ev.deltaY < 0 ? 1.12 : 1 / 1.12))); zoom.x = mx - (mx - zoom.x) * k / zoom.k; zoom.y = my - (my - zoom.y) * k / zoom.k; zoom.k = k; applyZoom(); }, { passive: false });
+
+  async function save() {
+    await SP.api("PUT", "/api/map/positions", { view: data.view, positions: pos });
+    dirty = false; SP.$("#map-save").classList.remove("primary"); SP.toast("Layout saved");
+  }
+  SP.$("#map-save").onclick = save;
+  SP.$("#map-fit").onclick = fit;
+  SP.$("#map-relayout").onclick = async () => { await SP.api("DELETE", `/api/map/positions?view=${encodeURIComponent(data.view)}`); pos = {}; layout(true); render(); fit(); };
+  SP.$("#map-ports").onchange = render;
+  SP.$("#map-unmanaged").onchange = () => load();
+  SP.$("#map-search").addEventListener("input", highlight);
+  function setSite(s) { site = s; SP.$("#map-site").value = s; const u = new URL(location); s ? u.searchParams.set("site", s) : u.searchParams.delete("site"); history.replaceState(null, "", u); pos = {}; load(true); }
+  SP.$("#map-site").onchange = (e) => setSite(e.target.value);
+  const tagSel = SP.$("#map-tag"); if (tagSel) tagSel.onchange = (e) => { tag = e.target.value; pos = {}; load(true); };
+
+  async function load(refit) {
+    const fresh = await SP.api("GET", `/api/map?site=${encodeURIComponent(site)}&tag=${encodeURIComponent(tag)}&unmanaged=${SP.$("#map-unmanaged").checked}`);
+    const first = !data || refit;
+    data = fresh;
+    for (const [id, p] of Object.entries(data.positions || {})) if (first || !pos[id]) pos[id] = p;
+    const sel = SP.$("#map-site");
+    if (sel.options.length <= 1 || first) { sel.innerHTML = '<option value="">All sites</option>' + data.sites.map((s) => `<option ${s.name === site ? "selected" : ""}>${SP.esc(s.name)}</option>`).join(""); }
+    layout(false); render();
+    if (first) fit();
+  }
+  SP.transforms.maplink = (b) => b;
+  const parentsCall = async (apply) => {
+    const r = await SP.api("POST", "/api/map/parents", { root_device_id: +SP.$("#parents-root").value, apply, overwrite: SP.$("#parents-overwrite").checked });
+    SP.$("#parents-preview").innerHTML = r.parents.length ? `<table class="table compact">${r.parents.map((p) => `<tr><td>${SP.esc(p.device)}</td><td>← ${SP.esc(p.parent)}</td></tr>`).join("")}</table>` : "No devices are linked to that device yet.";
+    if (apply) { SP.toast(`Parents set on ${r.applied} devices`); setTimeout(() => location.reload(), 700); }
+  };
+  SP.$("#parents-preview-btn").onclick = () => parentsCall(false).catch((e) => SP.toast(e.message, "error"));
+  SP.$("#parents-apply").onclick = () => parentsCall(true).catch((e) => SP.toast(e.message, "error"));
+  window.addEventListener("resize", () => data && fit());
+  document.addEventListener("sp:theme", () => data && render());
+  load(true).catch((e) => SP.toast(e.message, "error"));
+  setInterval(() => { if (!drag && !document.hidden) load(false).catch(() => {}); }, 30000);
+});
+</script>
+{% endblock %}

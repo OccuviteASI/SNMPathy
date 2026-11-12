@@ -2,7 +2,7 @@
 {% set o = c.options or {} %}
 <div class="form-grid">
   <label class="field">Type<select name="type" id="check-type">
-    {% for t, l in [('http', 'HTTP(S) / website'), ('icmp', 'Ping (ICMP)'), ('tcp', 'TCP port'), ('dns', 'DNS resolution'), ('snmp', 'SNMP agent')] %}<option value="{{ t }}" {{ 'selected' if (c.type or 'http') == t }}>{{ l }}</option>{% endfor %}
+    {% for t, l in [('http', 'HTTP(S) / website'), ('icmp', 'Ping (ICMP)'), ('tcp', 'TCP port'), ('dns', 'DNS resolution'), ('snmp', 'SNMP agent'), ('nagios', 'Nagios plugin'), ('passive', 'Passive (results submitted)')] %}<option value="{{ t }}" {{ 'selected' if (c.type or 'http') == t }}>{{ l }}</option>{% endfor %}
   </select></label>
   <label class="field">Name<input name="name" value="{{ c.name or '' }}" placeholder="Company website" data-empty="omit"></label>
   <label class="field wide"><span id="target-label">URL</span><input name="target" required value="{{ c.target or '' }}" placeholder="https://www.example.com/" id="check-target"></label>
@@ -19,7 +19,12 @@
   <label class="check ct ct-http"><input type="checkbox" name="options.verify_tls" {{ 'checked' if o.verify_tls is not defined or o.verify_tls }}> Verify TLS certificate</label>
   <label class="field ct ct-icmp">Packets per check<input name="options.count" type="number" data-type="int" value="{{ o.count or 1 }}" min="1" max="5"></label>
   <label class="field ct ct-dns">Expected address <span class="hint">optional</span><input name="options.expected" value="{{ o.expected or '' }}"></label>
+  <label class="field ct ct-nagios">Plugin <span class="hint">name in a plugin directory</span><input name="options.command" value="{{ o.command or '' }}" placeholder="check_disk"></label>
+  <label class="field wide ct ct-nagios">Arguments <span class="hint">$HOSTADDRESS$, $HOSTNAME$, $PORT$ are replaced</span><input name="options.args" value="{{ o.args or '' }}" placeholder="-w 20% -c 10% -p /"></label>
+  <p class="small muted wide ct ct-passive">Submit results with <code>POST /api/passive</code> (NRDP-style: host, service, state 0-3, output). If nothing arrives within the interval × (retries + 1) the check goes down as stale.</p>
   <label class="field ct ct-snmp">Community <span class="hint">if no device is linked</span><input name="options.community" value="{{ o.community or 'public' }}"></label>
+  <label class="field">Run from<select name="collector_id" data-type="nullable"><option value="">Same as the device / this server</option>{% for col in collectors %}<option value="{{ col.id }}" {{ 'selected' if c.collector_id == col.id }}>Collector: {{ col.name }}{{ ' (' ~ col.site ~ ')' if col.site }}</option>{% endfor %}</select></label>
+  <label class="check wide"><input type="checkbox" name="affects_device" {{ 'checked' if not check or c.affects_device }}> Counts toward the linked device's online/offline status</label>
   <label class="check"><input type="checkbox" name="public" {{ 'checked' if c.public }}> Show on the public status page</label>
   <label class="check"><input type="checkbox" name="enabled" {{ 'checked' if not check or c.enabled }}> Enabled</label>
 </div>

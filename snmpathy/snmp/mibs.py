@@ -165,3 +165,31 @@ METRIC_INFO: dict[str, dict[str, str]] = {
     "if.oper_status": {"name": "Operational status", "unit": ""},
     "snmp.response_ms": {"name": "SNMP response time", "unit": "ms"},
 }
+
+
+# LLDP-MIB (IEEE 802.1AB) -- layer-2 neighbour discovery.
+# lldpLocPortTable, index lldpLocPortNum
+LLDP_LOC_PORT_TABLE = "1.0.8802.1.1.2.1.3.7.1"
+LLDP_LOC_PORT_ID_SUBTYPE = "1.0.8802.1.1.2.1.3.7.1.2"
+LLDP_LOC_PORT_ID = "1.0.8802.1.1.2.1.3.7.1.3"
+LLDP_LOC_PORT_DESC = "1.0.8802.1.1.2.1.3.7.1.4"
+# lldpRemTable, index lldpRemTimeMark.lldpRemLocalPortNum.lldpRemIndex
+LLDP_REM_TABLE = "1.0.8802.1.1.2.1.4.1.1"
+LLDP_REM_CHASSIS_ID_SUBTYPE = "1.0.8802.1.1.2.1.4.1.1.4"
+LLDP_REM_CHASSIS_ID = "1.0.8802.1.1.2.1.4.1.1.5"
+LLDP_REM_PORT_ID_SUBTYPE = "1.0.8802.1.1.2.1.4.1.1.6"
+LLDP_REM_PORT_ID = "1.0.8802.1.1.2.1.4.1.1.7"
+LLDP_REM_PORT_DESC = "1.0.8802.1.1.2.1.4.1.1.8"
+LLDP_REM_SYS_NAME = "1.0.8802.1.1.2.1.4.1.1.9"
+LLDP_REM_SYS_DESC = "1.0.8802.1.1.2.1.4.1.1.10"
+# lldpRemManAddrTable, index timeMark.localPortNum.remIndex.addrSubtype.addrLen.addr...
+LLDP_REM_MAN_ADDR_TABLE = "1.0.8802.1.1.2.1.4.2.1"
+
+# CISCO-CDP-MIB::cdpCacheTable, index ifIndex.cdpCacheDeviceIndex
+CDP_CACHE_TABLE = "1.3.6.1.4.1.9.9.23.1.2.1.1"
+CDP_CACHE_ADDRESS_TYPE = "1.3.6.1.4.1.9.9.23.1.2.1.1.3"
+CDP_CACHE_ADDRESS = "1.3.6.1.4.1.9.9.23.1.2.1.1.4"
+CDP_CACHE_VERSION = "1.3.6.1.4.1.9.9.23.1.2.1.1.5"
+CDP_CACHE_DEVICE_ID = "1.3.6.1.4.1.9.9.23.1.2.1.1.6"
+CDP_CACHE_DEVICE_PORT = "1.3.6.1.4.1.9.9.23.1.2.1.1.7"
+CDP_CACHE_PLATFORM = "1.3.6.1.4.1.9.9.23.1.2.1.1.8"
