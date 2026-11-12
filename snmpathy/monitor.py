@@ -302,10 +302,11 @@ class Monitor:
             async with self._sem:
                 probe = self.probe
                 if check.get("collector_id") and check["type"] != "passive":
-                    hub = self.hub
+                    hub, cid = self.hub, check["collector_id"]
 
-                    async def probe(c, device, _cid=check["collector_id"]):
-                        return await hub.run_check(_cid, c, device)
+                    async def remote_probe(c, device):
+                        return await hub.run_check(cid, c, device)
+                    probe = remote_probe
                 updated = await execute_check(self.db, check, probe)
                 self.counters["checks"] += 1
                 if updated.get("transition") in {"up", "down"}:

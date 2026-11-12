@@ -11,12 +11,12 @@ import io
 import json
 import time
 from datetime import datetime, timezone
-from typing import Any, Iterator, Optional
+from typing import Any, Iterator
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, StreamingResponse
-from markupsafe import Markup, escape
+from markupsafe import Markup
 from pydantic import BaseModel, Field
 
 from ..db import Database, loads
