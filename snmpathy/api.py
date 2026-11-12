@@ -917,3 +917,219 @@ async def send_schedule_now(sid: int, request: Request, db: Database = Depends(g
     if not schedule:
         raise _not_found("schedule")
     return await scheduled.deliver(db, schedule, request.app.state.settings)
+
+
+# ======================================================================= scans
+class ScanV3User(BaseModel):
+    user: str
+    auth_proto: str = "sha"
+    auth_key: str = ""
+    priv_proto: str = "aes"
+    priv_key: str = ""
+    context: str = ""
+
+
+class ScanOptionsIn(BaseModel):
+    communities: list[str] = ["public"]
+    v3: list[ScanV3User] = []
+    snmp: bool = True
+    snmp_port: int = Field(161, ge=1, le=65535)
+    ping: bool = True
+    tcp_ports: list[int] = []
+    timeout: float = Field(1.5, gt=0, le=30)
+    concurrency: int = Field(64, ge=1, le=512)
+    resolve_dns: bool = True
+    snmp_only_if_alive: bool = False
+    exclude: str = ""
+    auto_add: Literal["none", "snmp", "alive"] = "none"
+    add_ping_check: bool = True
+    tags: list[str] = ["discovered"]
+    location: str = ""
+    poll_interval: int = Field(300, ge=10, le=86400)
+    avail_mode: Literal["any", "all", "quorum", "snmp", "checks"] = "any"
+
+
+class ScanIn(BaseModel):
+    name: str = ""
+    targets: str = Field(min_length=1)
+    options: ScanOptionsIn = ScanOptionsIn()
+    interval: int = Field(0, ge=0, le=30 * 86400)
+    collector_id: Optional[int] = None
+    start: bool = True
+
+
+class ScanPatch(BaseModel):
+    name: Optional[str] = None
+    targets: Optional[str] = None
+    options: Optional[dict[str, Any]] = None
+    interval: Optional[int] = Field(None, ge=0, le=30 * 86400)
+    collector_id: Optional[int] = None
+
+
+class ScanAddIn(BaseModel):
+    ips: Optional[list[str]] = None
+    mode: Literal["snmp", "alive"] = "alive"
+
+
+def _scans(request: Request):
+    return request.app.state.scans
+
+
+def _public_scan(db: Database, scan: dict[str, Any], results: bool = False) -> dict[str, Any]:
+    from .scanner import public_options
+    from .db import loads
+
+    out = dict(scan)
+    out["options"] = public_options(loads(scan["options"], {}))
+    if results:
+        rows = db.query("SELECT scan_results.*, devices.name AS device_name FROM scan_results "
+                        "LEFT JOIN devices ON devices.id = scan_results.device_id WHERE scan_id = ? ORDER BY id",
+                        (scan["id"],))
+        for r in rows:
+            r["open_ports"] = loads(r["open_ports"], [])
+        import ipaddress
+
+        def order(r):
+            try:
+                return (0, int(ipaddress.ip_address(r["ip"])), "")
+            except ValueError:
+                return (1, 0, r["ip"])
+        out["results"] = sorted(rows, key=order)
+    return out
+
+
+@router.post("/scans/preview", tags=["scans"])
+def preview_scan(body: dict[str, Any]):
+    """Validate targets and report how many addresses a scan would probe."""
+    from .scanner import TargetError, expand_targets
+
+    try:
+        hosts = expand_targets(str(body.get("targets") or ""), str(body.get("exclude") or ""))
+    except TargetError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"count": len(hosts), "first": hosts[:5], "last": hosts[-3:] if len(hosts) > 5 else []}
+
+
+@router.get("/scans", tags=["scans"])
+def list_scans(request: Request, db: Database = Depends(get_db)):
+    return [_public_scan(db, s) for s in db.query("SELECT * FROM scans ORDER BY created_at DESC")]
+
+
+@router.post("/scans", status_code=201, tags=["scans"])
+async def create_scan(body: ScanIn, request: Request, db: Database = Depends(get_db)):
+    from .scanner import TargetError
+
+    if body.collector_id and not db.one("SELECT 1 FROM collectors WHERE id = ?", (body.collector_id,)):
+        raise HTTPException(422, "collector does not exist")
+    manager = _scans(request)
+    try:
+        scan = manager.create({"name": body.name, "targets": body.targets, "options": body.options.model_dump(),
+                               "interval": body.interval, "collector_id": body.collector_id})
+    except (TargetError, ValueError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if body.start:
+        scan = manager.start(scan["id"])
+    return _public_scan(db, scan)
+
+
+@router.get("/scans/{scan_id}", tags=["scans"])
+def get_scan(scan_id: int, request: Request, db: Database = Depends(get_db)):
+    scan = db.one("SELECT * FROM scans WHERE id = ?", (scan_id,))
+    if not scan:
+        raise _not_found("scan")
+    return {**_public_scan(db, scan, results=True), "running": _scans(request).is_running(scan_id)}
+
+
+@router.patch("/scans/{scan_id}", tags=["scans"])
+def patch_scan(scan_id: int, body: ScanPatch, request: Request, db: Database = Depends(get_db)):
+    from .scanner import TargetError
+
+    try:
+        scan = _scans(request).update(scan_id, body.model_dump(exclude_unset=True))
+    except KeyError as exc:
+        raise _not_found("scan") from exc
+    except (TargetError, ValueError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return _public_scan(db, scan)
+
+
+@router.post("/scans/{scan_id}/run", tags=["scans"])
+async def run_scan(scan_id: int, request: Request, db: Database = Depends(get_db)):
+    try:
+        return _public_scan(db, _scans(request).start(scan_id))
+    except KeyError as exc:
+        raise _not_found("scan") from exc
+
+
+@router.post("/scans/{scan_id}/cancel", tags=["scans"])
+async def cancel_scan(scan_id: int, request: Request):
+    return {"cancelled": _scans(request).cancel(scan_id)}
+
+
+@router.post("/scans/{scan_id}/add", tags=["scans"])
+async def add_scan_results(scan_id: int, body: ScanAddIn, request: Request):
+    try:
+        added = _scans(request).add(scan_id, ips=body.ips, mode=body.mode)
+    except KeyError as exc:
+        raise _not_found("scan") from exc
+    monitor = request.app.state.monitor
+    if monitor:
+        for a in added:
+            monitor.reschedule_device(a["device_id"])
+    return {"added": len(added), "devices": added}
+
+
+@router.delete("/scans/{scan_id}", status_code=204, tags=["scans"])
+async def delete_scan(scan_id: int, request: Request):
+    _scans(request).delete(scan_id)
+
+
+# ============================================================ passive results
+class PassiveResult(BaseModel):
+    """NRDP/NSCA-style result. Identify the check by id, or by host + service names."""
+    check_id: Optional[int] = None
+    host: str = ""
+    service: str = ""
+    state: int = Field(0, ge=0, le=3, description="0 OK, 1 WARNING, 2 CRITICAL, 3 UNKNOWN")
+    output: str = ""
+    timestamp: Optional[float] = None
+
+
+class PassiveIn(BaseModel):
+    results: list[PassiveResult] = Field(min_length=1, max_length=5000)
+
+
+def _passive_check(db: Database, r: PassiveResult) -> dict[str, Any] | None:
+    if r.check_id:
+        return db.one("SELECT * FROM checks WHERE id = ? AND type = 'passive'", (r.check_id,))
+    rows = db.query(
+        "SELECT checks.* FROM checks LEFT JOIN devices ON devices.id = checks.device_id "
+        "WHERE checks.type = 'passive' AND lower(checks.name) = lower(?)", (r.service,))
+    host = r.host.lower()
+    for c in rows:
+        dev = db.one("SELECT name, hostname FROM devices WHERE id = ?", (c["device_id"],)) if c["device_id"] else None
+        names = {c["target"].lower()} | ({dev["name"].lower(), dev["hostname"].lower()} if dev else set())
+        if not host or host in names:
+            return c
+    return None
+
+
+@router.post("/passive", tags=["checks"])
+def submit_passive(body: PassiveIn, request: Request, db: Database = Depends(get_db)):
+    """Submit passive check results (like Nagios NRDP). Unknown checks are reported back, not created."""
+    from .checks.probes import parse_plugin_output
+    from .checks.runner import record_result
+
+    accepted, unknown = 0, []
+    for r in body.results:
+        check = _passive_check(db, r)
+        if not check:
+            unknown.append({"host": r.host, "service": r.service, "check_id": r.check_id})
+            continue
+        result = parse_plugin_output(r.output or ["OK", "WARNING", "CRITICAL", "UNKNOWN"][r.state], r.state)
+        updated = record_result(db, check, result, now=min(r.timestamp or time.time(), time.time()))
+        accepted += 1
+        monitor = request.app.state.monitor
+        if monitor and updated.get("transition"):
+            monitor._alert_wakeup.set()
+    return {"accepted": accepted, "unknown": unknown}

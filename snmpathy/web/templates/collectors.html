@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status, icon %}
+{% block title %}Collectors{% endblock %}
+{% block actions %}<button class="btn primary" data-action="modal" data-target="#col-modal">{{ icon('plus') }} Add collector</button>{% endblock %}
+{% block content %}
+<p class="muted small" style="margin-top:0">Collectors are SNMPathy installed at other sites. They connect <em>out</em> to this server (no inbound firewall rules at the site), pull the devices and checks assigned to them, poll and check them locally and send the results here - buffering them while the WAN is down. Devices behind a collector that stops reporting show as <em>unreachable</em> rather than down. Assign devices, checks and scans to a collector with their <strong>Monitored from / Run from</strong> setting.</p>
+<div class="card mb">
+  <div class="card-body flush table-wrap">
+    <table class="table">
+      <thead><tr><th>Status</th><th>Collector</th><th>Site</th><th>Host</th><th>Version</th><th>Devices</th><th>Checks</th><th>Results</th><th>Backlog</th><th>Last contact</th></tr></thead>
+      <tbody>
+      {% for c in rows %}
+        <tr>
+          <td>{% if not c.enabled %}{{ status('paused', 'disabled') }}{% else %}{{ status({'online': 'up', 'offline': 'down'}.get(c.status, 'unknown'), c.status if c.status != 'new' else 'never connected') }}{% endif %}</td>
+          <td><a href="/collectors/{{ c.id }}"><strong>{{ c.name }}</strong></a><div class="small muted">{{ c.description }}</div></td>
+          <td>{{ c.site or '-' }}</td>
+          <td>{{ c.hostname or '-' }}<div class="small muted">{{ c.last_ip }}{% if c.platform %} · {{ c.platform }}{% endif %}</div></td>
+          <td>{{ c.version or '-' }}</td>
+          <td class="num">{{ c.devices }}</td>
+          <td class="num">{{ c.checks }}</td>
+          <td class="num">{{ '{:,}'.format(c.results) }}</td>
+          <td class="num">{% if c.backlog %}<span class="status warning">{{ '{:,}'.format(c.backlog) }}</span>{% else %}0{% endif %}</td>
+          <td class="nowrap">{{ c.last_seen|ts('ago')|safe }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="10"><div class="empty">No collectors yet. Add one for each remote site you want to monitor from inside its network.</div></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<div class="card">
+  <div class="card-head"><h2>Downloads</h2><span class="small muted">served by this server at <code>/collector/download/…</code></span></div>
+  <div class="card-body">
+    {% include "_collector_downloads.html" %}
+  </div>
+</div>
+
+<div class="modal-back hidden" id="col-modal">
+  <div class="modal">
+    <div class="card-head"><h2>Add collector</h2><button class="btn ghost" data-action="close-modal">&times;</button></div>
+    <form id="col-form">
+      <div class="modal-body">
+        <div class="form-grid">
+          <label class="field">Name<input name="name" required placeholder="Branch A collector"></label>
+          <label class="field">Site<input name="site" placeholder="Branch A"></label>
+          <label class="field wide">Description<input name="description" placeholder="Rack 2, Dell OptiPlex"></label>
+        </div>
+      </div>
+      <div class="modal-foot"><button type="button" class="btn" data-action="close-modal">Cancel</button><button class="btn primary" type="submit">Create and show install command</button></div>
+    </form>
+  </div>
+</div>
+{% include "_collector_token_modal.html" %}
+{% endblock %}
+{% block scripts %}
+{% include "_collector_script.html" %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  SP.$("#col-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      const r = await SP.api("POST", "/api/collectors", SP.formData(e.target));
+      SP.closeModal(SP.$("#col-modal"));
+      SP.showCollectorToken(r, `/collectors/${r.id}`);
+    } catch (err) { SP.toast(err.message, "error"); }
+  });
+});
+</script>
+{% endblock %}

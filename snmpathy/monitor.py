@@ -12,6 +12,10 @@ import time
 from typing import Any, Callable
 
 from .alerting.engine import AlertEngine
+from .availability import evaluate_all
+from .collectors import CollectorHub, RemoteSnmpClient
+from .scanner import ScanManager
+from .snmp.neighbors import apply_neighbors, discover_neighbors
 from .alerting.notify import dispatch
 from .checks.runner import ProbeFunc, execute_check
 from .config import Settings
@@ -39,6 +43,18 @@ def default_snmp_factory(device: dict[str, Any], settings: Settings) -> SnmpClie
     )
 
 
+def scan_client_factory(settings: Settings, snmp_factory: "SnmpFactory | None" = None):
+    """Adapt a device-based SNMP factory to the scanner's (address, credentials, timeout) signature."""
+    import dataclasses
+
+    factory = snmp_factory or default_snmp_factory
+
+    def make(target: str, cred: dict[str, Any], timeout: float) -> SnmpClient:
+        quick = dataclasses.replace(settings, snmp_timeout=timeout, snmp_retries=0)
+        return factory({"hostname": target, "name": target, **cred}, quick)
+    return make
+
+
 def _creds_fingerprint(device: dict[str, Any]) -> str:
     keys = ("hostname", "snmp_version", "snmp_port", "snmp_community", "v3_user", "v3_auth_proto",
             "v3_auth_key", "v3_priv_proto", "v3_priv_key", "v3_context")
@@ -47,18 +63,25 @@ def _creds_fingerprint(device: dict[str, Any]) -> str:
 
 class Monitor:
     def __init__(self, db: Database, settings: Settings, snmp_factory: SnmpFactory | None = None,
-                 probe: ProbeFunc | None = None):
+                 probe: ProbeFunc | None = None, hub: CollectorHub | None = None, scans: ScanManager | None = None):
         self.db = db
         self.settings = settings
         self.snmp_factory = snmp_factory or default_snmp_factory
         self.probe = probe
         self.alerts = AlertEngine(db, notifier=self._notify)
+        self.hub = hub or CollectorHub(db, offline_after=settings.collector_offline_after)
+        self.hub.on_change = lambda: self._alert_wakeup.set()
+        self.scans = scans or ScanManager(db, local_probe=probe,
+                                          local_clients=scan_client_factory(settings, snmp_factory), hub=self.hub)
         self.syslog: SyslogServer | None = None
+        self.logs: Any = None
+        self.flows: Any = None
         self._tasks: list[asyncio.Task] = []
         self._sem = asyncio.Semaphore(max(1, settings.poller_concurrency))
         self._clients: dict[int, tuple[str, SnmpClient]] = {}
         self._next_poll: dict[int, float] = {}
         self._next_check: dict[int, float] = {}
+        self._rediscover_after: dict[int, float] = {}
         self._inflight: set[str] = set()
         self._jobs: set[asyncio.Task] = set()
         self._alert_wakeup = asyncio.Event()
@@ -72,12 +95,30 @@ class Monitor:
             self.syslog = SyslogServer(self.db, s.syslog_host, s.syslog_udp_port, s.syslog_tcp_port,
                                        s.syslog_batch_size, s.syslog_flush_interval)
             await self.syslog.start()
+            if s.gelf_udp_port or s.json_tcp_port or s.json_udp_port:
+                from .syslog.structured import StructuredLogServer
+
+                self.logs = StructuredLogServer(self.db, s.syslog_host, s.gelf_udp_port, s.json_tcp_port,
+                                                s.json_udp_port, s.syslog_batch_size, s.syslog_flush_interval)
+                await self.logs.start()
+        if s.netflow_port or s.ipfix_port or s.sflow_port:
+            from .flows import FlowCollector
+
+            self.flows = FlowCollector(self.db, s.syslog_host,
+                                       {"netflow": s.netflow_port, "ipfix": s.ipfix_port, "sflow": s.sflow_port})
+            await self.flows.start()
+        # Bring device states in line with their availability rules (also after upgrades).
+        try:
+            await asyncio.to_thread(evaluate_all, self.db)
+        except Exception:
+            log.exception("initial availability evaluation failed")
         if s.enable_poller:
             self._spawn(self._poll_loop(), "snmp-poller")
             self._spawn(self._check_loop(), "check-runner")
         if s.enable_alerting:
             self._spawn(self._alert_loop(), "alert-engine")
         self._spawn(self._housekeeping_loop(), "housekeeping")
+        self._spawn(self._collector_loop(), "collectors")
         log.info("monitor started (poller=%s syslog=%s alerting=%s)", s.enable_poller, s.enable_syslog,
                  s.enable_alerting)
 
@@ -106,12 +147,19 @@ class Monitor:
             await asyncio.gather(*self._jobs, return_exceptions=True)
         if self.syslog:
             await self.syslog.stop()
+        if self.logs:
+            await self.logs.stop()
+        if self.flows:
+            await self.flows.stop()
         for _, client in self._clients.values():
             client.close()
         self._clients.clear()
 
     # ----------------------------------------------------------- SNMP
     def _client(self, device: dict[str, Any]) -> SnmpClient:
+        if device.get("collector_id"):
+            return RemoteSnmpClient(self.hub, device["collector_id"], device["hostname"], device,
+                                    timeout=self.settings.snmp_timeout, retries=self.settings.snmp_retries)
         fp = _creds_fingerprint(device)
         cached = self._clients.get(device["id"])
         if cached and cached[0] == fp:
@@ -142,6 +190,13 @@ class Monitor:
             self.db.update("devices", device_id, {"last_error": str(exc)[:500]})
             raise
         summary = apply_discovery(self.db, device_id, result)
+        try:
+            neighbours = await discover_neighbors(client)
+            summary["neighbors"] = apply_neighbors(self.db, device_id, neighbours)["links"]
+        except SnmpError as exc:
+            log.info("neighbour discovery on %s failed: %s", device["name"], exc)
+        if device.get("collector_id"):
+            self.hub.invalidate(device["collector_id"])
         self.db.log_event("device.discovered",
                           f"Discovered {summary['interfaces']} interfaces and {summary['metrics']} metrics on {device['name']}",
                           device_id=device_id)
@@ -152,6 +207,18 @@ class Monitor:
         if not device:
             raise KeyError(device_id)
         return await self._poll_job(device)
+
+    async def _remote_discovery_job(self, device: dict[str, Any]) -> None:
+        key = f"r{device['id']}"
+        self._inflight.add(key)
+        try:
+            await self.discover_device(device["id"])
+        except (SnmpError, KeyError) as exc:
+            log.info("discovery of %s through its collector failed: %s", device["name"], exc)
+        except Exception:
+            log.exception("discovery of %s crashed", device["name"])
+        finally:
+            self._inflight.discard(key)
 
     async def _poll_job(self, device: dict[str, Any]) -> dict[str, Any]:
         key = f"d{device['id']}"
@@ -189,6 +256,15 @@ class Monitor:
             devices = self.db.query("SELECT * FROM devices WHERE enabled = 1 AND snmp_enabled = 1")
             live = set()
             for device in devices:
+                if device["collector_id"]:
+                    # The collector polls on its own schedule; discovery (SNMP walks) is relayed from here.
+                    stale = not device["last_discovered"] or now - device["last_discovered"] > REDISCOVER_INTERVAL
+                    key = f"r{device['id']}"
+                    if stale and key not in self._inflight and self._rediscover_after.get(device["id"], 0) <= now \
+                            and self.hub.is_online(device["collector_id"]):
+                        self._rediscover_after[device["id"]] = now + 300
+                        self._job(self._remote_discovery_job(device))
+                    continue
                 live.add(device["id"])
                 interval = max(10, int(device["poll_interval"] or self.settings.default_poll_interval))
                 due = self._next_poll.get(device["id"])
@@ -217,7 +293,13 @@ class Monitor:
         self._inflight.add(key)
         try:
             async with self._sem:
-                updated = await execute_check(self.db, check, self.probe)
+                probe = self.probe
+                if check.get("collector_id") and check["type"] != "passive":
+                    hub = self.hub
+
+                    async def probe(c, device, _cid=check["collector_id"]):
+                        return await hub.run_check(_cid, c, device)
+                updated = await execute_check(self.db, check, probe)
                 self.counters["checks"] += 1
                 if updated.get("transition") in {"up", "down"}:
                     self._alert_wakeup.set()
@@ -235,6 +317,14 @@ class Monitor:
             for check in self.db.query("SELECT * FROM checks WHERE enabled = 1"):
                 live.add(check["id"])
                 interval = max(5, int(check["interval"] or self.settings.default_check_interval))
+                if check["type"] == "passive":
+                    # Freshness: a passive check fails when no result arrived for an interval.
+                    stale_at = (check["last_checked"] or check["created_at"]) + interval
+                    if now >= stale_at and f"c{check['id']}" not in self._inflight:
+                        self._job(self._check_job(check))
+                    continue
+                if check["collector_id"]:
+                    continue  # scheduled by the collector itself
                 due = self._next_check.get(check["id"])
                 if due is None:
                     due = (check["last_checked"] + interval) if check["last_checked"] else now + random.uniform(0, 2)
@@ -254,6 +344,19 @@ class Monitor:
 
     def reschedule_device(self, device_id: int) -> None:
         self._next_poll.pop(device_id, None)
+
+    # ----------------------------------------------------------- collectors
+    async def _collector_loop(self) -> None:
+        last_scan_check = 0.0
+        while True:
+            try:
+                self.hub.sweep()
+                if time.time() - last_scan_check > 30:
+                    last_scan_check = time.time()
+                    await self.scans.run_due()
+            except Exception:
+                log.exception("collector housekeeping failed")
+            await asyncio.sleep(10)
 
     # ----------------------------------------------------------- alerting
     async def _notify(self, event: str, alert: dict[str, Any], rule: dict[str, Any]) -> None:
@@ -302,5 +405,7 @@ class Monitor:
             "inflight": len(self._inflight),
             "syslog": ({**self.syslog.stats.as_dict(), "listening": self.syslog.listening}
                        if self.syslog else None),
+            "log_inputs": ({**self.logs.stats.as_dict(), "listening": self.logs.listening} if self.logs else None),
+            "flows": ({**self.flows.stats.as_dict(), "listening": self.flows.listening} if self.flows else None),
             "tasks": {t.get_name(): (not t.done()) for t in self._tasks},
         }

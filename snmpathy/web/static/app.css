@@ -389,3 +389,15 @@ body.kiosk .content { padding: 12px; }
 @media (max-width: 900px) { .grid-12 > * { grid-column: 1 / -1 !important; } }
 .table td:first-child { white-space: nowrap; }
 .seg { max-width: 100%; overflow-x: auto; flex-wrap: nowrap; }
+
+/* ---- scans, collectors, map, analyzer, fusion ---- */
+.progress { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+.progress > span { display: block; height: 100%; background: var(--accent); transition: width .4s ease; }
+.card.stat .big { font-size: 22px; font-weight: 650; }
+details > summary { cursor: pointer; color: var(--accent); font-size: 13px; }
+.codebox { position: relative; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px 70px 10px 12px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+.codebox .copy { position: absolute; top: 6px; right: 6px; }
+.seg-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
+.seg-tabs button { border: 1px solid var(--border); background: var(--surface); color: var(--text); padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 12.5px; }
+.seg-tabs button.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.callout { border: 1px solid var(--warning); background: var(--surface); border-radius: 8px; padding: 12px 14px; }

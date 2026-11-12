@@ -20,26 +20,16 @@
     </div>
   </fieldset>
   <fieldset>
-    <legend>Online / offline rule</legend>
-    <p class="small muted" style="margin-top:0">A device can be watched several ways (SNMP polling and the checks linked to it, such as ping). Choose how they combine: with the default, a device that answers ping but not SNMP (or the other way round) is still online and shown as <em>degraded</em>. If the parent device is down, this device is shown as <em>unreachable</em> instead of down and does not raise its own alert.</p>
-    <div class="form-grid">
-      <label class="field">Device is online when<select name="avail_mode" id="avail-mode">
-        {% for key, label in AVAIL_MODES.items() %}<option value="{{ key }}" {{ 'selected' if (d.avail_mode or 'any') == key }}>{{ label }}</option>{% endfor %}
-      </select></label>
-      <label class="field" id="avail-min-field">Methods that must respond (N)<input name="avail_min" type="number" data-type="int" min="1" max="20" value="{{ d.avail_min or 2 }}"></label>
-      <label class="field">SNMP failures before SNMP counts as down<input name="snmp_down_after" type="number" data-type="int" min="1" max="20" value="{{ d.snmp_down_after or 1 }}"></label>
-    </div>
-  </fieldset>
-  <fieldset>
-    <legend>SNMP</legend>
+    <legend id="snmp">SNMP</legend>
     <div class="form-grid">
       <label class="check wide"><input type="checkbox" name="snmp_enabled" {{ 'checked' if not device or d.snmp_enabled }}> Poll this device with SNMP <span class="muted small">(untick for availability checks only)</span></label>
       <label class="field">Version<select name="snmp_version" id="snmp-version">
         {% for v, l in [('2c', 'v2c'), ('3', 'v3'), ('1', 'v1')] %}<option value="{{ v }}" {{ 'selected' if (d.snmp_version or '2c') == v }}>{{ l }}</option>{% endfor %}
       </select></label>
+      <label class="field v12">Community string <span class="hint">v1 / v2c</span><input name="snmp_community" value="{{ d.snmp_community if device else 'public' }}" autocomplete="off" placeholder="public"></label>
+      <p class="small muted v3" style="grid-column:1/-1;margin:0">SNMPv3 does not use a community: enter the user and passphrases below.</p>
       <label class="field">Port<input name="snmp_port" type="number" data-type="int" value="{{ d.snmp_port or 161 }}" min="1" max="65535"></label>
       <label class="field">Poll interval (seconds)<input name="poll_interval" type="number" data-type="int" value="{{ d.poll_interval or 300 }}" min="10"></label>
-      <label class="field v12">Community<input name="snmp_community" value="{{ d.snmp_community if device else 'public' }}" autocomplete="off"></label>
       <label class="field v3">User<input name="v3_user" value="{{ d.v3_user or '' }}" autocomplete="off"></label>
       <label class="field v3">Auth protocol<select name="v3_auth_proto">{% for p in ['sha', 'sha256', 'sha384', 'sha512', 'sha224', 'md5', 'none'] %}<option {{ 'selected' if (d.v3_auth_proto or 'sha') == p }}>{{ p }}</option>{% endfor %}</select></label>
       <label class="field v3">Auth passphrase<input name="v3_auth_key" type="password" autocomplete="new-password" placeholder="{{ 'unchanged' if d.has_v3_auth_key else '' }}"></label>
@@ -50,6 +40,17 @@
     <div class="row mt">
       <button type="button" class="btn" id="snmp-test">Test SNMP</button>
       <span id="snmp-result" class="small"></span>
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>Online / offline rule</legend>
+    <p class="small muted" style="margin-top:0">A device can be watched several ways (SNMP polling and the checks linked to it, such as ping). Choose how they combine: with the default, a device that answers ping but not SNMP (or the other way round) is still online and shown as <em>degraded</em>. If the parent device is down, this device is shown as <em>unreachable</em> instead of down and does not raise its own alert.</p>
+    <div class="form-grid">
+      <label class="field">Device is online when<select name="avail_mode" id="avail-mode">
+        {% for key, label in AVAIL_MODES.items() %}<option value="{{ key }}" {{ 'selected' if (d.avail_mode or 'any') == key }}>{{ label }}</option>{% endfor %}
+      </select></label>
+      <label class="field" id="avail-min-field">Methods that must respond (N)<input name="avail_min" type="number" data-type="int" min="1" max="20" value="{{ d.avail_min or 2 }}"></label>
+      <label class="field">SNMP failures before SNMP counts as down<input name="snmp_down_after" type="number" data-type="int" min="1" max="20" value="{{ d.snmp_down_after or 1 }}"></label>
     </div>
   </fieldset>
   <div class="row">

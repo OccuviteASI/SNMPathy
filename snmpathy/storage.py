@@ -85,6 +85,12 @@ def apply_retention(db: Database, settings: Any, now: float | None = None) -> di
         if n < 5000:
             break
     removed["syslog"] = total
+    flow_days = getattr(settings, "retention_flow_days", 14)
+    with db.transaction() as conn:
+        removed["flows"] = conn.execute("DELETE FROM flows WHERE bucket < ?", (int(now - flow_days * day),)).rowcount
+        removed["device_outages"] = conn.execute(
+            "DELETE FROM device_outages WHERE ended_at IS NOT NULL AND ended_at < ?",
+            (now - settings.retention_rollup_days * day,)).rowcount
     return removed
 
 

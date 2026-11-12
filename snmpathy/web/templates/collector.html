@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status, icon %}
+{% block title %}{{ col.name }}{% endblock %}
+{% block crumbs %}<div class="crumbs"><a href="/collectors">Collectors</a>{% if col.site %} / {{ col.site }}{% endif %}</div>{% endblock %}
+{% block heading %}{{ col.name }} {{ status({'online': 'up', 'offline': 'down'}.get(col.status, 'unknown'), col.status if col.status != 'new' else 'never connected') }}{% endblock %}
+{% block actions %}
+<button class="btn" data-action="api" data-url="/api/collectors/{{ col.id }}/ping" data-then="none" data-success="Round trip {rtt_ms} ms (collector {version})">Test connection</button>
+<a class="btn" href="/scans?new=1">Scan from this collector</a>
+<button class="btn" id="rotate">New token / install command</button>
+<button class="btn" data-action="api" data-method="PATCH" data-url="/api/collectors/{{ col.id }}" data-body='{"enabled": {{ 'false' if col.enabled else 'true' }}}'>{{ 'Disable' if col.enabled else 'Enable' }}</button>
+<button class="btn danger" data-action="api" data-method="DELETE" data-url="/api/collectors/{{ col.id }}" data-confirm="Delete {{ col.name }}? Its devices and checks move back to this server." data-redirect="/collectors">Delete</button>
+{% endblock %}
+{% block content %}
+<div class="grid grid-12">
+  <div class="card" style="grid-column: span 5">
+    <div class="card-head"><h2>Collector</h2></div>
+    <div class="card-body">
+      <dl class="kv">
+        <dt>Site</dt><dd>{{ col.site or '-' }}</dd>
+        <dt>Host</dt><dd>{{ col.hostname or '-' }} {% if col.last_ip %}<span class="muted">({{ col.last_ip }})</span>{% endif %}</dd>
+        <dt>Platform</dt><dd>{{ col.platform or '-' }}</dd>
+        <dt>Version</dt><dd>{{ col.version or '-' }}</dd>
+        <dt>Last contact</dt><dd>{{ col.last_seen|ts('ago')|safe }}</dd>
+        <dt>Results received</dt><dd>{{ '{:,}'.format(col.results) }}</dd>
+        <dt>Buffered on collector</dt><dd>{{ '{:,}'.format(col.backlog) }}</dd>
+        <dt>Created</dt><dd>{{ col.created_at|ts|safe }}</dd>
+        {% if col.description %}<dt>Notes</dt><dd>{{ col.description }}</dd>{% endif %}
+      </dl>
+    </div>
+  </div>
+  <div class="stack" style="grid-column: span 7">
+    <div class="card">
+      <div class="card-head"><h2>Devices ({{ devices|length }})</h2></div>
+      <div class="card-body flush table-wrap">
+        <table class="table compact">
+          <thead><tr><th>Status</th><th>Device</th><th>Last poll</th></tr></thead>
+          <tbody>{% for d in devices %}<tr><td>{{ status(d.status) }}</td><td><a href="/devices/{{ d.id }}">{{ d.name }}</a> <span class="small muted">{{ d.hostname }}</span></td><td>{{ d.last_polled|ts('ago')|safe }}</td></tr>
+          {% else %}<tr><td colspan="3" class="muted">No devices yet: set a device's <em>Monitored from</em> to this collector, or run a scan from it.</td></tr>{% endfor %}</tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>Checks ({{ checks|length }})</h2></div>
+      <div class="card-body flush table-wrap">
+        <table class="table compact">
+          <thead><tr><th>State</th><th>Check</th><th>Last result</th></tr></thead>
+          <tbody>{% for c in checks %}<tr><td>{{ status(c.state) }}</td><td><a href="/checks/{{ c.id }}">{{ c.name }}</a> <span class="small muted">{{ c.type|upper }}</span></td><td class="small">{{ c.last_checked|ts('ago')|safe }} · {{ c.last_message }}</td></tr>
+          {% else %}<tr><td colspan="3" class="muted">No checks.</td></tr>{% endfor %}</tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="card mt">
+  <div class="card-head"><h2>Downloads</h2></div>
+  <div class="card-body">{% include "_collector_downloads.html" %}</div>
+</div>
+{% include "_collector_token_modal.html" %}
+{% endblock %}
+{% block scripts %}
+{% include "_collector_script.html" %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  SP.$("#rotate").addEventListener("click", async () => {
+    if (!confirm("Issue a new token? The collector stops working until it is reinstalled (or its collector.yaml is updated) with the new token.")) return;
+    try { SP.showCollectorToken(await SP.api("POST", "/api/collectors/{{ col.id }}/token"), location.pathname); }
+    catch (err) { SP.toast(err.message, "error"); }
+  });
+});
+</script>
+{% endblock %}

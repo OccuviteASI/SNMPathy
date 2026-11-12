@@ -60,6 +60,23 @@ class Settings:
     snmp_timeout: float = 2.0
     snmp_retries: int = 1
 
+    # Remote collectors: seconds without contact before one is marked offline,
+    # and the folder of collector executables offered for download
+    # (default: "downloads" next to the database / executable).
+    collector_offline_after: float = 90.0
+    downloads_dir: str = ""
+
+    # Structured log inputs (0 disables): GELF over UDP, JSON lines over TCP, JSON over UDP
+    gelf_udp_port: int = 12201
+    json_tcp_port: int = 5544
+    json_udp_port: int = 0
+
+    # Flow collector for the Network Analyzer (0 disables)
+    netflow_port: int = 2055
+    ipfix_port: int = 4739
+    sflow_port: int = 6343
+    retention_flow_days: int = 14
+
     # Retention (days)
     retention_raw_days: int = 7
     retention_rollup_days: int = 400

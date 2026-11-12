@@ -97,8 +97,13 @@ def compute_value(metric: dict[str, Any], raw: Any, raw2: Any, now: float, reboo
     return None, num
 
 
-async def poll_device(db: Database, client: SnmpClient, device: dict[str, Any], now: float | None = None) -> PollResult:
-    """Poll every enabled metric of ``device`` and persist the results."""
+async def poll_device(db: Database, client: SnmpClient, device: dict[str, Any], now: float | None = None,
+                      duration_ms: float | None = None) -> PollResult:
+    """Poll every enabled metric of ``device`` and persist the results.
+
+    ``duration_ms`` overrides the measured response time (used for results a
+    remote collector already fetched).
+    """
     now = now or time.time()
     metrics = db.query(
         "SELECT * FROM metrics WHERE device_id = ? AND enabled = 1", (device["id"],)
@@ -114,10 +119,10 @@ async def poll_device(db: Database, client: SnmpClient, device: dict[str, Any], 
     try:
         values = await client.get(sorted(oids))
     except SnmpError as exc:
-        duration = (time.perf_counter() - started) * 1000
+        duration = duration_ms if duration_ms is not None else (time.perf_counter() - started) * 1000
         _mark_failure(db, device, str(exc), now)
         return PollResult(ok=False, duration_ms=duration, error=str(exc))
-    duration = (time.perf_counter() - started) * 1000
+    duration = duration_ms if duration_ms is not None else (time.perf_counter() - started) * 1000
     if values.get(mibs.SYS_UPTIME) is None and all(v is None for v in values.values()):
         _mark_failure(db, device, "device returned no data", now)
         return PollResult(ok=False, duration_ms=duration, error="device returned no data")

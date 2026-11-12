@@ -29,7 +29,7 @@
         <dt>Uptime</dt><dd>{{ device.sys_uptime|duration if device.sys_uptime else '-' }}</dd>
         <dt>Location</dt><dd>{{ device.location or device.sys_location or '-' }}</dd>
         <dt>Contact</dt><dd>{{ device.sys_contact or '-' }}</dd>
-        <dt>SNMP</dt><dd>{% if device.snmp_enabled %}v{{ device.snmp_version }} · port {{ device.snmp_port }} · every {{ device.poll_interval|duration }}{% else %}disabled{% endif %}</dd>
+        <dt>SNMP</dt><dd>{% if device.snmp_enabled %}v{{ device.snmp_version }}{% if device.snmp_version == '3' %} · user {{ device.v3_user or '-' }}{% else %} · community <code>{{ device.snmp_community }}</code>{% endif %} · port {{ device.snmp_port }} · every {{ device.poll_interval|duration }}{% else %}disabled{% endif %} · <a href="/devices/{{ device.id }}/edit#snmp">Change SNMP settings</a></dd>
         <dt>Last poll</dt><dd>{{ device.last_polled|ts('ago')|safe }}{% if device.last_poll_ms %} · {{ '%.0f'|format(device.last_poll_ms) }} ms{% endif %}</dd>
         {% if device.last_error %}<dt>Last error</dt><dd class="status down" style="white-space:normal">{{ device.last_error }}</dd>{% endif %}
         {% if device.tags %}<dt>Tags</dt><dd>{% for t in device.tags %}<a class="tag" href="/devices?tag={{ t|urlencode }}">{{ t }}</a>{% endfor %}</dd>{% endif %}

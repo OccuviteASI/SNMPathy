@@ -360,3 +360,56 @@ def logout():
     resp = RedirectResponse("/login", status_code=303)
     resp.delete_cookie("snmpathy_token")
     return resp
+
+
+# ------------------------------------------------------------ scans & collectors
+@router.get("/scans", response_class=HTMLResponse)
+def scans_page(request: Request):
+    db = db_of(request)
+    rows = db.query("SELECT scans.*, collectors.name AS collector_name FROM scans "
+                    "LEFT JOIN collectors ON collectors.id = scans.collector_id ORDER BY scans.created_at DESC")
+    return render(request, "scans.html", nav="devices", scans=rows)
+
+
+@router.get("/scans/{scan_id}", response_class=HTMLResponse)
+def scan_page(request: Request, scan_id: int):
+    from ..scanner import public_options
+
+    db = db_of(request)
+    scan = db.one("SELECT * FROM scans WHERE id = ?", (scan_id,))
+    if not scan:
+        raise HTTPException(404)
+    scan["options"] = public_options(loads(scan["options"], {}))
+    collector = db.one("SELECT * FROM collectors WHERE id = ?", (scan["collector_id"],)) if scan["collector_id"] else None
+    return render(request, "scan.html", nav="devices", scan=scan, collector=collector)
+
+
+def _download_context(request: Request) -> dict[str, Any]:
+    from ..collector_api import available_downloads, downloads_dir
+
+    return {"downloads": available_downloads(request), "downloads_dir": str(downloads_dir(request))}
+
+
+@router.get("/collectors", response_class=HTMLResponse)
+def collectors_page(request: Request):
+    db = db_of(request)
+    rows = db.query("SELECT * FROM collectors ORDER BY name COLLATE NOCASE")
+    devs = {r["collector_id"]: r["n"] for r in db.query(
+        "SELECT collector_id, COUNT(*) AS n FROM devices WHERE collector_id IS NOT NULL GROUP BY collector_id")}
+    chks = {r["collector_id"]: r["n"] for r in db.query(
+        "SELECT collector_id, COUNT(*) AS n FROM checks WHERE collector_id IS NOT NULL GROUP BY collector_id")}
+    for r in rows:
+        r["devices"], r["checks"] = devs.get(r["id"], 0), chks.get(r["id"], 0)
+    return render(request, "collectors.html", nav="collectors", rows=rows, **_download_context(request))
+
+
+@router.get("/collectors/{collector_id}", response_class=HTMLResponse)
+def collector_page(request: Request, collector_id: int):
+    db = db_of(request)
+    col = db.one("SELECT * FROM collectors WHERE id = ?", (collector_id,))
+    if not col:
+        raise HTTPException(404)
+    devices = db.query("SELECT * FROM devices WHERE collector_id = ? ORDER BY name COLLATE NOCASE", (collector_id,))
+    checks = db.query("SELECT * FROM checks WHERE collector_id = ? ORDER BY name COLLATE NOCASE", (collector_id,))
+    return render(request, "collector.html", nav="collectors", col=col, devices=devices, checks=checks,
+                  **_download_context(request))

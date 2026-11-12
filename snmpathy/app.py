@@ -14,18 +14,23 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .api import router as api_router
+from .collector_api import router as collector_router
+from .collectors import CollectorHub
+from .scanner import ScanManager
 from .grafana import router as grafana_router
 from .checks.runner import ProbeFunc
 from .config import Settings
 from .dashboards import seed_dashboards
 from .db import Database
-from .monitor import Monitor, SnmpFactory
+from .monitor import Monitor, SnmpFactory, scan_client_factory
 from .services import seed_defaults
 from .web import router as web_router
 
 log = logging.getLogger(__name__)
 
-PUBLIC_PATHS = ("/static/", "/status", "/api/status-page", "/login", "/healthz")
+# Collector endpoints authenticate with the collector's own token; downloads and
+# install scripts must be reachable from a fresh site machine.
+PUBLIC_PATHS = ("/static/", "/status", "/api/status-page", "/login", "/healthz", "/api/collector/v1/", "/collector/")
 COOKIE = "snmpathy_token"
 
 
@@ -47,16 +52,19 @@ def create_app(settings: Settings | None = None, db: Database | None = None, sta
     db = db or Database(settings.database)
     seed_defaults(db)
     seed_dashboards(db)
+    hub = CollectorHub(db, offline_after=settings.collector_offline_after)
+    scans = ScanManager(db, local_probe=probe, local_clients=scan_client_factory(settings, snmp_factory), hub=hub)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if start_monitor:
-            monitor = Monitor(db, settings, snmp_factory=snmp_factory, probe=probe)
+            monitor = Monitor(db, settings, snmp_factory=snmp_factory, probe=probe, hub=hub, scans=scans)
             app.state.monitor = monitor
             await monitor.start()
         try:
             yield
         finally:
+            await scans.stop()
             if app.state.monitor:
                 await app.state.monitor.stop()
 
@@ -68,6 +76,8 @@ def create_app(settings: Settings | None = None, db: Database | None = None, sta
     )
     app.state.settings = settings
     app.state.db = db
+    app.state.hub = hub
+    app.state.scans = scans
     app.state.monitor = None
 
     @app.middleware("http")
@@ -95,6 +105,7 @@ def create_app(settings: Settings | None = None, db: Database | None = None, sta
         return {"ok": True, "version": __version__, "monitor": bool(monitor)}
 
     app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "web" / "static")), name="static")
+    app.include_router(collector_router)
     app.include_router(api_router)
     app.include_router(grafana_router)
     app.include_router(web_router)
