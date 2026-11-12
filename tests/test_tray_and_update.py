@@ -138,3 +138,116 @@ def test_update_launcher_written_next_to_exe(tmp_path):
     text = path.read_text()
     assert ("update.cmd" if sys.platform.startswith("win") else "update.sh") in text
     assert str(ROOT) in text
+    info = __import__("json").loads((tmp_path / "updater.json").read_text())
+    assert info["gui"].endswith("update_gui.py") and Path(info["python"]).exists()
+
+
+# ------------------------------------------------------------- progress window
+@pytest.fixture
+def gui():
+    spec = importlib.util.spec_from_file_location("update_gui", ROOT / "scripts" / "update_gui.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+TRANSCRIPT = """\
+[update] checking https://github.com/OccuviteASI/SNMPathy.git for updates
+[update] updated 96eed7e -> a5081a1 (2 new commit(s))
+[update] installed build: 96eed7e; building a5081a1
+[update] closing the running SNMPathy (pid 4120, 4188) so it can be replaced
+[build] executable will be stored in C:\\Users\\me\\Claude\\SNMPathy
+[build] using Python 3.12.4 (C:\\Python312\\python.exe)
+[build] step 1/4: reusing build environment in C:\\src\\SNMPathy\\build\\venv
+[build] build stamp: a5081a1, 2026-11-12
+[build] step 2/4: installing SNMPathy and PyInstaller into the build environment (first run downloads ~60 MB)
+[build] step 3/4: running PyInstaller (this takes a minute or two)
+123 INFO: PyInstaller: 6.11.1
+456 INFO: Building EXE from EXE-00.toc completed successfully.
+[build] step 4/4: checking the executable starts
+[build] smoke test ok: snmpathy 0.6.0 (build a5081a1, 2026-11-12)
+[build] BUILD OK: C:\\Users\\me\\Claude\\SNMPathy\\SNMPathy.exe (31 MB)
+[update] starting C:\\Users\\me\\Claude\\SNMPathy\\SNMPathy.exe
+[update] UPDATE OK: SNMPathy is now build a5081a1
+"""
+
+
+def test_progress_follows_the_update_output(gui):
+    percent, seen, outcome = 0, [], None
+    for line in TRANSCRIPT.splitlines():
+        new, status, result = gui.parse_line(line, percent)
+        assert new >= percent  # never goes backwards
+        percent, outcome = new, result or outcome
+        if status:
+            seen.append(status)
+    assert percent == 100 and outcome == "ok"
+    assert seen[0] == "Checking for updates…" and "Closing SNMPathy…" in seen
+    assert "Building SNMPathy (a minute or two)…" in seen
+    assert seen[-1] == "SNMPathy is up to date (build a5081a1)."
+
+
+def test_progress_reports_failures_and_no_op(gui):
+    assert gui.parse_line("[update] UPDATE FAILED: the source folder has local changes; commit them", 10) == (
+        10, "Update failed: the source folder has local changes; commit them", "failed")
+    assert gui.parse_line("[build] BUILD FAILED while running: pip install ... (exit code 1)", 30)[2] == "failed"
+    pct, status, outcome = gui.parse_line(
+        "[update] SNMPathy in C:\\x is already build a5081a1: nothing to do", 10)
+    assert (pct, outcome) == (100, "current") and "a5081a1" in status
+    # PyInstaller chatter creeps forward inside its stage but never past it
+    pct = 50
+    for _ in range(100):
+        pct = gui.parse_line("INFO: Analyzing hidden import", pct)[0]
+    assert pct == 85
+
+
+def test_update_runs_without_a_console(gui, monkeypatch):
+    cmd = gui.update_command(["--dest", "X"])
+    assert cmd[1:3] == ["-u", str(ROOT / "scripts" / "update.py")] and "--from-tray" in cmd and cmd[-2:] == ["--dest", "X"]
+    monkeypatch.setattr(gui.sys, "executable", str(ROOT / "pythonw.exe"))
+    assert gui.console_python().endswith("pythonw.exe")  # no python.exe next to it: keep what we have
+
+
+def test_only_one_update_at_a_time(update, tmp_path, monkeypatch):
+    monkeypatch.setattr(update, "LOCK_FILE", tmp_path / "update.lock")
+    assert update.acquire_lock() and not update.acquire_lock()
+    update.release_lock()
+    assert update.acquire_lock()
+    old = __import__("time").time() - update.LOCK_STALE - 10
+    __import__("os").utime(tmp_path / "update.lock", (old, old))  # left behind by a crash
+    assert update.acquire_lock()
+    monkeypatch.setattr(update, "acquire_lock", lambda: False)
+    monkeypatch.setattr(update, "pull_latest", lambda: pytest.fail("must not run"))
+    assert update.main([]) == 3
+
+
+def test_restarted_app_does_not_inherit_the_progress_pipe(update, monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr(update.subprocess, "Popen", lambda argv, **kw: seen.update(kw))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    update.start(tmp_path / "SNMPathy")
+    assert seen["stdout"] is subprocess.DEVNULL and seen["stderr"] is subprocess.DEVNULL
+
+
+def test_tray_opens_the_progress_window(monkeypatch, tmp_path):
+    monkeypatch.setattr(tray, "app_dir", lambda: tmp_path)
+    assert tray.updater_command() is None and not tray.update_available()
+    gui_script = tmp_path / "src" / "scripts" / "update_gui.py"
+    gui_script.parent.mkdir(parents=True)
+    gui_script.write_text("")
+    (tmp_path / "updater.json").write_text(__import__("json").dumps(
+        {"python": sys.executable, "gui": str(gui_script), "source": str(tmp_path / "src")}))
+    cmd = tray.updater_command()
+    assert cmd == [sys.executable, str(gui_script), "--dest", str(tmp_path)] and tray.update_available()
+    launched = []
+    monkeypatch.setattr(tray.subprocess, "Popen", lambda argv, **kw: launched.append((argv, kw)))
+    tray.TrayApp.__new__(tray.TrayApp).run_update()
+    argv, kw = launched[0]
+    assert argv == cmd and kw["stdout"] is subprocess.DEVNULL and kw["cwd"] == tmp_path / "src"
+
+
+def test_error_lines_are_recognised(gui):
+    assert gui.error_line("ERROR: Could not install packages due to an OSError: [WinError 5] Access is denied")
+    assert gui.error_line("fatal: unable to access 'https://github.com/': Could not resolve host")
+    assert gui.error_line("PermissionError: [Errno 13] Permission denied: 'SNMPathy.exe'")
+    assert not gui.error_line("[build] BUILD FAILED while running: pip install")
+    assert not gui.error_line("123 INFO: Building EXE")

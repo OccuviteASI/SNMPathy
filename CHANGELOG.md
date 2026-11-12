@@ -4,6 +4,13 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 `snmpathy version`. Executables built with `scripts/build_executable` also show the git
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
+## 0.6.1
+- **Update from the tray shows a progress window** instead of a command prompt: current step,
+  progress bar, full log under "Show details", and the actual error when an update fails.
+  "Run in background" hides it while the update finishes.
+- Only one update runs at a time (tray, double-click and the nightly scheduled update).
+- Builds no longer print setuptools `project.license` deprecation warnings.
+
 ## 0.6.0
 - Runs in the **system tray** when started by double-click, at login or after an update: no
   console window. Tray menu: Open SNMPathy, live status (red marker when something is down),

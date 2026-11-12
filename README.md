@@ -487,9 +487,14 @@ The CLI flags `--db`, `--host`, `--port`, `--syslog-udp`, `--syslog-tcp`, `--tok
 
 ## Updating
 
-Double-click **Update SNMPathy** (created next to `SNMPathy.exe` in your Claude folder by the
-build) or `scripts\update.cmd` in the source folder (`scripts/update.sh` on macOS / Linux), or
-choose **Update SNMPathy** in the tray menu. It:
+Right-click the tray icon and choose **Update SNMPathy**. A small window shows the progress
+(checking, downloading, building, restarting) with the full log under **Show details**; no
+console window opens. **Run in background** hides the window and lets the update finish on its
+own. If the update fails, the window says why and SNMPathy keeps running the previous version.
+
+You can also double-click **Update SNMPathy** (created next to `SNMPathy.exe` in your Claude
+folder by the build) or `scripts\update.cmd` in the source folder (`scripts/update.sh` on
+macOS / Linux), which show the same steps in a console window. Every way of updating:
 
 1. fetches the latest `main` and fast-forwards your source folder (it refuses, and changes
    nothing, if you have local edits),
@@ -501,6 +506,11 @@ To have it happen automatically, run `scripts\update.cmd --schedule` once: a sch
 (cron on macOS / Linux) checks every night at 03:17 and only rebuilds when something new was
 merged; it runs hidden and logs to `build/update.log`. `--unschedule` removes it. Git must
 be installed (Git for Windows on Windows).
+
+Only one update runs at a time: a tray click while the nightly update is running is refused
+with "another update is already running". The progress window uses the Python that built the
+executable (recorded in `updater.json` next to it); if you move the source folder or reinstall
+Python, run `scripts\build_executable.cmd` once to refresh it.
 
 ## Running in the system tray
 

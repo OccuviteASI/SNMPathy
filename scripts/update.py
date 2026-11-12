@@ -3,6 +3,7 @@
 
     scripts\\update.cmd                 (Windows: double-click, or "Update SNMPathy.cmd" next to SNMPathy.exe)
     scripts/update.sh                  (macOS / Linux)
+    tray menu > Update SNMPathy        (runs this through scripts/update_gui.py: a progress window)
 
 Steps:
   1. git fetch, switch to main and fast-forward to origin/main (local edits are never discarded)
@@ -37,6 +38,8 @@ EXE_NAME = "SNMPathy.exe" if IS_WINDOWS else "SNMPathy"
 TASK_NAME = "SNMPathy Update"
 BRANCH = "main"
 LOG_FILE = ROOT / "build" / "update.log"
+LOCK_FILE = ROOT / "build" / "update.lock"
+LOCK_STALE = 2 * 3600  # an update never takes this long: the lock was left by a crash
 _quiet = False
 
 
@@ -144,15 +147,17 @@ def stop(exe: Path) -> bool:
 
 def start(exe: Path) -> None:
     log(f"starting {exe}")
+    # Never hand SNMPathy our stdout: the update progress window waits for it to close.
+    quiet = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if IS_WINDOWS:
         vbs = Path(os.environ.get("LOCALAPPDATA", "")) / "SNMPathy" / "autostart.vbs"
         if vbs.exists():  # started at login without a window: do the same
-            subprocess.Popen(["wscript.exe", "//B", "//nologo", str(vbs)], cwd=exe.parent)
+            subprocess.Popen(["wscript.exe", "//B", "//nologo", str(vbs)], cwd=exe.parent, **quiet)
         else:  # in the system tray, without a console window
-            subprocess.Popen([str(exe), "tray"], cwd=exe.parent, creationflags=subprocess.CREATE_NO_WINDOW)
+            subprocess.Popen([str(exe), "tray"], cwd=exe.parent, creationflags=subprocess.CREATE_NO_WINDOW,
+                             **quiet)
     else:
-        subprocess.Popen([str(exe), "tray"], cwd=exe.parent, start_new_session=True,
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.Popen([str(exe), "tray"], cwd=exe.parent, start_new_session=True, **quiet)
 
 
 def load_build_module():
@@ -161,6 +166,34 @@ def load_build_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+# --------------------------------------------------------------------- lock
+def acquire_lock() -> bool:
+    """Only one update at a time (tray click, double-click and the nightly schedule)."""
+    LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    for _ in range(2):
+        try:
+            fd = os.open(LOCK_FILE, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                if time.time() - LOCK_FILE.stat().st_mtime < LOCK_STALE:
+                    return False
+                LOCK_FILE.unlink()
+            except FileNotFoundError:
+                pass
+            continue
+        with os.fdopen(fd, "w") as fh:
+            fh.write(str(os.getpid()))
+        return True
+    return False
+
+
+def release_lock() -> None:
+    try:
+        LOCK_FILE.unlink()
+    except FileNotFoundError:
+        pass
 
 
 # ----------------------------------------------------------------- schedule
@@ -209,6 +242,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.unschedule:
             return 0
 
+    if not acquire_lock():
+        log(f"UPDATE FAILED: another update is already running (if it is not, delete {LOCK_FILE})")
+        return 3
+    try:
+        return run_update(args)
+    finally:
+        release_lock()
+
+
+def run_update(args: argparse.Namespace) -> int:
     try:
         _, head = pull_latest()
     except UpdateError as exc:
@@ -218,7 +261,7 @@ def main(argv: list[str] | None = None) -> int:
     build = load_build_module()
     dest = build.resolve_destination(args.dest)
     if dest is None:
-        log("could not find your Claude folder; run again with --dest <folder that holds SNMPathy.exe>")
+        log("UPDATE FAILED: could not find your Claude folder; run again with --dest <folder that holds SNMPathy.exe>")
         return 2
     exe = dest / EXE_NAME
     have = installed_build(exe)

@@ -7,7 +7,8 @@ server in a background thread and shows a tray icon with:
 * a live status line (devices down / unreachable, checks down), and a red marker on the
   icon when something is down
 * **Start at login** - the same switch as Settings > Startup
-* **Update SNMPathy** - runs the "Update SNMPathy" launcher next to the executable
+* **Update SNMPathy** - pulls, rebuilds and restarts, showing a progress window
+  (``scripts/update_gui.py``, recorded in ``updater.json`` next to the executable)
 * **Open data folder**, **View log** (the log goes to ``snmpathy.log`` in tray mode)
 * **Quit SNMPathy**
 
@@ -143,6 +144,24 @@ def update_launcher() -> Path | None:
     return None
 
 
+def updater_command() -> list[str] | None:
+    """The progress-window updater recorded by the build (updater.json next to the executable)."""
+    import json
+
+    try:
+        info = json.loads((app_dir() / "updater.json").read_text(encoding="utf-8"))
+        python, gui = Path(info["python"]), Path(info["gui"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if not python.exists() or not gui.exists():
+        return None  # Python or the source folder was moved: rebuild once to refresh updater.json
+    return [str(python), str(gui), "--dest", str(app_dir())]
+
+
+def update_available() -> bool:
+    return updater_command() is not None or update_launcher() is not None
+
+
 class TrayApp:
     def __init__(self, settings: Settings, open_browser: bool = True):
         self.settings = settings
@@ -217,12 +236,25 @@ class TrayApp:
             return False
 
     def run_update(self, *_: Any) -> None:
+        command = updater_command()
+        if command is not None:
+            # A progress window in its own process: it outlives this one, which the update closes.
+            flags = 0
+            if sys.platform.startswith("win"):
+                flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
+            try:
+                subprocess.Popen(command, cwd=Path(command[1]).parent.parent, stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags,
+                                 start_new_session=not sys.platform.startswith("win"))
+                return
+            except OSError as exc:
+                log.warning("could not open the update window (%s); using the update script", exc)
         launcher = update_launcher()
         if launcher is None:
             self.notify("No updater found next to SNMPathy. Rebuild once with scripts/build_executable.")
             return
         if sys.platform.startswith("win"):
-            # A visible window so the update progress can be followed; it restarts SNMPathy itself.
+            # Older builds without updater.json: the update script in a console window.
             subprocess.Popen(["cmd", "/c", "start", "SNMPathy update", str(launcher), "--from-tray"])
         else:
             subprocess.Popen([str(launcher)], start_new_session=True)
@@ -260,7 +292,7 @@ class TrayApp:
             item(lambda _i: self.status, None, enabled=False),
             pystray.Menu.SEPARATOR,
             item("Start at login", self.toggle_autostart, checked=self.autostart_enabled),
-            item("Update SNMPathy", self.run_update, visible=lambda _i: update_launcher() is not None),
+            item("Update SNMPathy", self.run_update, visible=lambda _i: update_available()),
             item("Open data folder", self.open_folder),
             item("View log", self.view_log),
             pystray.Menu.SEPARATOR,
