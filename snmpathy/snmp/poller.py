@@ -40,6 +40,12 @@ def to_number(value: Any) -> float | None:
         return None
 
 
+def as_text_value(value: Any) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", "replace")
+    return "" if value is None else str(value)
+
+
 def counter_delta(prev: float, cur: float, bits: int) -> float | None:
     """Difference between two counter readings, accounting for wraparound.
 
@@ -86,6 +92,12 @@ def compute_value(metric: dict[str, Any], raw: Any, raw2: Any, now: float, reboo
             # old baseline so the next poll measures over a longer window.
             return None, None
         return delta / dt * scale, num
+    if kind == "pct_text":
+        # e.g. FASTPATH "5 Secs ( 31.11%) 60 Secs ( 16.75%) ...": take the first percentage.
+        import re
+
+        match = re.search(r"(\d+(?:\.\d+)?)\s*%", raw if isinstance(raw, str) else as_text_value(raw))
+        return (float(match.group(1)) if match else None), None
     if kind == "idle_counter":
         # A cumulative idle-time counter in centiseconds: its rate is idle %, report busy %.
         rate, new_raw = compute_value({**metric, "kind": "counter", "scale": 1.0}, raw, raw2, now, rebooted)

@@ -64,6 +64,7 @@ covering test.
 | FR-SNMP-8 | S | User-defined custom OIDs per device (gauge, counter, ratio, inverse ratio). | `services.py::add_custom_metric` |
 | FR-SNMP-9 | S | Test credentials without saving; CLI `get` / `walk` / `discover` tools that need no net-snmp. | `api.py::test_snmp`, `cli.py` |
 | FR-SNMP-10 | S | Reject impossible counter spikes (> 2× line rate) and the zero rates caused by agent counter caching. | `snmp/poller.py` |
+| FR-SNMP-12 | S | Ubiquiti private MIBs: airMAX (link + per-station), UniFi APs (clients, utilisation), airFiber / LTU / AF60 / Wave (links, stations), EdgeMAX and EdgeSwitch / FASTPATH (temperatures, fans, PSUs, CPU, memory, PoE); family found by probing one identity OID per MIB because they share generic sysObjectIDs; device-vs-MIB quirks handled (AF60 `.1` scalars, LTU metres, airOS ×10^7 temperature, kHz frequencies, text CPU). Standard POWER-ETHERNET-MIB PoE for any switch. | `snmp/ubiquiti.py`, `tests/test_ubiquiti.py` |
 | FR-SNMP-11 | S | Vendor private-MIB discovery: Rajant BreadCrumb (temperature, memory, CPU from idle ticks, InstaMesh counters, radios, GPS; bare-OID scalars) and Tachyon TNA-30x (identity, CPU / memory, temperatures, radios, per-peer RSSI / SNR / rate / MCS / distance / traffic, peers as wireless map links). | `snmp/vendors.py`, `tests/test_vendors.py` |
 
 #### Syslog

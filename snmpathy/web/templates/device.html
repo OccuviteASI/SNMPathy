@@ -110,6 +110,21 @@
   {% if by_key.get('wireless.rx_bps') %}
   <div class="card"><div class="card-head"><h3>Wireless peer traffic</h3></div><div class="card-body"><div data-chart='{"type":"area","targets":[{"key":"wireless.rx_bps","device":"{{ dev }}","alias":"In {label}","limit":4},{"key":"wireless.tx_bps","device":"{{ dev }}","alias":"Out {label}","limit":4}]}'></div></div></div>
   {% endif %}
+  {% if by_key.get('wireless.signal') or by_key.get('wireless.ccq') %}
+  <div class="card"><div class="card-head"><h3>Wireless link</h3></div><div class="card-body"><div data-chart='{"targets":[{"key":"wireless.signal","device":"{{ dev }}","alias":"Signal (dBm)"},{"key":"wireless.ccq","device":"{{ dev }}","alias":"CCQ {label} (%)","limit":6},{"key":"wireless.airmax_capacity","device":"{{ dev }}","alias":"airMAX capacity {label} (%)","limit":6}]}'></div></div></div>
+  {% endif %}
+  {% if by_key.get('wireless.tx_capacity') %}
+  <div class="card"><div class="card-head"><h3>Wireless capacity</h3></div><div class="card-body"><div data-chart='{"targets":[{"key":"wireless.tx_capacity","device":"{{ dev }}","alias":"TX {label}","limit":4},{"key":"wireless.rx_capacity","device":"{{ dev }}","alias":"RX {label}","limit":4}]}'></div></div></div>
+  {% endif %}
+  {% if by_key.get('wireless.clients') %}
+  <div class="card"><div class="card-head"><h3>Wireless clients</h3></div><div class="card-body"><div data-chart='{"type":"stacked","targets":[{"key":"wireless.clients","device":"{{ dev }}","alias":"{label}","limit":8}]}'></div></div></div>
+  {% endif %}
+  {% if by_key.get('radio.channel_util') %}
+  <div class="card"><div class="card-head"><h3>Channel utilisation</h3></div><div class="card-body"><div data-chart='{"yMax":100,"unit":"%","targets":[{"key":"radio.channel_util","device":"{{ dev }}","alias":"{label}"}]}'></div></div></div>
+  {% endif %}
+  {% if by_key.get('poe.consumption_w') or by_key.get('poe.output_w') %}
+  <div class="card"><div class="card-head"><h3>PoE power</h3></div><div class="card-body"><div data-chart='{"unit":"W","targets":[{"key":"poe.consumption_w","device":"{{ dev }}","alias":"Used {label}"},{"key":"poe.budget_w","device":"{{ dev }}","alias":"Budget {label}"},{"key":"poe.output_w","device":"{{ dev }}","alias":"Output {label}"}]}'></div></div></div>
+  {% endif %}
   {% if by_key.get('hw.temperature') %}
   <div class="card"><div class="card-head"><h3>Temperature</h3></div><div class="card-body"><div data-chart='{"unit":"°C","targets":[{"key":"hw.temperature","device":"{{ dev }}","alias":"{label}","limit":6}]}'></div></div></div>
   {% endif %}

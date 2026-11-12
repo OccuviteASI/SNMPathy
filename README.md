@@ -159,10 +159,15 @@ a gauge, counter (converted to a rate) or ratio.
 | Vendor | What is collected (private MIB) |
 |---|---|
 | **Rajant** BreadCrumb (RAJANT-CORPORATION-MIB, enterprise 34861) | model / serial / firmware, system temperature, free memory, CPU (from the idle counter when HOST-RESOURCES is absent), InstaMesh packets received / sent / dropped / floods dropped, per-radio (wlan0-3) frequency and noise floor, GPS position and satellites. The Rajant MIB has no per-peer table, so mesh peer signal is not available over SNMP |
+| **Ubiquiti airMAX** (UBNT-AirMAX-MIB) | model / firmware (IEEE 802.11 MIB), frequency, TX power, signal, noise, CCQ, TX / RX rate, station count, airMAX quality / capacity / airtime, temperature, memory; per station: signal, CCQ, airMAX capacity, TX / RX rate and capacity, latency, distance, traffic. Stations appear on the map |
+| **Ubiquiti UniFi** APs (UBNT-UniFi-MIB) | model / firmware, clients per SSID and band, CCQ, traffic per SSID, channel and TX power, channel utilisation (total, own RX / TX, other networks) per radio |
+| **Ubiquiti UISP / airFiber** (UBNT-AirFIBER-MIB, UBNT-AFLTU-MIB, UI-AF60-MIB) | airFiber classic: link capacity, local and remote RX power per chain, radio temperatures, link state and uptime, distance, RF traffic. LTU / airFiber 5XHD and airFiber 60 / Wave: CPU, memory, frequency and per station RSSI / remote RSSI, SNR, MCS, capacity, latency, distance, traffic. Links appear on the map |
+| **Ubiquiti EdgeMAX / EdgeSwitch** (UBNT-EdgeMAX-MIB, EdgeSwitch-BOXSERVICES-PRIVATE-MIB) | EdgeRouter / UFiber / UISP Fiber OLT / EdgePower: model, serial, firmware, temperatures, fans, PoE output. EdgeSwitch and first-generation UniFi switches: model, serial, firmware, CPU, memory, temperatures, fan speed and state, PSU state. Newer UniFi switches and gateways only expose standard MIBs (interfaces, CPU, memory, PoE) |
 | **Tachyon Networks** TNA-30x (TACHYON-MIB, enterprise 57344) | model / serial / firmware, CPU %, memory %, CPU / modem / radio temperature, radio TX power, frequency and channel width, peer count, and per peer: RSSI, SNR, TX / RX PHY rate, TX / RX MCS, link uptime, distance and traffic. Peers also appear as **wireless links on the network map** |
 
-Example alert rules: `wireless.rssi < -70` (instance glob per peer), `wireless.snr < 10`,
-`hw.temperature > 75`. Devices discovered before an upgrade pick these up at their next
+Any switch that implements the standard POWER-ETHERNET-MIB also gets PoE budget and power
+used. Example alert rules: `wireless.rssi < -70` (instance glob per peer), `wireless.snr < 10`,
+`wireless.ccq < 80`, `radio.channel_util > 70`, `hw.temperature > 75`, `hw.psu_state != 2`. Devices discovered before an upgrade pick these up at their next
 rediscovery (every 6 hours) or immediately with **Rediscover** on the device page.
 
 ### Change SNMP settings later
