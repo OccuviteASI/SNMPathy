@@ -87,7 +87,26 @@ async def discover(client: SnmpClient) -> DiscoveryResult:
     await _discover_interfaces(client, result)
     await _discover_host_resources(client, result)
     await _discover_ucd(client, result)
+    await _discover_vendor(client, result)
     return result
+
+
+async def _discover_vendor(client: SnmpClient, result: DiscoveryResult) -> None:
+    """Private-MIB metrics for supported vendors (Rajant, Tachyon, ...)."""
+    from .vendors import discover_vendor
+
+    keys = {m.key for m in result.metrics}
+    try:
+        extra = await discover_vendor(client, result.system.get("sys_object_id", ""), result.system.get("sys_descr", ""),
+                                      have_cpu="cpu.load" in keys,
+                                      have_memory=bool(keys & {"mem.used_pct", "hr.mem.used_pct"}))
+    except SnmpError as exc:
+        log.debug("vendor discovery failed: %s", exc)
+        return
+    if extra.vendor:
+        result.system["vendor"] = extra.vendor
+    result.system.update(extra.system)
+    result.metrics.extend(extra.metrics)
 
 
 async def _discover_interfaces(client: SnmpClient, result: DiscoveryResult) -> None:

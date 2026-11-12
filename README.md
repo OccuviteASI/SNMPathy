@@ -153,6 +153,18 @@ detection (40+ vendors), ifTable / ifXTable, HOST-RESOURCES CPU and storage, and
 load and memory. **Custom metrics:** on a device's *Metrics* tab, add any numeric OID as
 a gauge, counter (converted to a rate) or ratio.
 
+**Vendor-specific metrics** are added automatically when discovery recognises the device
+(by sysObjectID, or by probing devices that report a generic Net-SNMP ID):
+
+| Vendor | What is collected (private MIB) |
+|---|---|
+| **Rajant** BreadCrumb (RAJANT-CORPORATION-MIB, enterprise 34861) | model / serial / firmware, system temperature, free memory, CPU (from the idle counter when HOST-RESOURCES is absent), InstaMesh packets received / sent / dropped / floods dropped, per-radio (wlan0-3) frequency and noise floor, GPS position and satellites. The Rajant MIB has no per-peer table, so mesh peer signal is not available over SNMP |
+| **Tachyon Networks** TNA-30x (TACHYON-MIB, enterprise 57344) | model / serial / firmware, CPU %, memory %, CPU / modem / radio temperature, radio TX power, frequency and channel width, peer count, and per peer: RSSI, SNR, TX / RX PHY rate, TX / RX MCS, link uptime, distance and traffic. Peers also appear as **wireless links on the network map** |
+
+Example alert rules: `wireless.rssi < -70` (instance glob per peer), `wireless.snr < 10`,
+`hw.temperature > 75`. Devices discovered before an upgrade pick these up at their next
+rediscovery (every 6 hours) or immediately with **Rediscover** on the device page.
+
 ### Change SNMP settings later
 
 Open the device and click **Edit** (or **Change SNMP settings** next to the SNMP line on

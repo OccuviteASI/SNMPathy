@@ -86,6 +86,10 @@ def compute_value(metric: dict[str, Any], raw: Any, raw2: Any, now: float, reboo
             # old baseline so the next poll measures over a longer window.
             return None, None
         return delta / dt * scale, num
+    if kind == "idle_counter":
+        # A cumulative idle-time counter in centiseconds: its rate is idle %, report busy %.
+        rate, new_raw = compute_value({**metric, "kind": "counter", "scale": 1.0}, raw, raw2, now, rebooted)
+        return (None if rate is None else max(0.0, min(100.0, 100.0 - rate))), new_raw
     if kind in {"ratio", "ratio_free"}:
         den = to_number(raw2)
         if num is None or not den:

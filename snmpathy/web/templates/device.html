@@ -23,7 +23,9 @@
       <dl class="kv">
         <dt>Hostname</dt><dd>{{ device.hostname }}</dd>
         <dt>sysName</dt><dd>{{ device.sys_name or '-' }}</dd>
-        <dt>Vendor</dt><dd>{{ device.vendor or '-' }}</dd>
+        <dt>Vendor</dt><dd>{{ device.vendor or '-' }}{% if device.hw_model %} · {{ device.hw_model }}{% endif %}</dd>
+        {% if device.hw_serial %}<dt>Serial</dt><dd class="mono">{{ device.hw_serial }}</dd>{% endif %}
+        {% if device.firmware %}<dt>Firmware</dt><dd>{{ device.firmware }}</dd>{% endif %}
         <dt>Description</dt><dd class="small">{{ device.sys_descr or '-' }}</dd>
         <dt>Object ID</dt><dd class="mono">{{ device.sys_object_id or '-' }}</dd>
         <dt>Uptime</dt><dd>{{ device.sys_uptime|duration if device.sys_uptime else '-' }}</dd>
@@ -95,6 +97,27 @@
   {% endif %}
   {% if by_key.get('load.1') %}
   <div class="card"><div class="card-head"><h3>Load average</h3></div><div class="card-body"><div data-chart='{"targets":[{"key":"load.1","device":"{{ dev }}","alias":"1 min"},{"key":"load.5","device":"{{ dev }}","alias":"5 min"},{"key":"load.15","device":"{{ dev }}","alias":"15 min"}]}'></div></div></div>
+  {% endif %}
+  {% if by_key.get('wireless.rssi') %}
+  <div class="card"><div class="card-head"><h3>Wireless signal</h3></div><div class="card-body"><div data-chart='{"unit":"dBm","targets":[{"key":"wireless.rssi","device":"{{ dev }}","alias":"RSSI {label}","limit":8}]}'></div></div></div>
+  {% endif %}
+  {% if by_key.get('wireless.snr') %}
+  <div class="card"><div class="card-head"><h3>Wireless SNR</h3></div><div class="card-body"><div data-chart='{"unit":"dB","targets":[{"key":"wireless.snr","device":"{{ dev }}","alias":"SNR {label}","limit":8}]}'></div></div></div>
+  {% endif %}
+  {% if by_key.get('wireless.tx_rate') %}
+  <div class="card"><div class="card-head"><h3>Wireless link rate</h3></div><div class="card-body"><div data-chart='{"targets":[{"key":"wireless.tx_rate","device":"{{ dev }}","alias":"TX {label}","limit":4},{"key":"wireless.rx_rate","device":"{{ dev }}","alias":"RX {label}","limit":4}]}'></div></div></div>
+  {% endif %}
+  {% if by_key.get('wireless.rx_bps') %}
+  <div class="card"><div class="card-head"><h3>Wireless peer traffic</h3></div><div class="card-body"><div data-chart='{"type":"area","targets":[{"key":"wireless.rx_bps","device":"{{ dev }}","alias":"In {label}","limit":4},{"key":"wireless.tx_bps","device":"{{ dev }}","alias":"Out {label}","limit":4}]}'></div></div></div>
+  {% endif %}
+  {% if by_key.get('hw.temperature') %}
+  <div class="card"><div class="card-head"><h3>Temperature</h3></div><div class="card-body"><div data-chart='{"unit":"°C","targets":[{"key":"hw.temperature","device":"{{ dev }}","alias":"{label}","limit":6}]}'></div></div></div>
+  {% endif %}
+  {% if by_key.get('radio.noise') or by_key.get('radio.tx_power') %}
+  <div class="card"><div class="card-head"><h3>Radios</h3></div><div class="card-body"><div data-chart='{"unit":"dBm","targets":[{"key":"radio.noise","device":"{{ dev }}","alias":"Noise {label}"},{"key":"radio.tx_power","device":"{{ dev }}","alias":"TX power {label}"}]}'></div></div></div>
+  {% endif %}
+  {% if by_key.get('rajant.mesh.rx_pps') %}
+  <div class="card"><div class="card-head"><h3>InstaMesh</h3></div><div class="card-body"><div data-chart='{"unit":"pps","targets":[{"key":"rajant.mesh.rx_pps","device":"{{ dev }}","alias":"Received"},{"key":"rajant.mesh.tx_pps","device":"{{ dev }}","alias":"Sent"},{"key":"rajant.mesh.dropped_pps","device":"{{ dev }}","alias":"Dropped"}]}'></div></div></div>
   {% endif %}
   {% if by_key.get('snmp.response_ms') %}
   <div class="card"><div class="card-head"><h3>SNMP response time</h3></div><div class="card-body"><div data-chart='{"targets":[{"key":"snmp.response_ms","device":"{{ dev }}","alias":"Response time"}]}'></div></div></div>
