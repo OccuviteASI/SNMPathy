@@ -468,6 +468,23 @@ commented example.
 The CLI flags `--db`, `--host`, `--port`, `--syslog-udp`, `--syslog-tcp`, `--token`,
 `--no-syslog` and `--no-poller` override the file.
 
+## Start automatically at login
+
+**Settings → Startup → Start SNMPathy automatically when I log in** (or
+`snmpathy autostart on` / `off` / `status`). No admin rights are needed; it uses the
+normal per-user mechanism of each OS:
+
+| OS | What it creates |
+|---|---|
+| Windows | `HKCU\…\CurrentVersion\Run\SNMPathy`, launching through a small VBScript so no console window appears |
+| macOS | `~/Library/LaunchAgents/com.snmpathy.autostart.plist` (logs in `~/Library/Logs/SNMPathy.log`) |
+| Linux | a systemd user service (`~/.config/systemd/user/snmpathy.service`), or `~/.config/autostart/snmpathy.desktop` without systemd |
+
+The autostarted server uses the same executable / Python, configuration file and database
+as the one you enabled it from, and does not open a browser. For a machine that should
+monitor without anyone logged in, use a service (below) instead. In Docker, use the
+container restart policy.
+
 ## Running as a service
 
 | Platform | How |

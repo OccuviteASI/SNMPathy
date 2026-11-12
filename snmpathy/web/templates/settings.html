@@ -21,6 +21,19 @@
       </dl>
     </div>
   </div>
+  <div class="card" id="autostart">
+    <div class="card-head"><h2>Startup</h2></div>
+    <div class="card-body stack">
+      {% if autostart.supported %}
+      <label class="check" style="font-size:15px"><input type="checkbox" id="autostart-toggle" {{ 'checked' if autostart.enabled }}> <strong>Start SNMPathy automatically when I log in</strong></label>
+      <p class="small muted" style="margin:0" id="autostart-note">{{ autostart.note }}</p>
+      <div class="small muted {{ '' if autostart.enabled else 'hidden' }}" id="autostart-detail">Entry: <code id="autostart-location">{{ autostart.location }}</code><br>Runs: <code id="autostart-command">{{ autostart.command|join(' ') }}</code></div>
+      <p class="small muted" style="margin:0">To run without anyone logged in (a server), install SNMPathy as a service instead: see <em>Running as a service</em> in the README.</p>
+      {% else %}
+      <p style="margin:0">{{ status('unknown', 'not available') }} <span class="small muted">{{ autostart.note }}</span></p>
+      {% endif %}
+    </div>
+  </div>
   <div class="card">
     <div class="card-head"><h2>Data</h2></div>
     <div class="card-body">
@@ -47,7 +60,7 @@
     <div class="card-head"><h2>Settings in effect</h2><span class="small muted">edit snmpathy.yaml or SNMPATHY_* variables, then restart</span></div>
     <div class="card-body flush table-wrap scroll" style="max-height:300px">
       <table class="table compact"><tbody>
-      {% for k, v in settings.__dict__.items() if k != 'extra' %}
+      {% for k, v in settings.__dict__.items() if k not in ('extra', 'config_path') %}
         <tr><td class="mono small">{{ k }}</td><td class="mono small">{{ '********' if ('password' in k or 'token' in k) and v else v }}</td></tr>
       {% endfor %}
       </tbody></table>
@@ -78,6 +91,24 @@
 </div>
 {% endblock %}
 {% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const box = SP.$("#autostart-toggle");
+  if (!box) return;
+  box.addEventListener("change", async () => {
+    box.disabled = true;
+    try {
+      const r = await SP.api("PUT", "/api/system/autostart", { enabled: box.checked });
+      box.checked = r.enabled;
+      SP.$("#autostart-detail").classList.toggle("hidden", !r.enabled);
+      SP.$("#autostart-location").textContent = r.location;
+      SP.$("#autostart-command").textContent = r.command.join(" ");
+      SP.toast(r.enabled ? "SNMPathy will start automatically when you log in" : "Autostart turned off");
+    } catch (e) { box.checked = !box.checked; SP.toast(e.message, "error"); }
+    finally { box.disabled = false; }
+  });
+});
+</script>
 <script>
 document.addEventListener("DOMContentLoaded", () => {
   SP.$("#import-btn").addEventListener("click", async () => {

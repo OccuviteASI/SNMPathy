@@ -122,6 +122,8 @@ class Settings:
                 extra[key] = value
         settings = cls(**kwargs)
         settings.extra = extra
+        # Remembered so autostart can relaunch SNMPathy with the same configuration file.
+        settings.config_path = str(Path(path).resolve()) if path else ""
         if is_frozen() and not Path(settings.database).is_absolute():
             settings.database = str(app_dir() / settings.database)
         return settings

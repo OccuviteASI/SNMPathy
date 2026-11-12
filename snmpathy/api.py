@@ -1133,3 +1133,26 @@ def submit_passive(body: PassiveIn, request: Request, db: Database = Depends(get
         if monitor and updated.get("transition"):
             monitor._alert_wakeup.set()
     return {"accepted": accepted, "unknown": unknown}
+
+
+# ================================================================== autostart
+class AutostartIn(BaseModel):
+    enabled: bool
+
+
+@router.get("/system/autostart", tags=["system"])
+def get_autostart(request: Request):
+    """Whether SNMPathy starts automatically when the current user logs in."""
+    from . import autostart
+
+    return autostart.status(request.app.state.settings)
+
+
+@router.put("/system/autostart", tags=["system"])
+def put_autostart(body: AutostartIn, request: Request):
+    from . import autostart
+
+    try:
+        return autostart.set_enabled(body.enabled, request.app.state.settings)
+    except (autostart.AutostartError, OSError) as exc:
+        raise HTTPException(422, f"could not change autostart: {exc}") from exc
