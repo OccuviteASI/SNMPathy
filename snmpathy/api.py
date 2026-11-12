@@ -238,7 +238,7 @@ def status(db: Database = Depends(get_db)):
 
 @router.get("/system", tags=["system"])
 def system(request: Request, db: Database = Depends(get_db)):
-    from . import __version__
+    from . import __version__, version_string
     from .checks.probes import detect_icmp_mode
     import platform
     import sys
@@ -246,6 +246,7 @@ def system(request: Request, db: Database = Depends(get_db)):
     monitor = request.app.state.monitor
     return {
         "version": __version__,
+        "build": version_string(),
         "python": sys.version.split()[0],
         "platform": platform.platform(),
         "icmp_mode": detect_icmp_mode(),

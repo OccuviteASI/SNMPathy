@@ -346,7 +346,9 @@ def cmd_grafana_export(args: argparse.Namespace) -> int:
 
 
 def cmd_version(_args: argparse.Namespace) -> int:
-    print(f"snmpathy {__version__} (Python {sys.version.split()[0]}, {sys.platform})")
+    from . import version_string
+
+    print(f"snmpathy {version_string()} (Python {sys.version.split()[0]}, {sys.platform})")
     return 0
 
 

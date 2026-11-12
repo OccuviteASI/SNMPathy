@@ -30,7 +30,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from . import __version__, reports
+from . import __version__, reports, version_string
 from .db import Database, loads
 from .services import overview
 
@@ -191,7 +191,7 @@ def summary(db: Database, name: str | None = None) -> dict[str, Any]:
     ov = overview(db)
     return {
         "schema": SCHEMA,
-        "server": {"name": name or "SNMPathy", "version": __version__, "time": now},
+        "server": {"name": name or "SNMPathy", "version": version_string(), "time": now},
         "overview": ov,
         "devices": devices,
         "checks": checks,

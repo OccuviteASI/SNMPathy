@@ -16,3 +16,6 @@ dist/
 /SNMPathy
 /README.txt
 /*.new
+
+# Build stamp written by scripts/build_executable.py
+/snmpathy/_build.py

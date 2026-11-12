@@ -26,7 +26,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import __version__
+from . import __version__, version_string
 from .checks.probes import ProbeResult
 from .checks.runner import run_probe
 from .collectors import encode_values
@@ -75,7 +75,7 @@ class CollectorAgent:
         return self._client
 
     def _info_headers(self) -> dict[str, str]:
-        return {"X-Collector-Version": __version__, "X-Collector-Hostname": self.name,
+        return {"X-Collector-Version": version_string(), "X-Collector-Hostname": self.name,
                 "X-Collector-Platform": f"{platform.system()} {platform.release()} ({platform.machine()})",
                 "X-Collector-Backlog": str(len(self.outbox)),
                 "X-Collector-Config": str(self.config.get("version") or "")}
