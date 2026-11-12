@@ -29,7 +29,9 @@ RUN useradd --system --uid 10001 --home-dir /data snmpathy \
 USER snmpathy
 VOLUME ["/data"]
 
-EXPOSE 8080 5514/udp 5514/tcp
+# Web/API, syslog, GELF, JSON logs, NetFlow, IPFIX, sFlow.
+# The same image runs a remote collector with: snmpathy collector --server ... --token ...
+EXPOSE 8080 5514/udp 5514/tcp 12201/udp 5544/tcp 2055/udp 4739/udp 6343/udp
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=4).status == 200 else 1)"
 

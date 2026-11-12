@@ -26,6 +26,7 @@ from .services import create_check, create_device
 from .snmp import mibs
 from .snmp.client import FakeSnmpClient, SnmpClient, SnmpError, normalize_oid
 from .snmp.discovery import apply_discovery, discover
+from .snmp.neighbors import apply_neighbors, discover_neighbors
 from .snmp.poller import poll_device
 from .storage import rollup
 from .syslog.parser import parse
@@ -58,6 +59,30 @@ DEMO_DEVICES: list[dict[str, Any]] = [
      "ports": 1, "uplinks": 0, "speed": GBIT, "uplink_speed": GBIT, "cpus": 1, "load": 8,
      "location": "HQ / lobby ceiling", "tags": ["wireless", "hq"]},
 ]
+
+# LLDP adjacencies between demo devices: (device, ifIndex, neighbour, neighbour ifIndex).
+# Neighbours that are not demo devices show up on the map as unmanaged nodes.
+DEMO_LINKS: list[tuple[str, int, str, int]] = [
+    ("core-sw01", 25, "dist-sw02", 17),
+    ("core-sw01", 26, "edge-fw01", 7),
+    ("core-sw01", 1, "nas01", 1),
+    ("core-sw01", 2, "ap-lobby", 1),
+    ("dist-sw02", 1, "linux-web01", 2),
+    ("edge-fw01", 8, "branch-rtr01", 5),
+    ("core-sw01", 3, "floor3-phone-sw", 48),
+    ("dist-sw02", 2, "esxi-host02", 3),
+]
+
+
+def _demo_neighbours(name: str) -> list[tuple[int, str, int]]:
+    out = []
+    for a, ai, b, bi in DEMO_LINKS:
+        if a == name:
+            out.append((ai, b, bi))
+        elif b == name:
+            out.append((bi, a, ai))
+    return out
+
 
 DEMO_CHECKS: list[dict[str, Any]] = [
     {"name": "Company website", "type": "http", "target": "https://www.example.demo/", "interval": 60, "public": 1,
@@ -139,7 +164,7 @@ class DemoAgent(FakeSnmpClient):
             else:
                 name = f"port{i}"
             speed = s["uplink_speed"] if uplink else s["speed"]
-            connected = uplink or _h(s["name"], i) % 10 < 7
+            connected = uplink or _h(s["name"], i) % 10 < 7 or any(p == i for p, _, _ in _demo_neighbours(s["name"]))
             self.ifaces.append({"idx": i, "name": name, "speed": speed, "uplink": uplink, "connected": connected,
                                 "alias": ("Uplink to core" if uplink else (f"User port {i}" if connected else ""))})
             d[f"{mibs.IF_DESCR}.{i}"] = name
@@ -168,7 +193,35 @@ class DemoAgent(FakeSnmpClient):
             self.disks.append((n, gb))
         if s.get("ucd"):
             d[mibs.UCD_MEM_TOTAL_REAL] = 16 * 1024 * 1024
+        # LLDP: local ports and remote neighbours.
+        specs = {x["name"]: x for x in DEMO_DEVICES}
+        for i in self.ifaces:
+            d[f"{mibs.LLDP_LOC_PORT_ID_SUBTYPE}.{i['idx']}"] = 5  # interfaceName
+            d[f"{mibs.LLDP_LOC_PORT_ID}.{i['idx']}"] = i["name"]
+            d[f"{mibs.LLDP_LOC_PORT_DESC}.{i['idx']}"] = i["alias"]
+        for n, (port, peer, peer_port) in enumerate(_demo_neighbours(s["name"]), start=1):
+            peer_spec = specs.get(peer)
+            peer_if = DemoAgent._port_name(peer_spec, peer_port) if peer_spec else f"port{peer_port}"
+            idx = f"0.{port}.{n}"
+            d[f"{mibs.LLDP_REM_CHASSIS_ID_SUBTYPE}.{idx}"] = 4
+            d[f"{mibs.LLDP_REM_CHASSIS_ID}.{idx}"] = bytes([0x00, 0x1B, 0x54, _h(peer) % 256, 0, 1])
+            d[f"{mibs.LLDP_REM_PORT_ID_SUBTYPE}.{idx}"] = 5
+            d[f"{mibs.LLDP_REM_PORT_ID}.{idx}"] = peer_if
+            d[f"{mibs.LLDP_REM_SYS_NAME}.{idx}"] = peer
+            d[f"{mibs.LLDP_REM_SYS_DESC}.{idx}"] = peer_spec["descr"] if peer_spec else (
+                "Cisco IOS Software, C2960X Software" if "sw" in peer else "VMware ESXi 8.0.2")
         self.static = {normalize_oid(k): v for k, v in d.items()}
+
+    @staticmethod
+    def _port_name(spec: dict[str, Any], i: int) -> str:
+        uplink = i > spec["ports"]
+        if spec["name"].startswith("linux") or spec["name"].startswith("nas"):
+            return f"eth{i - 1}"
+        if spec["vendor_oid"].startswith("1.3.6.1.4.1.9."):
+            return f"Te1/1/{i - spec['ports']}" if uplink else f"Gi1/0/{i}"
+        if spec["vendor_oid"].startswith("1.3.6.1.4.1.2636."):
+            return f"ge-0/0/{i - 1}"
+        return f"port{i}"
 
     def _value(self, oid: str, t: float) -> Any:
         s = self.spec
@@ -415,6 +468,7 @@ async def _populate(db: Database, days: int) -> None:
         agent = DemoAgent(spec, clock=lambda: clock["t"])
         clock["t"] = start
         apply_discovery(db, device["id"], await discover(agent), now=start)
+        apply_neighbors(db, device["id"], await discover_neighbors(agent), now=start)
         t = start
         # One transaction per device: thousands of small commits are slow on some disks.
         with db.transaction():

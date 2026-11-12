@@ -101,6 +101,8 @@ def expand_targets(spec: str, exclude: str = "", limit: int = MAX_HOSTS) -> list
             continue
         if _looks_like_ip(token):
             add(str(ipaddress.ip_address(token)))
+        elif re.fullmatch(r"[\d.]+", token):
+            raise TargetError(f"invalid address {token!r}")
         elif HOSTNAME_RE.match(token):
             add(token.rstrip(".").lower())
         else:

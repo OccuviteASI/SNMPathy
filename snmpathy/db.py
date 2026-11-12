@@ -450,6 +450,15 @@ CREATE TABLE IF NOT EXISTS flows (
 CREATE INDEX IF NOT EXISTS idx_flows_bucket ON flows(bucket);
 CREATE INDEX IF NOT EXISTS idx_flows_source ON flows(source_id, bucket);
 
+-- Saved log searches (query + filters), shown in the log explorer.
+CREATE TABLE IF NOT EXISTS saved_searches (
+    id          INTEGER PRIMARY KEY,
+    name        TEXT NOT NULL,
+    query       TEXT NOT NULL DEFAULT '',
+    filters     TEXT NOT NULL DEFAULT '{}',
+    created_at  REAL NOT NULL
+);
+
 -- Saved node positions on the topology map, per map view.
 CREATE TABLE IF NOT EXISTS map_positions (
     view  TEXT NOT NULL,

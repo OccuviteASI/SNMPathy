@@ -1,0 +1,35 @@
+# SNMPathy remote collector (systemd unit).
+#
+# The easiest install is the one-line command shown in the web UI under
+# Collectors, which downloads the collector from your server and installs
+# this unit for you. To do it by hand:
+#
+#   sudo python3 -m venv /opt/snmpathy && sudo /opt/snmpathy/bin/pip install snmpathy-<version>.tar.gz
+#   sudo mkdir -p /etc/snmpathy && sudo tee /etc/snmpathy/collector.yaml <<YAML
+#   server: https://nms.example.com
+#   token: col_xxxxxxxx
+#   YAML
+#   sudo chmod 600 /etc/snmpathy/collector.yaml
+#   sudo cp deploy/systemd/snmpathy-collector.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now snmpathy-collector
+[Unit]
+Description=SNMPathy remote collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/snmpathy/bin/snmpathy collector --config /etc/snmpathy/collector.yaml --state-dir /var/lib/snmpathy-collector
+Restart=always
+RestartSec=5
+DynamicUser=yes
+StateDirectory=snmpathy-collector
+AmbientCapabilities=CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_RAW
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

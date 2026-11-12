@@ -1,0 +1,399 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon %}
+{% block title %}Fusion{% endblock %}
+{% block crumbs %}<div class="crumbs">Tactical overview of all SNMPathy servers</div>{% endblock %}
+{% block actions %}
+<span class="small muted fx-hide-sm" id="fx-updated"></span>
+<button class="btn" data-fx="refresh-all" title="Fetch every server now">{{ icon('refresh') }} Refresh all</button>
+<button class="btn primary" data-fx="manage">{{ icon('settings') }} Manage servers</button>
+{% endblock %}
+{% block content %}
+<style>
+  .fx-tiles { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .fx-tiles .tile { color: inherit; }
+  .fx-tiles .tile:hover { text-decoration: none; border-color: var(--border-strong); }
+  .tile.warn .value { color: var(--warning-text); }
+  .fx-section { margin: 22px 0 10px; display: flex; align-items: center; gap: 10px; }
+  .fx-section h2 { flex: 1; }
+  .fx-servers { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+  .fx-server { padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; border-left: 4px solid var(--good); }
+  .fx-server.warn { border-left-color: var(--warning); }
+  .fx-server.bad { border-left-color: var(--critical); }
+  .fx-server.unknown { border-left-color: var(--unknown); }
+  .fx-server-head { display: flex; gap: 8px; align-items: center; justify-content: space-between; min-width: 0; }
+  .fx-server-head .nm { font-weight: 650; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .fx-meta { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fx-mini { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 0; font-size: 12.5px; }
+  .fx-mini dt { color: var(--muted); }
+  .fx-mini dd { margin: 0; display: flex; flex-wrap: wrap; gap: 2px 10px; }
+  .fx-mini .status { font-size: 12px; }
+  .fx-err { color: var(--critical-text); font-size: 12.5px; overflow-wrap: anywhere; }
+  .fx-foot { display: flex; gap: 6px; flex-wrap: wrap; margin-top: auto; }
+  .fx-detail { color: var(--text-2); font-size: 12.5px; overflow-wrap: anywhere; min-width: 180px; }
+  .fx-sub { display: none; color: var(--text-2); font-size: 12px; overflow-wrap: anywhere; white-space: normal; }
+  .fx-good { color: var(--good-text); } .fx-warn { color: var(--warning-text); } .fx-bad { color: var(--critical-text); }
+  .fx-banner { margin-bottom: 16px; }
+  .fx-top { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .fx-top .table td { white-space: nowrap; }
+  .fx-top .table td.fx-wrap { white-space: normal; overflow-wrap: anywhere; }
+  .fx-modal-list { margin-top: 18px; }
+  .fx-modal-list .table td { vertical-align: middle; }
+  .fx-url { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
+  #fx-problems .table td:first-child, #fx-alerts .table td:first-child { white-space: normal; }
+  @media (max-width: 1100px) { .fx-top { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 700px) {
+    .fx-hide-sm { display: none; }
+    .fx-sub { display: block; }
+    .fx-detail { min-width: 0; }
+    .fx-servers { grid-template-columns: minmax(0, 1fr); }
+    .fx-url { max-width: 140px; }
+  }
+</style>
+
+<div id="fx-banner" class="callout fx-banner hidden"></div>
+<div class="tiles fx-tiles" id="fx-tiles"></div>
+
+<div class="fx-section"><h2>Servers</h2><span class="small muted" id="fx-server-count"></span></div>
+<div class="fx-servers" id="fx-servers"></div>
+
+<div class="fx-section"><h2>Problems</h2><span class="small muted" id="fx-problem-count"></span></div>
+<div class="card" id="fx-problems"></div>
+
+<div class="fx-section"><h2>Firing alerts</h2><span class="small muted" id="fx-alert-count"></span></div>
+<div class="card" id="fx-alerts"></div>
+
+<div class="fx-section"><h2>Top metrics across servers</h2></div>
+<div class="fx-top" id="fx-top"></div>
+
+<div class="modal-back hidden" id="fx-modal">
+  <div class="modal wide">
+    <div class="card-head"><h2>Fusion servers</h2><button class="btn ghost" data-action="close-modal" aria-label="Close">&times;</button></div>
+    <div class="modal-body">
+      <form id="fx-form" autocomplete="off">
+        <input type="hidden" name="id" value="">
+        <div class="form-grid">
+          <label class="field">Name<input name="name" required maxlength="100" placeholder="Europe"></label>
+          <label class="field">URL<input name="url" required type="url" placeholder="https://snmpathy-eu.example.com"><span class="hint">Base URL of the other SNMPathy server</span></label>
+          <label class="field">API token<input name="api_token" type="password" autocomplete="new-password" placeholder="Token of that server, if it uses one"><span class="hint" id="fx-token-hint">Sent as <code>Authorization: Bearer</code>; never shown again</span></label>
+          <div class="field" style="justify-content:flex-end; gap:8px">
+            <label class="check"><input type="checkbox" name="verify_tls" checked> Verify TLS certificate</label>
+            <label class="check"><input type="checkbox" name="enabled" checked> Enabled</label>
+          </div>
+        </div>
+        <div class="row" style="margin-top:14px; justify-content:flex-end">
+          <button type="button" class="btn hidden" data-fx="cancel-edit">Cancel edit</button>
+          <button type="submit" class="btn primary" id="fx-submit">{{ icon('plus') }} Add server</button>
+        </div>
+      </form>
+      <div class="fx-modal-list card">
+        <div class="card-body flush table-wrap">
+          <table class="table compact">
+            <thead><tr><th>Name</th><th class="fx-hide-sm">URL</th><th>Status</th><th class="fx-hide-sm">Last OK</th><th></th></tr></thead>
+            <tbody id="fx-server-rows"><tr><td colspan="5" class="empty">Loading...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <p class="small muted" style="margin:12px 0 0">Each server is polled about once a minute at <code>/api/fusion/summary</code>. Data older than five minutes is shown as stale.</p>
+    </div>
+  </div>
+</div>
+
+<script type="application/json" id="fx-data">{{ fusion|tojson }}</script>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  "use strict";
+  const $ = SP.$, esc = SP.esc;
+  let data = null;
+  try { data = JSON.parse($("#fx-data").textContent); } catch (e) { data = null; }
+
+  const SERVER_STATUS = {
+    ok: ["ok", "OK"], stale: ["warning", "stale"], error: ["down", "unreachable"],
+    pending: ["unknown", "waiting"], unknown: ["unknown", "unknown"],
+  };
+  const PROBLEM_LABEL = { down: "down", unreachable: "unreachable", warning: "warning" };
+  const st = (cls, label) => `<span class="status ${esc(cls)}">${esc(label)}</span>`;
+  const n = (v) => Number(v || 0).toLocaleString();
+  const link = (url, text, local) => url
+    ? `<a href="${esc(url)}"${local ? "" : ' target="_blank" rel="noopener"'}>${esc(text)}</a>` : esc(text);
+  const since = (ts) => ts
+    ? `<span class="nowrap" title="${esc(SP.fmtTime(ts, "full"))}">${esc(SP.duration(Math.max(0, Date.now() / 1000 - ts)))}</span>`
+    : '<span class="muted">-</span>';
+  const meter = (pct) => {
+    if (pct == null || isNaN(pct)) return '<span class="muted">-</span>';
+    const cls = pct > 90 ? "crit" : pct > 75 ? "warn" : "";
+    return `<div class="meter-cell"><div class="meter ${cls}"><span style="width:${Math.max(0, Math.min(100, pct))}%"></span></div><span class="num small">${Math.round(pct)}%</span></div>`;
+  };
+  const serverCell = (r) => link(r.server_local ? "/" : (serverUrl(r.server_id) || ""), r.server, r.server_local)
+    + (r.server_stale ? ' <span class="badge warning" title="Last known data; this server is not reporting">stale</span>' : "");
+  const serverUrl = (id) => { const s = (data.servers || []).find((x) => x.id === id); return s ? s.url : ""; };
+
+  function tile(label, value, sub, cls, href) {
+    return `<a class="card tile ${cls || ""}" href="${esc(href || "#")}"><div class="label">${esc(label)}</div>`
+      + `<div class="value">${value}</div><div class="sub">${sub || "&nbsp;"}</div></a>`;
+  }
+
+  function renderTiles() {
+    const t = data.totals, d = t.devices, c = t.checks, a = t.alerts, s = t.servers;
+    const hostsActive = d.total - d.disabled, checksActive = c.total - c.paused;
+    const total = (v, of) => `${n(v)}<span class="muted" style="font-size:16px"> / ${n(of)}</span>`;
+    $("#fx-tiles").innerHTML = [
+      tile("Servers reporting", total(s.ok, s.total),
+        s.error ? st("down", s.error + " unreachable") : s.stale ? st("warning", s.stale + " stale")
+          : s.pending ? st("unknown", s.pending + " waiting") : st("ok", "all reporting"),
+        s.error ? "bad" : s.stale ? "warn" : "", "#fx-servers"),
+      tile("Hosts up", total(d.up + d.degraded, hostsActive),
+        d.degraded ? st("warning", d.degraded + " degraded") : (d.unknown ? st("unknown", d.unknown + " unknown") : st("up", "all responding")),
+        "", "#fx-problems"),
+      tile("Hosts down", n(d.down), d.down ? st("down", "need attention") : st("up", "none"), d.down ? "bad" : "good", "#fx-problems"),
+      tile("Hosts unreachable", n(d.unreachable), d.unreachable ? st("unreachable", "behind a failure") : st("up", "none"),
+        d.unreachable ? "warn" : "good", "#fx-problems"),
+      tile("Checks OK", total(c.up, checksActive), c.unknown ? st("unknown", c.unknown + " unknown") : "&nbsp;", "", "#fx-problems"),
+      tile("Checks warning", n(c.warning), c.warning ? st("warning", "warning") : st("up", "none"), c.warning ? "warn" : "good", "#fx-problems"),
+      tile("Checks critical", n(c.down), c.down ? st("down", "down") : st("up", "none"), c.down ? "bad" : "good", "#fx-problems"),
+      tile("Alerts firing", n(a.firing),
+        a.critical ? st("critical", a.critical + " critical") : `${n(a.unacknowledged)} unacknowledged`,
+        a.critical ? "bad" : "", "#fx-alerts"),
+    ].join("");
+  }
+
+  function serverHealth(s) {
+    if (s.status === "error") return "bad";
+    if (s.status === "pending" || s.status === "unknown") return "unknown";
+    if (s.devices.down || s.checks.down || s.alerts.critical) return "bad";
+    if (s.status === "stale" || s.devices.unreachable || s.devices.degraded || s.checks.warning) return "warn";
+    return "";
+  }
+
+  function renderServers() {
+    const servers = data.servers || [];
+    const remotes = servers.filter((s) => !s.local).length;
+    $("#fx-server-count").textContent = remotes ? `${servers.length} servers (this one and ${remotes} remote)` : "";
+    let html = servers.map((s) => {
+      const [cls, label] = SERVER_STATUS[s.status] || SERVER_STATUS.unknown;
+      const d = s.devices, c = s.checks, a = s.alerts;
+      const hosts = [st("up", n(d.up + d.degraded) + " up")];
+      if (d.down) hosts.push(st("down", n(d.down) + " down"));
+      if (d.unreachable) hosts.push(st("unreachable", n(d.unreachable) + " unreachable"));
+      if (d.degraded) hosts.push(st("warning", n(d.degraded) + " degraded"));
+      const checks = [st("up", n(c.up) + " ok")];
+      if (c.warning) checks.push(st("warning", n(c.warning) + " warning"));
+      if (c.down) checks.push(st("down", n(c.down) + " critical"));
+      const alerts = a.firing ? [st(a.critical ? "critical" : "warning", n(a.firing) + " firing")] : ['<span class="muted">none firing</span>'];
+      const meta = [s.local ? "local" : "", s.hostname, s.version ? "v" + s.version : "",
+        s.local ? "live" : (s.last_ok ? "updated " + SP.ago(s.last_ok) : "never fetched")].filter(Boolean).join(" · ");
+      const hasData = s.local || s.last_ok;
+      return `<div class="card fx-server ${serverHealth(s)}">
+        <div class="fx-server-head"><div class="nm" title="${esc(s.name)}">${esc(s.name)}</div>${st(cls, label)}</div>
+        <div class="fx-meta" title="${esc(meta)}">${esc(meta)}</div>
+        ${hasData ? `<dl class="fx-mini"><dt>Hosts</dt><dd>${hosts.join("")}</dd><dt>Checks</dt><dd>${checks.join("")}</dd><dt>Alerts</dt><dd>${alerts.join("")}</dd></dl>` : ""}
+        ${s.error ? `<div class="fx-err">${esc(s.error)}</div>` : ""}
+        <div class="fx-foot">
+          ${s.local ? '<a class="btn sm" href="/">Open</a>' : `<a class="btn sm" href="${esc(s.url)}" target="_blank" rel="noopener">Open</a>
+          <button class="btn sm ghost" data-fx="refresh" data-id="${s.id}">Refresh</button>`}
+        </div>
+      </div>`;
+    }).join("");
+    if (!remotes) {
+      html += `<div class="card fx-server unknown"><div class="fx-server-head"><div class="nm">Add a server</div></div>
+        <div class="small muted">Combine other SNMPathy servers (one per region or customer) into this view. Each one only needs to be reachable from here over HTTP(S).</div>
+        <div class="fx-foot"><button class="btn sm primary" data-fx="manage">Add server</button></div></div>`;
+    }
+    $("#fx-servers").innerHTML = html;
+  }
+
+  function renderProblems() {
+    const rows = data.problems || [];
+    $("#fx-problem-count").textContent = rows.length ? `${rows.length} shown, oldest first` : "";
+    if (!rows.length) { $("#fx-problems").innerHTML = `<div class="empty">${st("ok", "Everything is operating normally on all servers")}</div>`; return; }
+    const kindLabel = { device: "Host", check: "Check", server: "Server" };
+    $("#fx-problems").innerHTML = `<div class="card-body flush table-wrap scroll"><table class="table compact">
+      <thead><tr><th>Server</th><th>Item</th><th>Status</th><th>For</th><th class="fx-hide-sm">Detail</th></tr></thead><tbody>`
+      + rows.map((p) => `<tr>
+        <td>${serverCell(p)}</td>
+        <td><span class="muted small">${esc(kindLabel[p.kind] || p.kind)}</span> ${link(p.url, p.name, p.server_local)}${p.device ? ` <span class="muted small">on ${esc(p.device)}</span>` : ""}
+          ${p.detail ? `<div class="fx-sub">${esc(p.detail)}</div>` : ""}</td>
+        <td>${st(p.status, PROBLEM_LABEL[p.status] || p.status)}</td>
+        <td>${since(p.since)}</td>
+        <td class="fx-detail fx-hide-sm">${esc(p.detail)}</td></tr>`).join("")
+      + "</tbody></table></div>";
+  }
+
+  function renderAlerts() {
+    const rows = data.firing || [];
+    $("#fx-alert-count").textContent = rows.length ? `${rows.length} firing` : "";
+    if (!rows.length) { $("#fx-alerts").innerHTML = '<div class="empty">No alerts firing</div>'; return; }
+    $("#fx-alerts").innerHTML = `<div class="card-body flush table-wrap scroll"><table class="table compact">
+      <thead><tr><th>Server</th><th>Alert</th><th>Severity</th><th>Firing for</th><th class="fx-hide-sm">Acknowledged</th></tr></thead><tbody>`
+      + rows.map((a) => `<tr>
+        <td>${serverCell(a)}</td>
+        <td>${link(a.url, a.subject, a.server_local)}${a.message ? `<div class="fx-sub" style="display:block">${esc(a.message)}</div>` : ""}</td>
+        <td><span class="badge ${esc(a.severity)}">${esc(a.severity || "-")}</span></td>
+        <td>${since(a.fired_at || a.started_at)}</td>
+        <td class="fx-hide-sm">${a.acknowledged ? `<span class="badge ok">${esc(a.ack_by || "yes")}</span>` : '<span class="muted">no</span>'}</td></tr>`).join("")
+      + "</tbody></table></div>";
+  }
+
+  function topCard(title, head, rows, cell, empty) {
+    return `<div class="card"><div class="card-head"><h2>${esc(title)}</h2></div><div class="card-body flush table-wrap">
+      <table class="table compact"><thead><tr>${head}</tr></thead><tbody>`
+      + (rows.length ? rows.map((r) => `<tr><td>${serverCell(r)}</td>${cell(r)}</tr>`).join("")
+        : `<tr><td colspan="6" class="empty">${esc(empty)}</td></tr>`)
+      + "</tbody></table></div></div>";
+  }
+
+  function renderTop() {
+    const t = data.top || {};
+    const dev = (r) => `<td class="fx-wrap">${link(r.url, r.device, r.server_local)}</td>`;
+    const availCls = (v) => (v >= 99.9 ? "fx-good" : v >= 99 ? "fx-warn" : "fx-bad");
+    $("#fx-top").innerHTML = [
+      topCard("Highest CPU", "<th>Server</th><th>Device</th><th>CPU</th>", t.cpu || [],
+        (r) => `${dev(r)}<td style="width:45%">${meter(r.value)}</td>`, "No CPU data yet"),
+      topCard("Highest memory use", "<th>Server</th><th>Device</th><th>Memory</th>", t.memory || [],
+        (r) => `${dev(r)}<td style="width:45%">${meter(r.value)}</td>`, "No memory data yet"),
+      topCard("Busiest interfaces", '<th>Server</th><th>Device / interface</th><th class="num">In</th><th class="num">Out</th><th class="fx-hide-sm">Utilisation</th>', t.interfaces || [],
+        (r) => `<td class="fx-wrap">${link(r.url, r.device, r.server_local)} <span class="muted small">${esc(r.name)}</span></td>`
+          + `<td class="num">${esc(SP.fmt(r.in_bps, "bps"))}</td><td class="num">${esc(SP.fmt(r.out_bps, "bps"))}</td>`
+          + `<td class="fx-hide-sm" style="min-width:110px">${meter(r.util_pct)}</td>`, "No traffic data yet"),
+      topCard("Worst availability (30 days)", '<th>Server</th><th>Device</th><th class="num">Uptime</th><th class="num fx-hide-sm">Outages</th>', t.availability || [],
+        (r) => `${dev(r)}<td class="num ${availCls(r.value)}">${esc(r.value >= 99.995 ? "100%" : r.value.toFixed(3) + "%")}</td>`
+          + `<td class="num fx-hide-sm">${n(r.outages)}${r.downtime_seconds ? ` <span class="muted small">(${esc(SP.duration(r.downtime_seconds))})</span>` : ""}</td>`,
+        "No availability data yet"),
+    ].join("");
+  }
+
+  function render() {
+    if (!data) return;
+    renderTiles(); renderServers(); renderProblems(); renderAlerts(); renderTop();
+    $("#fx-updated").textContent = "Updated " + SP.fmtTime(data.generated_at, "timesec");
+  }
+
+  let loading = false;
+  async function load() {
+    if (loading) return;
+    loading = true;
+    try {
+      data = await SP.api("GET", "/api/fusion/combined");
+      render();
+      $("#fx-banner").classList.add("hidden");
+    } catch (e) {
+      const b = $("#fx-banner");
+      b.textContent = "Could not refresh the combined view: " + e.message + ". Showing the last data received.";
+      b.classList.remove("hidden");
+    } finally {
+      loading = false;
+    }
+  }
+
+  // ------------------------------------------------------------ manage servers
+  const form = $("#fx-form");
+  async function loadServers() {
+    const body = $("#fx-server-rows");
+    try {
+      const rows = await SP.api("GET", "/api/fusion/servers");
+      body.innerHTML = rows.length ? rows.map((s) => {
+        const [cls, label] = !s.enabled ? ["paused", "disabled"] : (s.status === "ok" && s.stale ? ["warning", "stale"] : (SERVER_STATUS[s.status] || SERVER_STATUS.unknown));
+        return `<tr>
+          <td><b>${esc(s.name)}</b>${s.has_token ? ' <span class="badge" title="An API token is stored">token</span>' : ""}${s.verify_tls ? "" : ' <span class="badge warning" title="TLS certificate is not verified">no TLS verify</span>'}</td>
+          <td class="fx-hide-sm"><span class="fx-url mono" title="${esc(s.url)}">${esc(s.url)}</span></td>
+          <td>${st(cls, label)}${s.error ? `<div class="fx-err small">${esc(s.error)}</div>` : ""}</td>
+          <td class="fx-hide-sm small">${s.last_ok ? esc(SP.ago(s.last_ok)) : '<span class="muted">never</span>'}</td>
+          <td class="right nowrap"><button class="btn sm ghost" data-fx="edit" data-id="${s.id}">Edit</button><button class="btn sm ghost" data-fx="refresh" data-id="${s.id}">Refresh</button><button class="btn sm ghost danger" data-fx="delete" data-id="${s.id}" data-name="${esc(s.name)}">Delete</button></td>
+        </tr>`;
+      }).join("") : '<tr><td colspan="5" class="empty">No remote servers yet. Add one above.</td></tr>';
+      body._rows = rows;
+    } catch (e) {
+      body.innerHTML = `<tr><td colspan="5" class="empty">${esc(e.message)}</td></tr>`;
+    }
+  }
+
+  function resetForm() {
+    form.reset();
+    form.elements.id.value = "";
+    form.elements.api_token.placeholder = "Token of that server, if it uses one";
+    $("#fx-submit").lastChild.textContent = " Add server";
+    $("[data-fx=cancel-edit]").classList.add("hidden");
+  }
+
+  function editServer(id) {
+    const s = ($("#fx-server-rows")._rows || []).find((x) => x.id === id);
+    if (!s) return;
+    form.elements.id.value = s.id;
+    form.elements.name.value = s.name;
+    form.elements.url.value = s.url;
+    form.elements.api_token.value = "";
+    form.elements.api_token.placeholder = s.has_token ? "Unchanged - type to replace" : "Token of that server, if it uses one";
+    form.elements.verify_tls.checked = s.verify_tls;
+    form.elements.enabled.checked = s.enabled;
+    $("#fx-submit").lastChild.textContent = " Save changes";
+    $("[data-fx=cancel-edit]").classList.remove("hidden");
+    form.elements.name.focus();
+  }
+
+  async function refreshServer(id, quiet) {
+    const s = await SP.api("POST", `/api/fusion/servers/${id}/refresh`);
+    if (s.status === "ok") { if (!quiet) SP.toast(`${s.name}: fetched`); }
+    else SP.toast(`${s.name}: ${s.error || s.status}`, "error");
+    return s;
+  }
+
+  form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const btn = $("#fx-submit");
+    btn.disabled = true;
+    const f = form.elements;
+    const body = { name: f.name.value.trim(), url: f.url.value.trim(), verify_tls: f.verify_tls.checked, enabled: f.enabled.checked };
+    if (f.api_token.value || !f.id.value) body.api_token = f.api_token.value;
+    try {
+      const id = f.id.value;
+      const saved = await SP.api(id ? "PATCH" : "POST", id ? `/api/fusion/servers/${id}` : "/api/fusion/servers", body);
+      SP.toast(id ? "Server updated" : "Server added");
+      resetForm();
+      if (saved.enabled) await refreshServer(saved.id, true);
+      await Promise.all([loadServers(), load()]);
+    } catch (e) {
+      SP.toast(e.message, "error");
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  document.addEventListener("click", async (ev) => {
+    const el = ev.target.closest("[data-fx]");
+    if (!el) return;
+    ev.preventDefault();
+    const action = el.dataset.fx, id = el.dataset.id ? parseInt(el.dataset.id, 10) : null;
+    if (action === "manage") { resetForm(); SP.openModal($("#fx-modal")); loadServers(); return; }
+    if (action === "cancel-edit") { resetForm(); return; }
+    if (action === "edit") { editServer(id); return; }
+    el.setAttribute("disabled", "");
+    try {
+      if (action === "refresh") {
+        await refreshServer(id);
+        await Promise.all([load(), $("#fx-modal").classList.contains("hidden") ? null : loadServers()]);
+      } else if (action === "refresh-all") {
+        const res = await SP.api("POST", "/api/fusion/refresh");
+        const bad = res.filter((s) => s.status !== "ok");
+        if (bad.length) SP.toast(bad.map((s) => `${s.name}: ${s.error || s.status}`).join("; "), "error");
+        else SP.toast(res.length ? `Fetched ${res.length} server${res.length === 1 ? "" : "s"}` : "No remote servers configured");
+        await load();
+      } else if (action === "delete") {
+        if (!confirm(`Remove ${el.dataset.name} from Fusion? Its own data is not touched.`)) return;
+        await SP.api("DELETE", `/api/fusion/servers/${id}`);
+        SP.toast("Server removed");
+        if (form.elements.id.value === String(id)) resetForm();
+        await Promise.all([loadServers(), load()]);
+      }
+    } catch (e) {
+      SP.toast(e.message, "error");
+    } finally {
+      el.removeAttribute("disabled");
+    }
+  });
+
+  render();
+  setInterval(() => { if (!document.hidden) load(); }, 30000);
+})();
+</script>
+{% endblock %}
