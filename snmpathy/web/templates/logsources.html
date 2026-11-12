@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}Log sources{% endblock %}
+{% block crumbs %}<span class="crumbs"><a href="/syslog">Logs</a> /</span>{% endblock %}
+{% block actions %}
+<a class="btn" href="/syslog">Open log explorer</a>
+{% endblock %}
+{% block content %}
+<style>
+  .ls-state { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12.5px; white-space: nowrap; }
+  .ls-state::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--unknown); }
+  .ls-state.listening { color: var(--good-text); }
+  .ls-state.listening::before { background: var(--good); }
+  .ls-state.not-listening, .ls-state.not-running { color: var(--warning-text); }
+  .ls-state.not-listening::before, .ls-state.not-running::before { background: var(--warning); border-radius: 1px; }
+  .ls-state.disabled { color: var(--muted); }
+  .ls-guide { display: none; }
+  .ls-guide.on { display: block; }
+  .ls-item { margin-bottom: 20px; }
+  .ls-item h3 { margin-bottom: 6px; }
+  .ls-item .note { font-size: 13px; color: var(--text-2); margin: 6px 0 0; }
+  .ls-code { position: relative; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; }
+  .ls-code pre { margin: 0; padding: 12px 14px; padding-right: 76px; overflow-x: auto; font-family: var(--mono); font-size: 12px; line-height: 1.5; color: var(--text); white-space: pre; }
+  .ls-code .copy { position: absolute; top: 6px; right: 6px; }
+  .ls-addr { font-family: var(--mono); font-size: 13px; }
+  @media (max-width: 700px) {
+    .ls-hide-sm { display: none; }
+  }
+</style>
+
+<div class="tiles mb">
+  <div class="card tile"><div class="label">Messages, last 24 h</div><div class="value">{{ '{:,}'.format(total) }}</div><div class="sub">{{ sources|length }} source{{ 's' if sources|length != 1 }}</div></div>
+  <div class="card tile"><div class="label">Inputs listening</div><div class="value">{{ inputs|selectattr('state', 'equalto', 'listening')|list|length }} / {{ inputs|rejectattr('state', 'equalto', 'disabled')|list|length }}</div><div class="sub">{% if not monitor_running %}monitoring engine not running{% else %}enabled inputs{% endif %}</div></div>
+  <div class="card tile"><div class="label">Send logs to</div><div class="value ls-addr" style="font-size:18px;overflow-wrap:anywhere">{{ server_host }}</div><div class="sub">set <code>public_url</code> if senders use another name</div></div>
+  {% if stats.syslog or stats.structured %}
+  <div class="card tile"><div class="label">Received since start</div>
+    <div class="value">{{ '{:,}'.format((stats.syslog.received if stats.syslog else 0) + (stats.structured.received if stats.structured else 0)) }}</div>
+    <div class="sub">{{ '{:,}'.format((stats.syslog.dropped if stats.syslog else 0) + (stats.structured.dropped if stats.structured else 0)) }} dropped, {{ '{:,}'.format((stats.syslog.errors if stats.syslog else 0) + (stats.structured.errors if stats.structured else 0)) }} unparseable</div></div>
+  {% endif %}
+</div>
+
+<div class="card mb">
+  <div class="card-head"><h2>Inputs</h2></div>
+  <div class="card-body flush table-wrap">
+    <table class="table compact">
+      <thead><tr><th>Input</th><th>Port</th><th>Status</th><th class="ls-hide-sm">Accepts</th><th class="ls-hide-sm">Setting</th></tr></thead>
+      <tbody>
+      {% for i in inputs %}
+        <tr>
+          <td class="nowrap"><strong>{{ i.label }}</strong> <span class="muted">{{ i.transport }}</span></td>
+          <td class="num">{{ i.port if i.state != 'disabled' else '-' }}</td>
+          <td><span class="ls-state {{ i.state|replace(' ', '-') }}">{{ i.state }}</span>{% if i.address %} <span class="muted small">{{ i.address }}</span>{% endif %}</td>
+          <td class="small ls-hide-sm">{{ i.formats }}</td>
+          <td class="small ls-hide-sm"><code>{{ i.setting }}</code></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-body small muted">Ports are set in the configuration file or with environment variables such as <code>SNMPATHY_JSON_TCP_PORT=5544</code>; <code>0</code> disables an input. Allow the ports in the host firewall.</div>
+</div>
+
+<div class="card mb">
+  <div class="card-head"><h2>Sources in the last 24 hours</h2></div>
+  <div class="card-body flush table-wrap">
+    {% if sources %}
+    <table class="table compact" id="ls-sources">
+      <thead><tr><th class="sortable">Host</th><th class="sortable ls-hide-sm">Source IP</th><th class="sortable ls-hide-sm">Type</th><th class="sortable num">Messages</th><th class="sortable num">Errors</th><th class="sortable num ls-hide-sm">Warnings</th><th class="sortable">Last message</th></tr></thead>
+      <tbody>
+      {% for s in sources %}
+        <tr>
+          <td><a href="/syslog?host={{ (s.host or s.source_ip)|urlencode }}&range=24h">{{ s.host or '(no host)' }}</a>{% if s.device_id %} <a class="muted small" href="/devices/{{ s.device_id }}">{{ s.device_name or 'device' }}</a>{% endif %}</td>
+          <td class="mono ls-hide-sm">{{ s.source_ip or '-' }}</td>
+          <td class="small ls-hide-sm">{{ s.kind }}</td>
+          <td class="num" data-sort="{{ s.n }}">{{ '{:,}'.format(s.n) }}</td>
+          <td class="num" data-sort="{{ s.errors or 0 }}">{% if s.errors %}<span class="badge err">{{ '{:,}'.format(s.errors) }}</span>{% else %}0{% endif %}</td>
+          <td class="num ls-hide-sm" data-sort="{{ s.warnings or 0 }}">{{ '{:,}'.format(s.warnings or 0) }}</td>
+          <td class="nowrap" data-sort="{{ s.last_ts }}">{{ s.last_ts|ts('ago')|safe }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty">No messages received in the last 24 hours. Point a device or agent at <strong>{{ server_host }}</strong> using the instructions below.</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-head"><h2>Send logs to SNMPathy</h2></div>
+  <div class="card-body">
+    <div class="seg-tabs" role="tablist" id="ls-tabs">
+      {% for g in guides %}<button type="button" role="tab" data-guide="{{ g.id }}" class="{{ 'on' if loop.first }}" aria-selected="{{ 'true' if loop.first else 'false' }}">{{ g.title }}</button>{% endfor %}
+    </div>
+    {% for g in guides %}
+    <div class="ls-guide {{ 'on' if loop.first }}" id="guide-{{ g.id }}" role="tabpanel">
+      {% for item in g["items"] %}
+      <div class="ls-item">
+        <h3>{{ item.title }}</h3>
+        <div class="ls-code"><button type="button" class="btn sm copy">Copy</button><pre><code>{{ item.code }}</code></pre></div>
+        {% if item.note %}<p class="note">{{ item.note }}</p>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const tabs = SP.$("#ls-tabs");
+  const show = (id) => {
+    SP.$$("button[data-guide]", tabs).forEach((b) => { const on = b.dataset.guide === id; b.classList.toggle("on", on); b.setAttribute("aria-selected", on ? "true" : "false"); });
+    SP.$$(".ls-guide").forEach((g) => g.classList.toggle("on", g.id === "guide-" + id));
+  };
+  tabs.addEventListener("click", (e) => { const b = e.target.closest("button[data-guide]"); if (b) { show(b.dataset.guide); history.replaceState(null, "", "#" + b.dataset.guide); } });
+  const hash = location.hash.slice(1);
+  if (hash && SP.$("#guide-" + CSS.escape(hash))) show(hash);
+  document.addEventListener("click", async (e) => {
+    const btn = e.target.closest(".ls-code .copy");
+    if (!btn) return;
+    const text = btn.parentElement.querySelector("pre").textContent;
+    try { await navigator.clipboard.writeText(text); }
+    catch (err) {
+      const ta = document.createElement("textarea");
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      try { document.execCommand("copy"); } finally { ta.remove(); }
+    }
+    btn.textContent = "Copied";
+    setTimeout(() => (btn.textContent = "Copy"), 1500);
+  });
+});
+</script>
+{% endblock %}

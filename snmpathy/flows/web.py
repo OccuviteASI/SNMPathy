@@ -533,11 +533,12 @@ def api_top(
     return {"by": by, "rows": flow_top(_db(request), f, by, limit), "filter": filter_dict(f)}
 
 
-@router.get("/api/flows/host/{ip}", tags=["flows"])
-def api_host(ip: str, request: Request, f: FlowFilter = Depends(flow_filter),
+@router.get("/api/flows/host/{address}", tags=["flows"])
+def api_host(address: str, request: Request, f: FlowFilter = Depends(flow_filter),
              peers: int = Query(15, ge=1, le=200)):
+    """Traffic for one IP: in/out totals and series, top peers (``ip``/``src``/``dst``/``cidr`` are ignored)."""
     try:
-        ip = _check_ip(ip, "host")
+        ip = _check_ip(address, "host")
     except ValueError as exc:
         raise _bad(str(exc)) from exc
     return _guarded(host_detail, _db(request), f, ip, peers)
@@ -585,12 +586,14 @@ def _page_context(request: Request) -> dict[str, Any]:
 def traffic_page(request: Request):
     from ..web import render
 
+    from .. import reporting
+
     db = _db(request)
     sources = list_sources(db)
-    params = {k: v for k, v in request.query_params.items() if v}
-    return render(request, "traffic.html", nav="traffic", sources=sources, params=params,
+    return render(request, "traffic.html", nav="traffic", sources=sources,
+                  source_names={s["id"]: s["display_name"] for s in sources}, proto_names=PROTO_NAMES,
                   has_data=bool(sources) or bool(db.scalar("SELECT 1 FROM flows LIMIT 1")),
-                  **_page_context(request))
+                  report_available="traffic" in reporting.REPORT_TYPES, **_page_context(request))
 
 
 @router.get("/traffic/sources", response_class=HTMLResponse, include_in_schema=False)

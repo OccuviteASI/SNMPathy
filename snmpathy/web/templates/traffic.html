@@ -1,0 +1,427 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon %}
+{% block title %}Network analyzer{% endblock %}
+{% block crumbs %}<div class="crumbs">NetFlow · IPFIX · sFlow traffic analysis</div>{% endblock %}
+{% block actions %}
+<span id="tf-updated" class="muted small"></span>
+<button class="btn" id="tf-reload" title="Reload now">{{ icon('refresh') }}</button>
+<a class="btn" href="/traffic/sources">{{ icon('collector') }} Exporters{% if sources %} <span class="badge">{{ sources|length }}</span>{% endif %}</a>
+{% if report_available %}<a class="btn" href="/reports/traffic">{{ icon('report') }} Report</a>{% endif %}
+{% endblock %}
+
+{% block content %}
+{% macro codebox() -%}
+<div class="codebox"><button type="button" class="btn sm copy">Copy</button><code>{{ caller() }}</code></div>
+{%- endmacro %}
+{% macro setup_guide() %}
+{%- set H = server_host %}{% set NF = ports.netflow %}{% set IX = ports.ipfix %}{% set SF = ports.sflow %}
+<p style="margin-top:0">Point your routers, switches and firewalls at this server
+  (<code>{{ H }}</code>{% if H == 'SNMPATHY-IP' %}: replace with the address exporters can reach{% endif %}):</p>
+<div class="tf-ports">
+  <div><span class="badge info">NetFlow v5 / v9</span> UDP <b>{{ NF }}</b></div>
+  <div><span class="badge info">IPFIX</span> UDP <b>{{ IX }}</b></div>
+  <div><span class="badge info">sFlow v5</span> UDP <b>{{ SF }}</b></div>
+</div>
+<p class="small muted">Every listener detects the export format, so any of these ports accepts any format. New exporters
+  appear under <a href="/traffic/sources">Exporters</a> as soon as their first packet arrives; sampled sFlow and NetFlow v9/IPFIX
+  sampling rates are scaled up automatically. Keep active-flow timeouts at 60 s or less for accurate graphs, and allow the UDP
+  ports through any firewall in between.</p>
+<div class="seg-tabs tf-tabs" role="tablist">
+  <button type="button" class="on" data-tab="cisco">Cisco IOS / IOS-XE</button>
+  <button type="button" data-tab="juniper">Juniper</button>
+  <button type="button" data-tab="mikrotik">MikroTik</button>
+  <button type="button" data-tab="pfsense">pfSense / OPNsense</button>
+  <button type="button" data-tab="linux">Linux</button>
+  <button type="button" data-tab="aruba">HPE / Aruba sFlow</button>
+</div>
+<div class="tf-cfg" data-tab="cisco">
+  <p class="small muted">Flexible NetFlow v9 (IOS-XE, IOS 15+). For IPFIX use <code>export-protocol ipfix</code> and port {{ IX }}.</p>
+  {% call codebox() -%}
+flow record SNMPATHY-REC
+ match ipv4 source address
+ match ipv4 destination address
+ match ipv4 protocol
+ match transport source-port
+ match transport destination-port
+ match interface input
+ collect interface output
+ collect counter bytes long
+ collect counter packets long
+ collect timestamp sys-uptime first
+ collect timestamp sys-uptime last
+!
+flow exporter SNMPATHY
+ destination {{ H }}
+ source GigabitEthernet0/0
+ transport udp {{ NF }}
+ export-protocol netflow-v9
+ template data timeout 60
+!
+flow monitor SNMPATHY-MON
+ exporter SNMPATHY
+ record SNMPATHY-REC
+ cache timeout active 60
+ cache timeout inactive 15
+!
+interface GigabitEthernet0/1
+ ip flow monitor SNMPATHY-MON input
+ ip flow monitor SNMPATHY-MON output
+  {%- endcall %}
+  <p class="small muted">Classic NetFlow v5 (older IOS):</p>
+  {% call codebox() -%}
+ip flow-export version 5
+ip flow-export destination {{ H }} {{ NF }}
+ip flow-export source GigabitEthernet0/0
+ip flow-cache timeout active 1
+!
+interface GigabitEthernet0/1
+ ip flow ingress
+ ip flow egress
+  {%- endcall %}
+</div>
+<div class="tf-cfg hidden" data-tab="juniper">
+  <p class="small muted">MX / vMX inline J-Flow exporting IPFIX (sample 1 in 100):</p>
+  {% call codebox() -%}
+set chassis fpc 0 sampling-instance SNMPATHY
+set services flow-monitoring version-ipfix template ipv4 ipv4-template
+set services flow-monitoring version-ipfix template ipv4 flow-active-timeout 60
+set services flow-monitoring version-ipfix template ipv4 template-refresh-rate seconds 60
+set forwarding-options sampling instance SNMPATHY input rate 100
+set forwarding-options sampling instance SNMPATHY family inet output flow-server {{ H }} port {{ IX }}
+set forwarding-options sampling instance SNMPATHY family inet output flow-server {{ H }} version-ipfix template ipv4
+set forwarding-options sampling instance SNMPATHY family inet output inline-jflow source-address ROUTER-IP
+set interfaces ge-0/0/0 unit 0 family inet sampling input
+set interfaces ge-0/0/0 unit 0 family inet sampling output
+  {%- endcall %}
+  <p class="small muted">EX / QFX switches use sFlow:</p>
+  {% call codebox() -%}
+set protocols sflow collector {{ H }} udp-port {{ SF }}
+set protocols sflow sample-rate ingress 1000
+set protocols sflow sample-rate egress 1000
+set protocols sflow polling-interval 30
+set protocols sflow interfaces ge-0/0/0
+  {%- endcall %}
+</div>
+<div class="tf-cfg hidden" data-tab="mikrotik">
+  <p class="small muted">RouterOS v6 / v7 Traffic Flow (NetFlow v9; use <code>version=ipfix</code> with port {{ IX }} for IPFIX):</p>
+  {% call codebox() -%}
+/ip traffic-flow set enabled=yes interfaces=all active-flow-timeout=1m inactive-flow-timeout=15s
+/ip traffic-flow target add dst-address={{ H }} port={{ NF }} version=9
+  {%- endcall %}
+</div>
+<div class="tf-cfg hidden" data-tab="pfsense">
+  <p class="small muted">pfSense: install the <b>softflowd</b> package (System › Package Manager), then Services › softflowd:</p>
+  {% call codebox() -%}
+Interfaces       LAN, WAN
+Host             {{ H }}
+Port             {{ NF }}
+Netflow version  9
+Flow tracking    Full
+Max lifetime     60
+  {%- endcall %}
+  <p class="small muted">OPNsense: Reporting › NetFlow:</p>
+  {% call codebox() -%}
+Listening interfaces  LAN
+WAN interfaces        WAN
+Version               v9
+Destinations          {{ H }}:{{ NF }}
+  {%- endcall %}
+</div>
+<div class="tf-cfg hidden" data-tab="linux">
+  <p class="small muted">softflowd (Debian/Ubuntu <code>apt install softflowd</code>):</p>
+  {% call codebox() -%}
+sudo softflowd -i eth0 -n {{ H }}:{{ NF }} -v 9 -t maxlife=60
+
+# persistent: /etc/softflowd/default.conf (or /etc/default/softflowd)
+interface='eth0'
+options='-n {{ H }}:{{ NF }} -v 9 -t maxlife=60'
+  {%- endcall %}
+  <p class="small muted">pmacct (<code>/etc/pmacct/pmacctd.conf</code>, NetFlow v9 probe):</p>
+  {% call codebox() -%}
+daemonize: true
+pcap_interface: eth0
+aggregate: src_host, dst_host, src_port, dst_port, proto
+plugins: nfprobe
+nfprobe_receiver: {{ H }}:{{ NF }}
+nfprobe_version: 9
+nfprobe_timeouts: maxlife=60
+  {%- endcall %}
+</div>
+<div class="tf-cfg hidden" data-tab="aruba">
+  <p class="small muted">ArubaOS-CX:</p>
+  {% call codebox() -%}
+sflow
+sflow collector {{ H }} port {{ SF }}
+sflow sampling 1000
+sflow polling 30
+interface 1/1/1
+    sflow
+  {%- endcall %}
+  <p class="small muted">ArubaOS-Switch / ProCurve (ports 1-24):</p>
+  {% call codebox() -%}
+sflow 1 destination {{ H }} {{ SF }}
+sflow 1 sampling 1-24 1000
+sflow 1 polling 1-24 30
+  {%- endcall %}
+</div>
+{% endmacro %}
+
+<div id="tf-root">
+  <div class="card mb">
+    <div class="card-body">
+      <form id="tf-filter" class="tf-filters" autocomplete="off">
+        <select name="source_id" aria-label="Exporter">
+          <option value="">All exporters</option>
+          {% for s in sources %}<option value="{{ s.id }}">{{ s.display_name }}</option>{% endfor %}
+        </select>
+        <input name="ip" placeholder="IP or CIDR (10.0.0.5, 10.1.0.0/16)" aria-label="IP address or CIDR network">
+        <input name="port" placeholder="Port / service" aria-label="Port or service name">
+        <input name="proto" list="tf-protos" placeholder="Protocol" aria-label="Protocol">
+        <datalist id="tf-protos">{% for p in ['TCP', 'UDP', 'ICMP', 'ICMPv6', 'GRE', 'ESP', 'AH', 'OSPF', 'SCTP'] %}<option value="{{ p }}">{% endfor %}</datalist>
+        <span class="row tf-btns"><button class="btn primary" type="submit">Apply</button></span>
+      </form>
+      <div class="row between mt">
+        <div id="tf-time"></div>
+        <div class="small muted">
+          {% if collector.enabled %}
+            Collector {% if collector.listening %}listening on {% for name, addr in collector.listening.items() %}<b>{{ name }}</b> udp/{{ addr.rsplit(':', 1)[-1] }}{{ ', ' if not loop.last }}{% endfor %}{% else %}<span class="status warning">has no bound ports</span>{% endif %}
+          {% else %}<span class="status unknown">flow collector not running</span>{% endif %}
+        </div>
+      </div>
+      <div id="tf-pills" class="tf-pills mt"></div>
+    </div>
+  </div>
+
+  {% if not has_data %}
+  <div class="card mb" id="tf-onboard">
+    <div class="card-head"><h2>No flow data yet</h2><span class="status unknown">waiting for exporters</span></div>
+    <div class="card-body">{{ setup_guide() }}</div>
+  </div>
+  {% endif %}
+
+  <div id="tf-dash" class="{{ 'hidden' if not has_data }}">
+    <div class="tiles tf-kpis mb" id="tf-kpis"></div>
+
+    <div class="card mb">
+      <div class="card-head tf-chart-head">
+        <h2>Bandwidth</h2>
+        <div class="seg" role="group" aria-label="Group traffic by" id="tf-group">
+          <button type="button" data-group="src">Top talkers</button>
+          <button type="button" data-group="app">Applications</button>
+          <button type="button" data-group="proto">Protocols</button>
+          <button type="button" data-group="source">Exporters</button>
+          <button type="button" data-group="dst">Destinations</button>
+          <button type="button" data-group="total">Total</button>
+        </div>
+        <div class="seg" role="group" aria-label="Chart style" id="tf-style">
+          <button type="button" data-style="stacked">Stacked</button>
+          <button type="button" data-style="area">Lines</button>
+        </div>
+      </div>
+      <div class="card-body"><div id="tf-chart" data-height="260"></div></div>
+    </div>
+
+    <div class="grid grid-2 mb">
+      {% for id, title, label in [('tf-src', 'Top talkers', 'Source'), ('tf-dst', 'Top destinations', 'Destination'),
+                                 ('tf-app', 'Top applications', 'Application'), ('tf-conv', 'Top conversations', 'Source → destination')] %}
+      <div class="card">
+        <div class="card-head"><h3>{{ title }}</h3><span class="small muted">click a row to filter</span></div>
+        <div class="card-body flush table-wrap">
+          <table class="table compact tf-table" id="{{ id }}">
+            <thead><tr><th>{{ label }}</th><th class="num">Traffic</th><th class="num tf-hide-sm">Avg rate</th><th>Share</th></tr></thead>
+            <tbody><tr><td colspan="4" class="muted small">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      {% endfor %}
+      <div class="card">
+        <div class="card-head"><h3>Top protocols</h3><span class="small muted">click a row to filter</span></div>
+        <div class="card-body flush table-wrap">
+          <table class="table compact tf-table" id="tf-proto">
+            <thead><tr><th>Protocol</th><th class="num">Traffic</th><th class="num tf-hide-sm">Avg rate</th><th>Share</th></tr></thead>
+            <tbody><tr><td colspan="4" class="muted small">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Interface bandwidth (SNMP)</h3><a class="small" href="/reports/bandwidth">Bandwidth report</a></div>
+        <div class="card-body flush table-wrap">
+          <table class="table compact tf-table" id="tf-ifaces">
+            <thead><tr><th>Device</th><th>Interface</th><th class="num">In</th><th class="num">Out</th><th class="tf-hide-sm">Utilisation</th></tr></thead>
+            <tbody><tr><td colspan="5" class="muted small">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <details class="card" id="setup">
+      <summary class="card-body">Exporter setup guide: NetFlow UDP {{ ports.netflow }}, IPFIX UDP {{ ports.ipfix }}, sFlow UDP {{ ports.sflow }}</summary>
+      <div class="card-body" style="padding-top:0">{{ setup_guide() }}</div>
+    </details>
+  </div>
+</div>
+
+<style>
+.tf-filters { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(180px, 1.4fr) minmax(110px, .8fr) minmax(100px, .7fr) auto; gap: 8px; align-items: center; }
+@media (max-width: 900px) { .tf-filters { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .tf-filters [name=ip], .tf-filters .tf-btns { grid-column: 1 / -1; } }
+.tf-pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-height: 24px; }
+.tf-pill { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; background: var(--accent-soft); color: var(--accent);
+  border-radius: 12px; padding: 1px 3px 1px 10px; font-size: 12.5px; }
+.tf-pill b { font-weight: 600; overflow-wrap: anywhere; }
+.tf-pill button { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 15px; line-height: 18px; width: 20px; height: 20px; border-radius: 50%; padding: 0; }
+.tf-pill button:hover { background: var(--surface); }
+.tf-kpis { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.tf-kpis .value { font-size: 24px; }
+.tf-chart-head { flex-wrap: wrap; }
+.tf-chart-head .seg button { white-space: nowrap; }
+@media (max-width: 700px) { .tf-chart-head h2 { flex-basis: 100%; } }
+.tf-table tbody tr[data-f] { cursor: pointer; }
+.tf-table td.tf-name { white-space: normal; overflow-wrap: anywhere; }
+.tf-table td.tf-share { width: 32%; min-width: 120px; }
+.tf-table .tf-sub { color: var(--muted); font-size: 12px; }
+.tf-ip { font-family: var(--mono); font-size: 12.5px; white-space: nowrap; }
+.tf-arrow { color: var(--muted); padding: 0 4px; }
+.tf-ports { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 4px 0 10px; }
+.tf-cfg .codebox { margin-bottom: 10px; }
+#setup > summary { list-style-position: inside; }
+@media (max-width: 700px) { .tf-hide-sm { display: none; } .tf-table td.tf-share { min-width: 90px; } }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const TF = {{ {"has_data": has_data, "sources": source_names, "protos": proto_names}|tojson }};
+document.addEventListener("DOMContentLoaded", () => {
+  const { $, $$, esc } = SP;
+  const root = $("#tf-root");
+  SP.RANGES = [["15m", "15m"], ["1h", "1h"], ["6h", "6h"], ["24h", "24h"], ["7d", "7d"]];
+  const qp = new URLSearchParams(location.search);
+  const state = SP.urlState({ range: "1h" });
+  const KEYS = ["source_id", "ip", "cidr", "src", "dst", "port", "proto"];
+  const LABEL = { source_id: "exporter", ip: "host", cidr: "network", src: "from", dst: "to", port: "port", proto: "protocol" };
+  const F = {};
+  KEYS.forEach((k) => { if (qp.get(k)) F[k] = qp.get(k); });
+  let group = qp.get("group") || "src";
+  let style = qp.get("style") === "area" ? "area" : "stacked";
+  const form = $("#tf-filter");
+
+  const qs = () => {
+    const p = new URLSearchParams(SP.rangeQuery(state));
+    KEYS.forEach((k) => { if (F[k] != null && F[k] !== "") p.set(k, F[k]); });
+    return p.toString();
+  };
+  const hostQs = () => { const p = new URLSearchParams(SP.rangeQuery(state)); if (F.source_id) p.set("source_id", F.source_id); return p.toString(); };
+  const pillValue = (k, v) => (k === "source_id" ? TF.sources[v] || v : k === "proto" ? TF.protos[v] || v : v);
+
+  function syncForm() {
+    form.source_id.value = F.source_id || "";
+    form.ip.value = F.ip || F.cidr || "";
+    form.port.value = F.port || "";
+    form.proto.value = F.proto ? pillValue("proto", F.proto) : "";
+    $$("#tf-group button").forEach((b) => b.classList.toggle("on", b.dataset.group === group));
+    $$("#tf-style button").forEach((b) => b.classList.toggle("on", b.dataset.style === style));
+  }
+  function renderPills() {
+    const active = KEYS.filter((k) => F[k] != null && F[k] !== "");
+    $("#tf-pills").innerHTML = active.length
+      ? active.map((k) => `<span class="tf-pill">${LABEL[k]} <b>${esc(pillValue(k, F[k]))}</b><button type="button" data-rm="${k}" aria-label="Remove ${LABEL[k]} filter" title="Remove">&times;</button></span>`).join("") +
+        `<button type="button" class="btn ghost sm" data-clear>Clear all</button>`
+      : `<span class="muted small">No filters: showing all traffic. Click any row below to drill in.</span>`;
+  }
+
+  const share = (pct) => `<div class="meter-cell"><div class="meter"><span style="width:${Math.min(100, pct || 0).toFixed(1)}%"></span></div><span class="num small">${(pct || 0).toFixed(1)}%</span></div>`;
+  const host = (ip) => `<a class="tf-ip" href="/traffic/host/${encodeURIComponent(ip)}?${hostQs()}" title="Drill into ${esc(ip)}">${esc(ip)}</a>`;
+  function fill(id, rows, name, filter) {
+    const tb = $(`#${id} tbody`);
+    tb.innerHTML = rows.length ? rows.map((r) =>
+      `<tr data-f="${esc(JSON.stringify(filter(r)))}" title="Click to filter on this"><td class="tf-name">${name(r)}</td>` +
+      `<td class="num">${esc(SP.fmt(r.bytes, "B"))}</td><td class="num tf-hide-sm">${esc(SP.fmt(r.bps, "bps"))}</td><td class="tf-share">${share(r.pct)}</td></tr>`).join("")
+      : `<tr><td colspan="4" class="empty">No traffic in this range</td></tr>`;
+  }
+  const tile = (label, value, sub) => `<div class="card tile"><div class="label">${label}</div><div class="value">${esc(value)}</div><div class="sub">${sub || "&nbsp;"}</div></div>`;
+  const count = (n) => (n >= 1e6 ? SP.fmt(n) : Number(n || 0).toLocaleString());
+  const top = (by, limit) => SP.api("GET", `/api/flows/top?by=${by}&limit=${limit || 10}&${qs()}`).then((r) => r.rows);
+
+  let seq = 0;
+  async function load() {
+    const mine = ++seq;
+    const extra = { group: group === "src" ? "" : group, style: style === "stacked" ? "" : style };
+    KEYS.forEach((k) => (extra[k] = F[k] || ""));
+    SP.pushState(state, extra);
+    try {
+      const [sum, ts, src, dst, app, conv, proto, ifaces] = await Promise.all([
+        SP.api("GET", "/api/flows/summary?" + qs()),
+        SP.api("GET", `/api/flows/timeseries?group=${group}&limit=7&${qs()}`),
+        top("src"), top("dst"), top("app"), top("conversation"), top("proto"),
+        SP.api("GET", "/api/flows/interfaces?limit=10"),
+      ]);
+      if (mine !== seq) return;
+      if (!TF.has_data && sum.sources) return location.reload();
+      const span = sum.filter.end - sum.filter.start;
+      $("#tf-kpis").innerHTML =
+        tile("Total traffic", SP.fmt(sum.bytes, "B"), "last " + esc(state.start ? SP.duration(span) : state.range)) +
+        tile("Average rate", SP.fmt(sum.bps_avg, "bps"), esc(count(Math.round(sum.pps_avg))) + " packets/s") +
+        tile("Peak rate", SP.fmt(sum.bps_peak, "bps"), sum.peak_ts ? esc(SP.fmtTime(sum.peak_ts)) + " · " + SP.duration(sum.peak_step) + " avg" : "") +
+        tile("Flows", count(sum.flows), esc(count(Math.round(sum.flows / Math.max(1, span / 60)))) + " per minute") +
+        tile("Packets", count(sum.packets), sum.packets ? esc(SP.fmt(sum.bytes / sum.packets, "B")) + " avg size" : "");
+      const series = ts.series.map((s) => (s.name === "Other" ? Object.assign({}, s, { color: "gray" }) : s));
+      SP.chart($("#tf-chart"), series, { type: style, unit: "bps", start: ts.start, end: ts.end, height: 260, legend: "auto", title: "Bandwidth" });
+      fill("tf-src", src, (r) => host(r.src), (r) => ({ src: r.src }));
+      fill("tf-dst", dst, (r) => host(r.dst), (r) => ({ dst: r.dst }));
+      fill("tf-app", app, (r) => `${esc(r.service)}${[6, 17, 132].includes(r.proto) ? ` <span class="tf-sub">${r.port}/${esc(r.proto_name.toLowerCase())}</span>` : ""}`, (r) => ({ port: r.port, proto: r.proto }));
+      fill("tf-conv", conv, (r) => `${host(r.src)}<span class="tf-arrow">→</span>${host(r.dst)}`, (r) => ({ src: r.src, dst: r.dst }));
+      fill("tf-proto", proto, (r) => esc(r.proto_name), (r) => ({ proto: r.proto }));
+      $("#tf-ifaces tbody").innerHTML = ifaces.length ? ifaces.map((i) => {
+        const util = i.util == null ? `<span class="muted">-</span>` : `<div class="meter-cell"><div class="meter ${i.util > 90 ? "crit" : i.util > 75 ? "warn" : ""}"><span style="width:${Math.min(100, i.util).toFixed(1)}%"></span></div><span class="num small">${i.util.toFixed(0)}%</span></div>`;
+        return `<tr><td class="tf-name"><a href="/devices/${i.device_id}">${esc(i.device_name)}</a></td><td class="tf-name"><a href="${esc(i.link)}">${esc(i.name || "if" + i.if_index)}</a>${i.alias ? ` <span class="tf-sub">${esc(i.alias)}</span>` : ""}</td>` +
+          `<td class="num">${esc(SP.fmt(i.in_bps, "bps"))}</td><td class="num">${esc(SP.fmt(i.out_bps, "bps"))}</td><td class="tf-share tf-hide-sm">${util}</td></tr>`;
+      }).join("") : `<tr><td colspan="5" class="empty">No SNMP interface traffic yet</td></tr>`;
+      $("#tf-updated").textContent = "updated " + SP.fmtTime(Date.now() / 1000, "timesec");
+    } catch (e) {
+      if (mine === seq) SP.toast(e.message, "error");
+    }
+  }
+  function changed() { syncForm(); renderPills(); load(); }
+
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    ["source_id", "port", "proto"].forEach((k) => { const v = form[k].value.trim(); if (v) F[k] = v; else delete F[k]; });
+    const ip = form.ip.value.trim();
+    delete F.ip; delete F.cidr;
+    if (ip) F[ip.includes("/") ? "cidr" : "ip"] = ip;
+    changed();
+  });
+  form.source_id.addEventListener("change", () => form.requestSubmit ? form.requestSubmit() : form.dispatchEvent(new Event("submit")));
+  root.addEventListener("click", (e) => {
+    const rm = e.target.closest("[data-rm]");
+    if (rm) { delete F[rm.dataset.rm]; return changed(); }
+    if (e.target.closest("[data-clear]")) { KEYS.forEach((k) => delete F[k]); return changed(); }
+    const g = e.target.closest("[data-group]");
+    if (g) { group = g.dataset.group; return changed(); }
+    const st = e.target.closest("[data-style]");
+    if (st) { style = st.dataset.style; return changed(); }
+    const tab = e.target.closest(".tf-tabs button");
+    if (tab) {
+      const box = tab.closest(".card-body");
+      $$(".tf-tabs button", box).forEach((b) => b.classList.toggle("on", b === tab));
+      $$(".tf-cfg", box).forEach((c) => c.classList.toggle("hidden", c.dataset.tab !== tab.dataset.tab));
+      return;
+    }
+    const copy = e.target.closest(".codebox .copy");
+    if (copy) {
+      const code = $("code", copy.parentNode);
+      const fallback = () => { const r = document.createRange(); r.selectNodeContents(code); const s = getSelection(); s.removeAllRanges(); s.addRange(r); SP.toast("Selected: press Ctrl/⌘-C to copy"); };
+      if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(code.textContent).then(() => SP.toast("Copied to clipboard"), fallback);
+      else fallback();
+      return;
+    }
+    const tr = e.target.closest("tr[data-f]");
+    if (tr && !e.target.closest("a, button")) { Object.assign(F, JSON.parse(tr.dataset.f)); changed(); }
+  });
+  $("#tf-reload").addEventListener("click", load);
+  SP.timePicker($("#tf-time"), state, load);
+  setInterval(() => { if (!document.hidden && !state.start) load(); }, 60000);
+  changed();
+});
+</script>
+{% endblock %}

@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, status %}
+{% block title %}Flow exporters{% endblock %}
+{% block crumbs %}<div class="crumbs"><a href="/traffic">Network analyzer</a></div>{% endblock %}
+{% block actions %}
+<a class="btn" href="/traffic#setup">Setup guide</a>
+<button class="btn" onclick="location.reload()" title="Reload">{{ icon('refresh') }}</button>
+{% endblock %}
+{% block content %}
+<div class="tiles mb ts-tiles">
+  <div class="card tile"><div class="label">Exporters</div><div class="value">{{ sources|length }}</div>
+    <div class="sub">{{ sources|selectattr('status_label', 'equalto', 'receiving')|list|length }} receiving</div></div>
+  <div class="card tile"><div class="label">Collector</div>
+    <div class="value" style="font-size:18px;margin-top:6px">{% if collector.enabled %}{{ status('up', 'running') }}{% else %}{{ status('unknown', 'not running') }}{% endif %}</div>
+    <div class="sub">{% if collector.enabled and collector.listening %}{% for name, addr in collector.listening.items() %}{{ name }} udp/{{ addr.rsplit(':', 1)[-1] }}{{ ', ' if not loop.last }}{% endfor %}{% elif collector.enabled %}no ports bound{% else %}set netflow/ipfix/sflow ports to enable{% endif %}</div></div>
+  {% if collector.stats %}
+  <div class="card tile"><div class="label">Datagrams received</div><div class="value">{{ '{:,}'.format(collector.stats.datagrams) }}</div>
+    <div class="sub">{{ '{:,}'.format(collector.stats.records) }} records · up {{ collector.stats.uptime|duration }}</div></div>
+  <div class="card tile {{ 'bad' if collector.stats.errors or collector.stats.dropped }}"><div class="label">Errors / dropped</div>
+    <div class="value">{{ '{:,}'.format(collector.stats.errors) }} / {{ '{:,}'.format(collector.stats.dropped) }}</div>
+    <div class="sub">{{ '{:,}'.format(collector.stats.skipped) }} skipped · {{ '{:,}'.format(collector.stats.ignored) }} from disabled</div></div>
+  {% endif %}
+  <div class="card tile"><div class="label">Retention</div><div class="value">{{ collector.retention_days or '-' }}{% if collector.retention_days %} <span class="small muted">days</span>{% endif %}</div>
+    <div class="sub">minute aggregates</div></div>
+</div>
+
+<div class="card">
+  <div class="card-head"><h2>Exporters</h2>
+    {% if sources %}<input type="search" data-filter="#ts-table" placeholder="Filter…" aria-label="Filter exporters" style="max-width:200px">{% endif %}</div>
+  {% if sources %}
+  <div class="card-body flush table-wrap">
+    <table class="table compact" id="ts-table">
+      <thead><tr>
+        <th class="sortable">Status</th><th class="sortable">Exporter</th><th>Name</th><th class="sortable">Format</th>
+        <th class="sortable num" title="Sampling rate 1:N reported by the exporter">Sampling</th>
+        <th title="Use when the exporter does not report its sampling rate">Override 1:N</th>
+        <th class="sortable num">Records</th><th class="sortable num" title="Records per second over the last 5 minutes">Rate</th>
+        <th class="sortable num" title="Traffic over the last 5 minutes">Traffic</th>
+        <th>Linked device</th><th class="sortable">Last seen</th><th>Enabled</th><th></th>
+      </tr></thead>
+      <tbody>
+      {% for s in sources %}
+        <tr data-id="{{ s.id }}">
+          <td data-sort="{{ s.age|int }}">{{ status(s.status, s.status_label) }}</td>
+          <td class="ts-name"><a class="mono" href="/traffic?source_id={{ s.id }}" title="Analyze traffic from this exporter">{{ s.address }}</a></td>
+          <td><input class="ts-in" data-field="name" value="{{ s.name }}" placeholder="{{ s.address }}" aria-label="Name for {{ s.address }}" maxlength="200"></td>
+          <td>{% if s.kind %}<span class="badge">{{ s.kind }}</span>{% else %}<span class="muted">-</span>{% endif %}</td>
+          <td class="num" data-sort="{{ s.sampling }}">{{ '1:%d'|format(s.sampling) if s.sampling > 1 else 'none' }}</td>
+          <td><input class="ts-in ts-num" type="number" min="0" step="1" data-field="sampling" value="{{ s.sampling_override or '' }}" placeholder="auto" aria-label="Sampling override for {{ s.address }}"></td>
+          <td class="num" data-sort="{{ s.records }}">{{ '{:,}'.format(s.records) }}</td>
+          <td class="num" data-sort="{{ s.records_per_sec }}">{{ '%.1f'|format(s.records_per_sec) }}/s</td>
+          <td class="num" data-sort="{{ s.bps_recent }}">{{ s.bps_recent|bps }}</td>
+          <td class="nowrap">
+            <select class="ts-in" data-field="device_id" aria-label="Linked device for {{ s.address }}">
+              <option value="">Not linked</option>
+              {% for d in devices %}<option value="{{ d.id }}" {{ 'selected' if d.id == s.device_id }}>{{ d.name }}{% if d.hostname != d.name %} ({{ d.hostname }}){% endif %}</option>{% endfor %}
+            </select>
+            {% if s.device_id %}<a class="small" href="/devices/{{ s.device_id }}?tab=interfaces" title="Device interfaces">{{ icon('device') }}</a>{% endif %}
+          </td>
+          <td class="nowrap" data-sort="{{ s.last_seen }}">{{ s.last_seen|ts('ago')|safe }}</td>
+          <td><input type="checkbox" data-field="enabled" {{ 'checked' if s.enabled }} aria-label="Accept flows from {{ s.address }}"></td>
+          <td class="nowrap"><button class="btn sm danger" data-action="api" data-method="DELETE" data-url="/api/flows/sources/{{ s.id }}"
+              data-confirm="Delete exporter {{ s.display_name }} and all of its stored flows? If it keeps exporting it will reappear; disable it instead to ignore it."
+              data-success="Exporter deleted">Delete</button></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-body small muted">
+    Exporters are added automatically when their first datagram arrives and linked to the device whose hostname matches
+    their address. Disabled exporters are ignored at the collector. Status: <b>receiving</b> within 5 minutes,
+    <b>idle</b> within an hour, otherwise <b>silent</b>.
+  </div>
+  {% else %}
+  <div class="empty">
+    {{ icon('flow') }}
+    <p>No exporters have sent flows yet.</p>
+    <p class="small">Send NetFlow v5/v9 to UDP {{ ports.netflow }}, IPFIX to UDP {{ ports.ipfix }} or sFlow to UDP {{ ports.sflow }}
+      on <code>{{ server_host }}</code>. <a href="/traffic#setup">Example configurations</a></p>
+  </div>
+  {% endif %}
+</div>
+
+<style>
+.ts-tiles { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+#ts-table .ts-in { padding: 3px 8px; font-size: 13px; max-width: 220px; }
+#ts-table .ts-num { width: 90px; }
+#ts-table td.ts-name { white-space: nowrap; }
+#ts-table td a svg { width: 15px; height: 15px; vertical-align: middle; }
+#ts-table tr.saving { opacity: .6; }
+</style>
+{% endblock %}
+{% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const table = SP.$("#ts-table");
+  if (!table) return;
+  table.addEventListener("change", async (e) => {
+    const el = e.target.closest("[data-field]");
+    if (!el) return;
+    const tr = el.closest("tr[data-id]");
+    const field = el.dataset.field;
+    let value;
+    if (field === "enabled") value = el.checked;
+    else if (field === "device_id") value = el.value ? +el.value : null;
+    else if (field === "sampling") value = el.value === "" ? null : Math.max(0, parseInt(el.value, 10) || 0);
+    else value = el.value.trim();
+    tr.classList.add("saving");
+    try {
+      const s = await SP.api("PATCH", `/api/flows/sources/${tr.dataset.id}`, { [field]: value });
+      SP.toast(field === "enabled" ? (s.enabled ? "Exporter enabled" : "Exporter disabled: its flows are now ignored")
+        : field === "sampling" ? (s.sampling_override ? `Sampling override 1:${s.sampling_override} saved` : "Sampling override cleared")
+        : field === "device_id" ? (s.device_name ? `Linked to ${s.device_name}` : "Device link removed") : "Name saved");
+      if (field === "enabled" || field === "device_id") setTimeout(() => location.reload(), 500);
+    } catch (err) {
+      SP.toast(err.message, "error");
+    } finally {
+      tr.classList.remove("saving");
+    }
+  });
+});
+</script>
+{% endblock %}

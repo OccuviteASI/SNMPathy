@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, status %}
+{% block title %}{{ ip }}{% endblock %}
+{% block crumbs %}<div class="crumbs"><a href="/traffic">Network analyzer</a> / host</div>{% endblock %}
+{% block heading %}<span class="mono" style="font-size:20px">{{ ip }}</span>{% endblock %}
+{% block actions %}
+<span id="th-updated" class="muted small"></span>
+<a class="btn" id="th-analyze" href="/traffic?ip={{ ip|urlencode }}">Filter analyzer on this host</a>
+{% endblock %}
+{% block content %}
+<div id="th-root">
+  <div class="card mb"><div class="card-body row between">
+    <div id="th-time"></div>
+    <div class="row small">
+      {% if device %}<span>Device <a href="/devices/{{ device.id }}">{{ device.name }}</a> {{ status(device.status) }}</span>{% endif %}
+      {% if exporter %}<span>Flow exporter <a href="/traffic?source_id={{ exporter.id }}">{{ exporter.name or exporter.address }}</a></span>{% endif %}
+      <label class="row" style="gap:6px">Exporter
+        <select id="th-source" aria-label="Exporter">
+          <option value="">All</option>
+          {% for s in sources %}<option value="{{ s.id }}" {{ 'selected' if params.source_id == s.id|string }}>{{ s.display_name }}</option>{% endfor %}
+        </select>
+      </label>
+    </div>
+  </div></div>
+
+  <div class="tiles mb th-kpis" id="th-kpis"></div>
+
+  <div class="card mb">
+    <div class="card-head"><h2>Traffic in / out</h2><span class="small muted">bits per second</span></div>
+    <div class="card-body"><div id="th-chart" data-height="240"></div></div>
+  </div>
+
+  <div class="grid grid-2 mb">
+    <div class="card">
+      <div class="card-head"><h3>Top peers</h3><span class="small muted">hosts talking to {{ ip }}</span></div>
+      <div class="card-body flush table-wrap">
+        <table class="table compact tf-table" id="th-peers">
+          <thead><tr><th>Peer</th><th class="num">In</th><th class="num">Out</th><th class="num tf-hide-sm">Total</th><th>Share</th></tr></thead>
+          <tbody><tr><td colspan="5" class="muted small">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>Top applications</h3></div>
+      <div class="card-body flush table-wrap">
+        <table class="table compact tf-table" id="th-apps">
+          <thead><tr><th>Application</th><th class="num">Traffic</th><th class="num tf-hide-sm">Avg rate</th><th>Share</th></tr></thead>
+          <tbody><tr><td colspan="4" class="muted small">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h3>Conversations</h3><span class="small muted">directional, largest first</span></div>
+    <div class="card-body flush table-wrap">
+      <table class="table compact tf-table" id="th-conv">
+        <thead><tr><th>Source</th><th>Destination</th><th class="num">Traffic</th><th class="num tf-hide-sm">Packets</th><th class="num tf-hide-sm">Flows</th><th>Share</th></tr></thead>
+        <tbody><tr><td colspan="6" class="muted small">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<style>
+.th-kpis { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.th-kpis .value { font-size: 24px; }
+.tf-table td.tf-name { white-space: normal; overflow-wrap: anywhere; }
+.tf-table td.tf-share { width: 28%; min-width: 110px; }
+.tf-sub { color: var(--muted); font-size: 12px; }
+.tf-ip { font-family: var(--mono); font-size: 12.5px; white-space: nowrap; }
+.th-self { font-weight: 600; }
+@media (max-width: 700px) { .tf-hide-sm { display: none; } }
+</style>
+{% endblock %}
+{% block scripts %}
+<script>
+const TH_IP = {{ ip|tojson }};
+document.addEventListener("DOMContentLoaded", () => {
+  const { $, esc } = SP;
+  SP.RANGES = [["15m", "15m"], ["1h", "1h"], ["6h", "6h"], ["24h", "24h"], ["7d", "7d"]];
+  const state = SP.urlState({ range: "1h" });
+  const sourceSel = $("#th-source");
+  const qs = (extra) => {
+    const p = new URLSearchParams(SP.rangeQuery(state));
+    if (sourceSel.value) p.set("source_id", sourceSel.value);
+    Object.entries(extra || {}).forEach(([k, v]) => p.set(k, v));
+    return p.toString();
+  };
+  const share = (pct) => `<div class="meter-cell"><div class="meter"><span style="width:${Math.min(100, pct || 0).toFixed(1)}%"></span></div><span class="num small">${(pct || 0).toFixed(1)}%</span></div>`;
+  const host = (ip) => ip === TH_IP ? `<span class="tf-ip th-self">${esc(ip)}</span>` : `<a class="tf-ip" href="/traffic/host/${encodeURIComponent(ip)}?${qs()}">${esc(ip)}</a>`;
+  const tile = (label, value, sub) => `<div class="card tile"><div class="label">${label}</div><div class="value">${esc(value)}</div><div class="sub">${sub || "&nbsp;"}</div></div>`;
+  const B = (v) => esc(SP.fmt(v, "B"));
+  const empty = (n) => `<tr><td colspan="${n}" class="empty">No traffic for this host in this range</td></tr>`;
+
+  let seq = 0;
+  async function load() {
+    const mine = ++seq;
+    SP.pushState(state, { source_id: sourceSel.value });
+    $("#th-analyze").href = `/traffic?ip=${encodeURIComponent(TH_IP)}&${qs()}`;
+    try {
+      const [h, apps, conv] = await Promise.all([
+        SP.api("GET", `/api/flows/host/${encodeURIComponent(TH_IP)}?peers=20&${qs()}`),
+        SP.api("GET", `/api/flows/top?by=app&limit=10&${qs({ ip: TH_IP })}`),
+        SP.api("GET", `/api/flows/top?by=conversation&limit=20&${qs({ ip: TH_IP })}`),
+      ]);
+      if (mine !== seq) return;
+      $("#th-kpis").innerHTML =
+        tile("Received (in)", SP.fmt(h.in.bytes, "B"), esc(SP.fmt(h.in.bps_avg, "bps")) + " average") +
+        tile("Sent (out)", SP.fmt(h.out.bytes, "B"), esc(SP.fmt(h.out.bps_avg, "bps")) + " average") +
+        tile("Total", SP.fmt(h.bytes, "B"), h.bytes ? Math.round((h.out.bytes / h.bytes) * 100) + "% sent" : "") +
+        tile("Peers", String(h.peers.length) + (h.peers.length >= 20 ? "+" : ""), "distinct hosts") +
+        tile("Flows", Number(h.flows).toLocaleString(), Number(h.packets).toLocaleString() + " packets");
+      SP.chart($("#th-chart"), h.series, { type: "area", unit: "bps", start: h.filter.start, end: h.filter.end, height: 240, legend: "list", title: "Traffic in / out" });
+      $("#th-peers tbody").innerHTML = h.peers.length ? h.peers.map((p) =>
+        `<tr><td class="tf-name">${host(p.peer)}</td><td class="num">${B(p.in_bytes)}</td><td class="num">${B(p.out_bytes)}</td><td class="num tf-hide-sm">${B(p.bytes)}</td><td class="tf-share">${share(p.pct)}</td></tr>`).join("") : empty(5);
+      $("#th-apps tbody").innerHTML = apps.rows.length ? apps.rows.map((r) =>
+        `<tr><td class="tf-name">${esc(r.service)}${[6, 17, 132].includes(r.proto) ? ` <span class="tf-sub">${r.port}/${esc(r.proto_name.toLowerCase())}</span>` : ""}</td><td class="num">${B(r.bytes)}</td><td class="num tf-hide-sm">${esc(SP.fmt(r.bps, "bps"))}</td><td class="tf-share">${share(r.pct)}</td></tr>`).join("") : empty(4);
+      $("#th-conv tbody").innerHTML = conv.rows.length ? conv.rows.map((r) =>
+        `<tr><td class="tf-name">${host(r.src)}</td><td class="tf-name">${host(r.dst)}</td><td class="num">${B(r.bytes)}</td><td class="num tf-hide-sm">${Number(r.packets).toLocaleString()}</td><td class="num tf-hide-sm">${Number(r.flows).toLocaleString()}</td><td class="tf-share">${share(r.pct)}</td></tr>`).join("") : empty(6);
+      $("#th-updated").textContent = "updated " + SP.fmtTime(Date.now() / 1000, "timesec");
+    } catch (e) {
+      if (mine === seq) SP.toast(e.message, "error");
+    }
+  }
+  sourceSel.addEventListener("change", load);
+  SP.timePicker($("#th-time"), state, load);
+  setInterval(() => { if (!document.hidden && !state.start) load(); }, 60000);
+  load();
+});
+</script>
+{% endblock %}
