@@ -50,3 +50,19 @@ def test_explicit_destination_and_env_override(build, monkeypatch, tmp_path):
 def test_no_claude_folder(build):
     assert build.find_claude_folder() is None
     assert build.resolve_destination(None) is None
+
+
+def test_build_stamp_is_written(build, tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    (root / "snmpathy").mkdir(parents=True)
+    monkeypatch.setattr(build, "ROOT", root)
+    stamp = build.write_build_stamp()
+    text = (root / "snmpathy" / "_build.py").read_text()
+    assert f"BUILD = {stamp!r}" in text and stamp  # date only outside a git checkout
+
+
+def test_version_string_includes_build(monkeypatch):
+    import snmpathy
+
+    monkeypatch.setattr(snmpathy, "BUILD", "abc1234, 2026-11-12")
+    assert snmpathy.version_string() == f"{snmpathy.__version__} (build abc1234, 2026-11-12)"

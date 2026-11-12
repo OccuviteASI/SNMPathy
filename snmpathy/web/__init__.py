@@ -58,9 +58,9 @@ def render(request: Request, name: str, **context: Any) -> HTMLResponse:
     }
     context["auth_enabled"] = bool(request.app.state.settings.api_token)
     context.setdefault("collectors", db.query("SELECT id, name, site, status FROM collectors ORDER BY name COLLATE NOCASE"))
-    from .. import __version__
+    from .. import version_string
 
-    context.setdefault("version", __version__)
+    context.setdefault("version", version_string())
     return templates.TemplateResponse(request, name, context)
 
 
@@ -316,7 +316,7 @@ def maintenance(request: Request):
 
 @router.get("/settings", response_class=HTMLResponse)
 def settings(request: Request):
-    from .. import __version__, storage
+    from .. import storage, version_string
     from ..checks.probes import detect_icmp_mode
     import platform
     import sys
@@ -327,7 +327,7 @@ def settings(request: Request):
     from ..grafana import grafana_dashboards
 
     return render(
-        request, "settings.html", settings=s, version=__version__, stats=storage.database_stats(db),
+        request, "settings.html", settings=s, version=version_string(), stats=storage.database_stats(db),
         grafana_boards=[{"file": k, "title": v["title"]} for k, v in grafana_dashboards().items()],
         base_url=str(request.base_url).rstrip("/"),
         python=sys.version.split()[0], platform=platform.platform(), icmp_mode=detect_icmp_mode(),
