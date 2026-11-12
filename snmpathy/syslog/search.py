@@ -383,7 +383,8 @@ _COLUMN_ALIASES = {
 }
 # Structured keys that the JSON inputs move into a column (NXLog's EventID ->
 # msgid, ...): match the column or the key, whichever is set.
-_DUAL = {"eventid": "msgid", "event_id": "msgid", "sourcename": "app", "processid": "procid"}
+_DUAL = {"eventid": ("msgid", "EventID"), "event_id": ("msgid", "event_id"),
+         "sourcename": ("app", "SourceName"), "processid": ("procid", "ProcessID")}
 
 COLUMN_FIELDS = ["host", "source_ip", "app", "severity", "facility", "procid", "msgid", "message", "device_id"]
 _INT_COLUMNS = {"severity", "facility", "device_id", "id"}
@@ -399,7 +400,7 @@ def _resolve(name: str) -> tuple[str, Any]:
     if low in _COLUMN_ALIASES:
         return "column", _COLUMN_ALIASES[low]
     if low in _DUAL:
-        return "dual", (_DUAL[low], name)
+        return "dual", _DUAL[low]
     return "json", name
 
 
