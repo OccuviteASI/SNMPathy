@@ -16,6 +16,8 @@ and a lightweight ELK stack:
 | **Online / offline rules** (Nagios style) | A device is judged on every method that watches it (SNMP polling, ping, TCP, HTTP, plugins): online if *any* responds (default), only if *all* respond, or if *N* respond. One failing method shows the device as *degraded*, not down. Parent devices make downstream devices *unreachable* instead of alerting for each. |
 | **Remote collectors** (Nagios distributed / PRTG remote probes / Auvik collectors) | Install a collector at each site with a one-line command (downloaded from your server). It connects out over HTTPS, polls and checks the site's devices locally, buffers results through WAN outages and runs network scans there. |
 | **Network map** (Auvik style) | Topology drawn from LLDP / CDP neighbours, grouped by site, with live device status and link utilisation, unmanaged neighbours, drag-and-save layouts and manual links. |
+| **Network Analyzer** (Nagios Network Analyzer style) | Built-in NetFlow v5/v9, IPFIX and sFlow collector: bandwidth by talker, application, protocol or exporter; top talkers, destinations, applications, conversations; per-host drill-down; bandwidth alerts and a traffic report, next to SNMP interface bandwidth. |
+| **Fusion** (Nagios Fusion style) | One tactical dashboard across several SNMPathy servers: totals, per-server health, merged problems and alerts, cross-server top metrics. |
 | **Alerting** (Zabbix style) | Threshold rules on any metric (with wildcards), device-unreachable, check-down and syslog pattern rules. Pending → firing → resolved lifecycle, "for" durations, acknowledgements, maintenance windows. Notifications via email, Slack / Mattermost, Microsoft Teams, Discord, PagerDuty and generic webhooks. |
 | **Dashboards** (Grafana style) | Built-in, editable dashboards with 13 panel types, a time-range picker, auto-refresh, light / dark themes, a kiosk / TV mode and a JSON model editor. Five dashboards ship ready to use. |
 | **Grafana integration** | A Grafana JSON data-source endpoint at `/grafana`, plus five pre-built Grafana dashboards that are provisioned automatically by the Docker Compose stack. |
@@ -266,6 +268,33 @@ thicker for faster links. Neighbours that are not monitored appear dashed, ready
 Drag nodes and **Save layout**, filter by site or tag, search, toggle port labels, click a
 node or link for details, **Add link** for connections LLDP cannot see (WAN circuits,
 unmanaged switches), and **Set parents…** to derive parent devices from the topology.
+
+### Network Analyzer (NetFlow / IPFIX / sFlow)
+
+Point flow exporters at the SNMPathy host: **NetFlow v5/v9 → UDP 2055**, **IPFIX → UDP 4739**,
+**sFlow → UDP 6343** (any of these ports accepts every format; set a port to 0 to disable it).
+Exporters appear automatically under **Network analyzer → Exporters**, where you can name
+them, link them to devices, override the sampling rate or disable them. The analyzer shows
+total / average / peak traffic, stacked bandwidth by top talkers, applications, protocols,
+destinations or exporters, and top-N tables you can click to filter (IP, CIDR, port or
+service name, protocol, exporter) or drill into one host. The **Exporter setup guide** on
+the page has copy-paste configs for Cisco, Juniper, MikroTik, pfSense / OPNsense, Linux
+(softflowd / pmacct) and HPE / Aruba sFlow.
+
+Alert on traffic with a **Traffic (flow) bandwidth** rule (for example filter `dport=443`
+or `cidr=10.1.0.0/16 proto=udp`, threshold in bits/s, averaged over a window; add `by=src`
+for one alert per talker). The **Traffic** report summarises talkers, applications,
+conversations and exporters for any period. Flow records are aggregated per minute and
+kept for 14 days (`retention_flow_days`).
+
+### Fusion: several servers on one screen
+
+On the server you want as the "master", open **Fusion → Manage servers** and add each other
+SNMPathy server's URL and API token. Every minute it fetches each server's summary and shows
+one tactical overview: servers reporting, hosts up / down / unreachable, checks OK /
+warning / critical, firing alerts, one merged problems list (each linking into the server
+that owns it), and the highest CPU, memory, busiest interfaces and worst availability
+across all servers. A server that cannot be reached keeps its last data, marked stale.
 
 ### Syslog
 

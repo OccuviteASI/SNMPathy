@@ -136,6 +136,16 @@ covering test.
 | FR-MAP-3 | M | Drag and save layouts per view; site and tag views; search; details panels. | `topology.py`, `map.html` |
 | FR-MAP-4 | S | Manual links; derive parent devices from the topology starting at a core device. | `topology.py::add_link / suggest_parents` |
 
+#### Network Analyzer (flows)
+
+| ID | Pri | Requirement | Where |
+|---|---|---|---|
+| FR-NA-1 | M | Collect NetFlow v5 and v9 (templates, options templates, sampling), IPFIX (variable-length and enterprise fields, withdrawals) and sFlow v5 (flow samples with Ethernet / VLAN / IPv4 / IPv6 headers) on UDP 2055 / 4739 / 6343, any format on any port; malformed packets are counted, never crash the listener. | `flows/parser.py`, `flows/collector.py`, `tests/test_flows.py` |
+| FR-NA-2 | M | Aggregate per minute and exporter on the 5-tuple and interfaces, apply sampling rates (reported or overridden), cap memory, and register exporters automatically (linked to a device by address). | `flows/collector.py` |
+| FR-NA-3 | M | Totals, bandwidth time series grouped by talker / destination / application / protocol / exporter with an "Other" series, top-N by source, destination, conversation, application, port, protocol, exporter and interface, with filters by exporter, IP, CIDR, port or service and protocol. | `flows/query.py`, `flows/web.py`, `tests/test_flow_web.py` |
+| FR-NA-4 | M | Analyzer pages: overview with KPIs and drill-down, per-host view, exporter management, SNMP interface bandwidth alongside, and exporter setup guides. | `web/templates/traffic*.html` |
+| FR-NA-5 | S | Flow bandwidth alert rules and a traffic report. | `flows/alerts.py`, `alerting/engine.py`, `reporting.py` |
+
 #### Fusion (multi-server view)
 
 | ID | Pri | Requirement | Where |
