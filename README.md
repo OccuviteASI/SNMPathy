@@ -312,9 +312,25 @@ set system syslog host 192.0.2.10 any any port 5514
 
 To test it: `snmpathy send-syslog "hello from the CLI" --severity 3`.
 
-Search syntax: plain words match anywhere, `"exact phrase"`, `-exclude`, `prefix*`,
-and `AND` / `OR` / `NOT`. Filter by host (wildcards allowed), app, minimum severity,
-facility and time range. You can click any facet value to filter by it.
+**Other log sources:** Windows Event Logs via NXLog (JSON lines to TCP **5544**, or GELF),
+Graylog / Docker `--log-driver gelf` senders (GELF on UDP **12201**, compressed and
+chunked), and Fluent Bit / Vector / Filebeat JSON. Extra fields (EventID, user names, …)
+become searchable fields. **Logs → Sources** shows what is listening, which hosts are
+sending, and copy-paste setup for rsyslog, syslog-ng, journald, NXLog on Windows, network
+vendors, Docker, Fluent Bit and Vector.
+
+**Log explorer** (Nagios Log Server / Kibana style): a field sidebar with counts and top
+values (click + / − to include or exclude), filter pills, several colour-coded queries on
+one histogram, expandable events showing every field, saved searches, CSV export, live
+tail and *Create alert* from the current query. Query language:
+
+| Example | Meaning |
+|---|---|
+| `error`, `"changed state"`, `fail*` | words, phrases, wildcards (full-text) |
+| `-x`, `NOT x`, `a OR b`, `(a b)` | exclude, combine, group (operators in capitals) |
+| `host:core-sw*`, `host:10.0.0.0/8`, `app:sshd` | host name or source IP (wildcards / CIDR), application |
+| `severity:<=warning`, `severity:err`, `facility:local7` | severity / facility by name or number, with comparisons |
+| `EventID:4625`, `user.name:bob`, `bytes:>1000`, `field:*` | any structured field (JSON from GELF / NXLog / JSON inputs) |
 
 ### Uptime checks
 

@@ -77,6 +77,10 @@ covering test.
 | FR-LOG-6 | S | Associate messages with known devices by source IP or hostname. | `syslog/server.py::_devices` |
 | FR-LOG-7 | S | Live tail in the UI. | `web/static/app.js::syslogExplorer` |
 | FR-LOG-8 | S | Degrade gracefully to LIKE search when SQLite lacks FTS5. | `db.py::FTS_SCHEMA`, `syslog/search.py::_run` |
+| FR-LOG-9 | M | Structured inputs: GELF over UDP (zlib / gzip, chunked), JSON lines over TCP (NXLog Windows Event Log, Fluent Bit, Vector, Filebeat) and JSON over UDP; extra fields stored and searchable. | `syslog/structured.py`, `tests/test_structured_logs.py` |
+| FR-LOG-10 | M | Field-qualified query language (host / app / severity / facility / source_ip with CIDR / msgid / any structured field, comparisons, wildcards, NOT / OR / AND, grouping) plus include / exclude filter pills. | `syslog/search.py`, `tests/test_log_explorer.py` |
+| FR-LOG-11 | M | Explorer: field sidebar with counts and top values, multi-query histogram, expandable events, saved searches, CSV export, live tail, create alert from query. | `syslog/web.py`, `web/templates/syslog.html` |
+| FR-LOG-12 | S | A log sources page with listener status, senders and setup instructions for common platforms. | `/logs/sources` |
 
 #### Availability and uptime
 

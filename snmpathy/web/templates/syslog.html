@@ -2,7 +2,7 @@
 {% from "_macros.html" import icon %}
 {% block title %}Logs{% endblock %}
 {% block actions %}
-<span id="log-count" class="muted small" aria-live="polite"></span>
+<span id="log-count" class="muted small lx-hide-sm-btn" aria-live="polite"></span>
 <button class="btn" id="log-live" type="button" aria-pressed="false" title="Show new messages as they arrive">Live tail</button>
 <div class="lx-menu" id="lx-saved">
   <button class="btn" id="lx-saved-btn" type="button" aria-haspopup="true" aria-expanded="false">Saved <span aria-hidden="true">▾</span></button>
@@ -17,7 +17,7 @@
 </div>
 <a class="btn" id="lx-export" href="/api/logs/export.csv" title="Download the current results as CSV (up to 100,000 rows)">{{ icon('download') }}<span class="lx-hide-sm">Export CSV</span></a>
 <a class="btn" id="lx-alert" href="/alerts?tab=rules" title="Create an alert rule from this query">{{ icon('alert') }}<span class="lx-hide-sm">Create alert</span></a>
-<a class="btn ghost" href="/logs/sources" title="Inputs and setup instructions">Sources</a>
+<a class="btn ghost lx-hide-sm-btn" href="/logs/sources" title="Inputs and setup instructions">Sources</a>
 {% endblock %}
 {% block content %}
 <style>
@@ -109,7 +109,10 @@
     .lx.fields-open .lx-side { display: block; }
     .lx-only-sm { display: inline-flex !important; }
   }
+  .lx-side { scroll-margin-top: 80px; }
   @media (max-width: 600px) {
+    .topbar { position: static; }
+    .lx-hide-sm-btn { display: none !important; }
     .btn .lx-hide-sm { display: none; }
     .lx-filters input, .lx-filters select { flex: 1 1 140px; width: auto !important; }
     .lx-hits { min-width: 0; }
@@ -494,7 +497,7 @@ document.addEventListener("DOMContentLoaded", () => {
     return values.map((v) => {
       const label = v.value == null || v.value === "" ? "(empty)" : v.label || fmtField(name, v.value);
       const pct = S.total ? (100 * v.count / S.total) : (100 * v.count / max);
-      return `<div class="lx-tv"><span class="lab"><span class="nm" title="${esc(label)}">${esc(label)}</span><span class="bar" style="width:${Math.max(2, Math.min(100, pct)).toFixed(1)}%"></span></span>
+      return `<div class="lx-tv"><span class="lab"><span class="nm" title="${esc(label)}">${esc(label)}</span><span class="bar" style="width:${Math.max(2, 100 * v.count / max).toFixed(1)}%"></span></span>
         <span class="num" title="${v.count.toLocaleString()} messages">${S.total ? pct.toFixed(pct < 10 ? 1 : 0) + "%" : v.count.toLocaleString()}</span>
         <button type="button" class="lx-ib" data-act="must" data-f="${esc(name)}" data-v="${esc(JSON.stringify(v.value == null || v.value === "" ? null : String(v.value)))}" aria-label="Filter for ${esc(label)}" title="Filter for this value">+</button>
         <button type="button" class="lx-ib neg" data-act="not" data-f="${esc(name)}" data-v="${esc(JSON.stringify(v.value == null || v.value === "" ? null : String(v.value)))}" aria-label="Filter out ${esc(label)}" title="Filter out this value">−</button></div>`;
@@ -543,7 +546,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const alertQuery = () => {
     const parts = [];
     const cq = combinedQuery();
-    if (cq) parts.push(S.queries.length > 1 ? "(" + cq + ")" : cq);
+    if (cq) parts.push(cq);
     S.pills.forEach((p) => {
       if (!/^[A-Za-z_@][\w.@-]*$/.test(p.field)) return;
       if (p.value == null) parts.push((p.neg ? "" : "-") + p.field + ":*");
@@ -554,6 +557,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (app) parts.push("app:" + (app.includes("*") && !/[\s"]/.test(app) ? app : quote(app)));
     if (field("severity").value) parts.push("severity:<=" + field("severity").value);
     if (field("device_id").value) parts.push("device_id:" + field("device_id").value);
+    if (cq && S.queries.length > 1 && parts.length > 1) parts[0] = "(" + cq + ")";
     return parts.join(" ");
   };
   const syncUrl = () => {
