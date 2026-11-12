@@ -485,6 +485,33 @@ commented example.
 The CLI flags `--db`, `--host`, `--port`, `--syslog-udp`, `--syslog-tcp`, `--token`,
 `--no-syslog` and `--no-poller` override the file.
 
+## Updating
+
+Double-click **Update SNMPathy** (created next to `SNMPathy.exe` in your Claude folder by the
+build) or `scripts\update.cmd` in the source folder (`scripts/update.sh` on macOS / Linux), or
+choose **Update SNMPathy** in the tray menu. It:
+
+1. fetches the latest `main` and fast-forwards your source folder (it refuses, and changes
+   nothing, if you have local edits),
+2. stops when nothing changed and the installed executable is already that build,
+3. closes the running SNMPathy, rebuilds, copies the new executable into place, and
+4. starts it again in the tray.
+
+To have it happen automatically, run `scripts\update.cmd --schedule` once: a scheduled task
+(cron on macOS / Linux) checks every night at 03:17 and only rebuilds when something new was
+merged; it runs hidden and logs to `build/update.log`. `--unschedule` removes it. Git must
+be installed (Git for Windows on Windows).
+
+## Running in the system tray
+
+Double-clicking the executable (and autostart at login, and the restart after an update) runs
+SNMPathy in the **system tray** instead of a console window. The icon turns red when a device
+or check is down; its tooltip and menu show the current status. Right-click for **Open
+SNMPathy**, **Start at login**, **Update SNMPathy**, **Open data folder**, **View log**
+(`snmpathy.log` next to the executable) and **Quit SNMPathy**. `snmpathy tray` does the same
+from a Python install (`pip install .[tray]`). On a Linux machine without a desktop, or when
+started from a terminal with `serve`, SNMPathy runs in the console as before.
+
 ## Open the firewall for syslog
 
 **Settings → Firewall**: tick what to open (**Syslog** by default; also *Web UI and API*,

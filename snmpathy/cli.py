@@ -88,7 +88,7 @@ async def _open_browser_when_ready(server, url: str) -> None:
 
 
 async def _serve(settings, snmp_factory=None, probe=None, setup=None, open_browser: bool = False,
-                 on_app=None) -> None:
+                 on_app=None, on_server=None) -> None:
     import uvicorn
 
     from .app import create_app
@@ -105,6 +105,8 @@ async def _serve(settings, snmp_factory=None, probe=None, setup=None, open_brows
     config = uvicorn.Config(app, host=settings.http_host, port=settings.http_port, log_level="info",
                             access_log=False, lifespan="on")
     server = uvicorn.Server(config)
+    if on_server:
+        on_server(server)
     shown = "localhost" if settings.http_host in ("0.0.0.0", "::") else settings.http_host
     url = f"http://{shown}:{settings.http_port}/"
     logging.getLogger("snmpathy").info("web UI: %s (database: %s)", url, settings.database)
@@ -130,6 +132,18 @@ def _run(coro) -> Any:
 def cmd_serve(args: argparse.Namespace) -> int:
     settings = _settings(args)
     _run(_serve(settings, open_browser=getattr(args, "open", False)))
+    return 0
+
+
+def cmd_tray(args: argparse.Namespace) -> int:
+    """Run the server with a system-tray icon instead of a console window."""
+    from .tray import run_tray
+
+    settings = _settings(args)
+    if run_tray(settings, open_browser=not getattr(args, "no_browser", False)) == 2:
+        logging.getLogger("snmpathy").warning(
+            "no system tray available (install the 'tray' extra: pip install snmpathy[tray]); running in the console")
+        _run(_serve(settings, open_browser=False))
     return 0
 
 
@@ -528,6 +542,11 @@ def build_parser() -> argparse.ArgumentParser:
     _server_args(p)
     p.set_defaults(func=cmd_serve)
 
+    p = sub.add_parser("tray", help="run the server with a system-tray icon (no console window)")
+    _server_args(p)
+    p.add_argument("--no-browser", action="store_true", help="do not open the web UI on start")
+    p.set_defaults(func=cmd_tray)
+
     p = sub.add_parser("demo", help="run with simulated devices, checks and syslog traffic")
     _server_args(p)
     p.add_argument("--days", type=int, default=7, help="days of history to generate")
@@ -662,7 +681,10 @@ def main(argv: list[str] | None = None) -> int:
         if is_frozen() and (app_dir() / "collector.yaml").exists() and not (app_dir() / "snmpathy.yaml").exists():
             # A collector install: the executable sits next to its collector.yaml.
             return int(cmd_collector(build_parser().parse_args(["collector"])) or 0)
-        extra = ["--open"] if is_frozen() else []
+        if is_frozen():
+            # Double-clicked: run in the system tray (opens the browser); console only as a fallback.
+            return int(cmd_tray(parser.parse_args([*(argv if argv is not None else sys.argv[1:]), "tray"])) or 0)
+        extra = []
         # Only top-level options (e.g. --log-level) can be present here, so they go first.
         args = parser.parse_args([*(argv if argv is not None else sys.argv[1:]), "serve", *extra])
     return int(args.func(args) or 0)

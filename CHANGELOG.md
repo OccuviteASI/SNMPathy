@@ -5,6 +5,12 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
 ## 0.6.0
+- Runs in the **system tray** when started by double-click, at login or after an update: no
+  console window. Tray menu: Open SNMPathy, live status (red marker when something is down),
+  Start at login, Update SNMPathy, Open data folder, View log, Quit. Log in `snmpathy.log`.
+- **One-click updates**: `scripts\update.cmd` (or "Update SNMPathy" next to the executable, or
+  the tray menu) pulls the latest code, rebuilds, and restarts SNMPathy; does nothing when
+  already current. `update.cmd --schedule` checks for updates every night automatically.
 - Ubiquiti private-MIB support, detected automatically:
   - **airMAX** (LiteBeam, NanoStation, PowerBeam, Rocket, Prism…): model / firmware, frequency,
     TX power, signal, noise, CCQ, rates, airMAX quality / capacity / airtime, temperature, memory,
