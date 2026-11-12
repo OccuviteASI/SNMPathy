@@ -480,18 +480,39 @@ async def nagios_plugin(command: str, args: str = "", timeout: float = 30.0, plu
     try:
         proc = await asyncio.create_subprocess_exec(
             *plugin_argv(path, args), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-            stdin=asyncio.subprocess.DEVNULL)
+            stdin=asyncio.subprocess.DEVNULL, start_new_session=not IS_WINDOWS)
     except OSError as exc:
         return ProbeResult(False, None, f"UNKNOWN: cannot run {command}: {exc}")
     try:
         out, _ = await asyncio.wait_for(proc.communicate(), timeout)
     except asyncio.TimeoutError:
-        proc.kill()
-        await proc.wait()
-        return ProbeResult(False, None, f"CRITICAL: plugin timed out after {timeout:.0f}s")
+        _kill_tree(proc)
+        try:
+            await asyncio.wait_for(proc.wait(), 5)
+        except asyncio.TimeoutError:
+            pass
+        return ProbeResult(False, None, f"CRITICAL: plugin timed out after {timeout:g}s")
     result = parse_plugin_output(out.decode("utf-8", "replace")[:16384], proc.returncode)
     result.latency_ms = (time.perf_counter() - start) * 1000
     return result
+
+
+def _kill_tree(proc: asyncio.subprocess.Process) -> None:
+    """Kill a plugin and anything it started (scripts often spawn helpers)."""
+    try:
+        if IS_WINDOWS:
+            import subprocess
+
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, timeout=5)
+        else:
+            import signal
+
+            os.killpg(proc.pid, signal.SIGKILL)
+    except (OSError, ProcessLookupError, Exception):
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
 
 
 def default_plugin_dirs() -> list[str]:
