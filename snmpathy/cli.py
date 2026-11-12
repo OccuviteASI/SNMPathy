@@ -12,7 +12,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import __version__
 
 EXAMPLE_CONFIG = """\
 # SNMPathy configuration. Every key can also be set with an environment
