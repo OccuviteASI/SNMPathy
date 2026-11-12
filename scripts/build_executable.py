@@ -144,7 +144,7 @@ def ensure_build_env(fresh: bool) -> Path:
     write_build_stamp()
     log("step 2/4: installing SNMPathy and PyInstaller into the build environment (first run downloads ~60 MB)")
     subprocess.run([py, "-m", "pip", "install", "--quiet", "--upgrade", "pip"], check=True, env=env)
-    subprocess.run([py, "-m", "pip", "install", "--quiet", "--upgrade", str(ROOT), "pyinstaller>=6.0"],
+    subprocess.run([py, "-m", "pip", "install", "--quiet", "--upgrade", f"{ROOT}[tray]", "pyinstaller>=6.0"],
                    check=True, env=env)
     return venv_python()
 
@@ -194,9 +194,12 @@ def smoke_test(exe: Path) -> None:
 RUN_NOTES = """SNMPathy
 ========
 
-Start:    double-click {exe} (or run it from a terminal). The web UI opens at
-          http://localhost:8080/ and the console window shows the log.
-Stop:     press Ctrl+C in the console window (or close it).
+Start:    double-click {exe}. It runs in the system tray (no console window) and opens
+          the web UI at http://localhost:8080/. Right-click the tray icon for Open,
+          Start at login, Update, Open data folder, View log and Quit.
+          From a terminal: {exe} serve   (console mode, Ctrl+C to stop)
+Update:   double-click "Update SNMPathy" in this folder (pulls, rebuilds, restarts).
+Log:      snmpathy.log in this folder when running in the tray.
 Demo:     {exe} demo --open        (simulated devices, separate database)
 Help:     {exe} --help             (serve, demo, walk, get, discover, ping, ...)
 
@@ -227,15 +230,32 @@ def install(exe: Path, dest: Path) -> Path:
              if IS_WINDOWS else
              "Service:  see deploy/ in the repository (systemd unit, launchd plist).\n")
     (dest / "README.txt").write_text(RUN_NOTES.format(exe=EXE_NAME, extra=extra), encoding="utf-8")
+    write_update_launcher(dest)
     return target
 
 
-def main() -> int:
+def write_update_launcher(dest: Path) -> Path:
+    """'Update SNMPathy' next to the executable: pulls, rebuilds and restarts from this source folder."""
+    if IS_WINDOWS:
+        path = dest / "Update SNMPathy.cmd"
+        path.write_text(
+            "@echo off\r\n"
+            "rem Pulls the latest SNMPathy, rebuilds this executable and restarts it.\r\n"
+            f'call "{ROOT / "scripts" / "update.cmd"}" %*\r\n', encoding="utf-8")
+    else:
+        path = dest / "update-snmpathy.sh"
+        path.write_text("#!/usr/bin/env sh\n# Pulls the latest SNMPathy, rebuilds this executable and restarts it.\n"
+                        f'exec "{ROOT / "scripts" / "update.sh"}" "$@"\n', encoding="utf-8")
+        path.chmod(0o755)
+    return path
+
+
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dest", help="folder to store the executable in (default: <Claude folder>/SNMPathy)")
     parser.add_argument("--no-copy", action="store_true", help="only build into ./dist")
     parser.add_argument("--fresh", action="store_true", help="recreate the build environment")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     dest = None if args.no_copy else resolve_destination(args.dest)
     if not args.no_copy and dest is None:

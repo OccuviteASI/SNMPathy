@@ -23,6 +23,14 @@ for package in ("pysnmp", "pyasn1"):
     hiddenimports += pkg_hidden
 datas += collect_data_files("pysnmp", include_py_files=True)
 
+# System-tray icon (optional extra; pystray picks its platform backend at runtime).
+try:
+    import pystray  # noqa: F401
+
+    hiddenimports += collect_submodules("pystray") + ["PIL.Image", "PIL.ImageDraw"]
+except Exception:  # not installed, or (Linux) no display on the build machine
+    pass
+
 a = Analysis(
     [str(ROOT / "packaging" / "entry.py")],
     pathex=[str(ROOT)],

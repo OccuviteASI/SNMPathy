@@ -1,4 +1,5 @@
-"""Vendor-specific discovery: private MIB metrics for particular device families.
+"""Vendor-specific discovery: private MIB metrics for particular device families
+(Rajant and Tachyon here; Ubiquiti in :mod:`.ubiquiti`).
 
 Each vendor contributes identity (model / serial / firmware), metrics (as
 :class:`MetricSpec`) and, where the MIB has one, a wireless-peer table that
@@ -106,6 +107,11 @@ async def detect(client: SnmpClient, sys_object_id: str, sys_descr: str = "") ->
     vendor = vendor_of(sys_object_id)
     if vendor:
         return vendor
+    from . import ubiquiti
+
+    family = await ubiquiti.detect_family(client, sys_object_id, sys_descr)
+    if family:
+        return f"ubnt:{family}"
     oid = (sys_object_id or "").lstrip(".")
     generic = not oid or oid.startswith(("1.3.6.1.4.1.8072.", "1.3.6.1.4.1.2021.")) or oid == "0.0"
     if not generic and "rajant" not in (sys_descr or "").lower():
@@ -126,6 +132,10 @@ async def discover_vendor(client: SnmpClient, sys_object_id: str, sys_descr: str
         return await _rajant(client, sys_descr, have_cpu, have_memory)
     if vendor == "tachyon":
         return await _tachyon(client, have_cpu, have_memory)
+    if vendor.startswith("ubnt:"):
+        from . import ubiquiti
+
+        return await ubiquiti.discover(client, vendor[5:], have_cpu, have_memory)
     return VendorResult()
 
 
@@ -257,9 +267,19 @@ def _mac_text(value: Any) -> str:
     return as_text(value).strip().lower().replace("-", ":")
 
 
+WIRELESS_FAMILIES = ("tachyon", "ubnt:airmax", "ubnt:airfiber", "ubnt:ltu", "ubnt:af60")
+
+
 async def wireless_neighbors(client: SnmpClient) -> list[dict[str, Any]]:
-    """Wireless peers as map neighbours (Tachyon only; the Rajant MIB has no peer table)."""
-    values = await _get(client, [TACHYON_MODEL])
-    if not as_text(values.get(TACHYON_MODEL)).strip():
+    """Wireless peers / stations as map neighbours (Tachyon, Ubiquiti airMAX / airFiber / LTU / AF60).
+
+    The Rajant MIB has no peer table, so Rajant contributes none.
+    """
+    from . import mibs
+
+    system = await _get(client, [mibs.SYS_OBJECT_ID, mibs.SYS_DESCR])
+    vendor = await detect(client, as_text(system.get(mibs.SYS_OBJECT_ID)), as_text(system.get(mibs.SYS_DESCR)))
+    if vendor not in WIRELESS_FAMILIES:
         return []
-    return (await _tachyon(client, True, True)).neighbors
+    return (await discover_vendor(client, as_text(system.get(mibs.SYS_OBJECT_ID)),
+                                  as_text(system.get(mibs.SYS_DESCR)), True, True)).neighbors

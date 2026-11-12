@@ -35,8 +35,9 @@ class AutostartError(RuntimeError):
 # ------------------------------------------------------------------ command
 def launch_command(settings: Settings | None = None) -> list[str]:
     """The command line that starts this SNMPathy installation's server."""
+    tray = _tray_available()
     if is_frozen():
-        argv = [sys.executable, "serve"]
+        argv = [sys.executable, "tray", "--no-browser"] if tray else [sys.executable, "serve"]
     else:
         python = sys.executable
         if sys.platform.startswith("win"):
@@ -44,7 +45,7 @@ def launch_command(settings: Settings | None = None) -> list[str]:
             windowless = Path(python).with_name("pythonw.exe")
             if windowless.exists():
                 python = str(windowless)
-        argv = [python, "-m", "snmpathy", "serve"]
+        argv = [python, "-m", "snmpathy", *(["tray", "--no-browser"] if tray else ["serve"])]
     if settings is not None:
         config = getattr(settings, "config_path", "") or ""
         if config:
@@ -52,6 +53,14 @@ def launch_command(settings: Settings | None = None) -> list[str]:
         # Pin the database so the login session's working directory does not matter.
         argv += ["--db", str(Path(settings.database).resolve())]
     return argv
+
+
+def _tray_available() -> bool:
+    if not sys.platform.startswith(("win", "darwin")):
+        return False  # Linux autostart runs headless (systemd user service): no tray there
+    from .tray import available
+
+    return available()
 
 
 def working_dir(settings: Settings | None = None) -> str:

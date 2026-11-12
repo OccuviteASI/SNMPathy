@@ -88,6 +88,9 @@ async def discover(client: SnmpClient) -> DiscoveryResult:
     await _discover_host_resources(client, result)
     await _discover_ucd(client, result)
     await _discover_vendor(client, result)
+    from .ubiquiti import discover_poe
+
+    result.metrics.extend(await discover_poe(client))
     return result
 
 

@@ -25,13 +25,16 @@ MAIN_SITE = "Main site"
 KIND_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("firewall", ("fortigate", "fortios", "palo alto", "pan-os", "adaptive security appliance", "asa ", "firepower",
                   "sonicwall", "pfsense", "opnsense", "check point", "checkpoint", "srx", "watchguard", "sophos")),
-    ("wireless", ("rajant", "breadcrumb", "instamesh", "tachyon", "tna-30", "access point", "aironet", "unifi ap", "uap-", "wireless lan controller", "wlc", "meraki mr",
+    ("wireless", ("rajant", "breadcrumb", "instamesh", "tachyon", "tna-30", "airmax", "airfiber", "litebeam",
+                  "nanostation", "nanobeam", "powerbeam", "rocket", "prism", "isostation", "ltu", "wave ", "af60",
+                  "uap-", "u6-", "u7-", "unifi ap", "access point", "aironet", "unifi ap", "uap-", "wireless lan controller", "wlc", "meraki mr",
                   "aruba ap", "instant on ap", "ruckus", "airos")),
-    ("router", ("ios xr", "ios-xe", " isr", "asr", "router", "routeros", "mikrotik", "edgerouter", "edgeos", "vyos",
+    ("router", ("ios xr", "ios-xe", " isr", "asr", "router", "routeros", "mikrotik", "edgerouter", "edgeos", "ufiber",
+                "uisp fiber", "ucg-", "udm", "vyos",
                 "junos mx", " mx", "juniper networks, inc. mx", "srx", "viptela", "velocloud")),
     ("switch", ("switch", "catalyst", "c2960", "c3560", "c3750", "c3850", "c9200", "c9300", "nexus", "nx-os",
                 "procurve", "arubaos-cx", "aruba jl", "ex2300", "ex3400", "ex4300", "qfx", "dell networking", "powerconnect",
-                "netgear", "unifi switch", "usw-", "comware", "icx", "fastiron", "edgeswitch", "cumulus", "sg350", "sg300")),
+                "netgear", "unifi switch", "usw-", "usw ", "edgeswitch", "edgepoint", "us-8", "us-24", "us-48", "comware", "icx", "fastiron", "edgeswitch", "cumulus", "sg350", "sg300")),
     ("printer", ("printer", "jetdirect", "laserjet", "officejet", "lexmark", "ricoh", "kyocera", "xerox", "brother")),
     ("ups", ("ups", "apc ", "american power conversion", "eaton", "network management card", "powerware")),
     ("storage", ("synology", "qnap", "netapp", "data ontap", "truenas", "freenas", "isilon")),
@@ -41,7 +44,7 @@ KIND_RULES: list[tuple[str, tuple[str, ...]]] = [
 
 
 def device_kind(device: dict[str, Any]) -> str:
-    text = " ".join(str(device.get(k) or "") for k in ("sys_descr", "vendor", "sys_name", "name")).lower()
+    text = " ".join(str(device.get(k) or "") for k in ("hw_model", "sys_descr", "vendor", "sys_name", "name")).lower()
     text = f" {text} "
     for kind, needles in KIND_RULES:
         if any(n in text for n in needles):
