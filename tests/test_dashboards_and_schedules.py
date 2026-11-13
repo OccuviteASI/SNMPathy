@@ -41,13 +41,18 @@ def test_all_panel_types_render(db, make_device):
 
 
 def test_default_dashboards_are_valid(db):
-    assert dashboards.seed_dashboards(db) == len(dashboards.DEFAULT_DASHBOARDS)
+    # the five originals plus the Main HUD and Log Analysis added in 0.7
+    assert dashboards.seed_dashboards(db) == len(dashboards.DEFAULT_DASHBOARDS) + 2
     assert dashboards.seed_dashboards(db) == 0
-    for row in db.query("SELECT config FROM dashboards"):
-        import json
+    assert db.one("SELECT slug FROM dashboards ORDER BY position, name")["slug"] == "main-hud"
+    import json
+    import time
 
+    for row in db.query("SELECT config FROM dashboards"):
         cfg = json.loads(row["config"])
         assert cfg["panels"] and all(p["type"] in dashboards.PANEL_TYPES for p in cfg["panels"])
+        for p in cfg["panels"]:  # every built-in panel produces data on an empty database
+            assert "error" not in dashboards.panel_data(db, p, time.time() - 3600, time.time()), p["type"]
 
 
 def test_grafana_value_unescaping():

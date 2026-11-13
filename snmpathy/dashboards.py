@@ -41,6 +41,17 @@ PANEL_TYPES = {
     "summary": "Overview counters",
     "events": "Event log",
     "text": "Text / notes",
+    # Nagios-style dashlets (snmpathy/hud.py)
+    "status_donut": "Status donut (devices, checks, ports or alerts)",
+    "status_bars": "Status bars by site / collector / type / tag",
+    "state_changes": "Latest state changes",
+    "bars": "Ranked bars (current value per device)",
+    "group_status": "Group status tile",
+    "treemap": "Device & service treemap",
+    "hypermap": "Hypermap (radial map)",
+    "device_services": "Devices with their services",
+    "log_queries": "Log events over time (one line per query)",
+    "log_field": "Log field top values (donut, bars or table)",
 }
 
 
@@ -74,6 +85,9 @@ def _device_filter(db: Database, target: dict[str, Any]) -> dict[int, dict[str, 
     tag = (target.get("tag") or "").strip()
     if tag:
         devices = {k: v for k, v in devices.items() if tag in loads(v["tags"], [])}
+    scope_ids = target.get("scope_ids")  # the dashboard's device group
+    if scope_ids is not None:
+        devices = {k: v for k, v in devices.items() if k in scope_ids}
     return devices
 
 
@@ -214,7 +228,7 @@ def _check_series(db: Database, target: dict[str, Any], start: float, end: float
     if sel not in (None, "", "*", "all", "$__all"):
         values = [str(v) for v in (sel if isinstance(sel, list) else [sel])]
         checks = [c for c in checks if str(c["id"]) in values or any(fnmatch.fnmatch(c["name"], v) for v in values)]
-    if target.get("device"):
+    if target.get("device") or target.get("scope_ids") is not None:
         devices = _device_filter(db, target)
         checks = [c for c in checks if c["device_id"] in devices]
     field = target.get("field") or "latency"
@@ -267,10 +281,38 @@ def reduce_series(series: list[dict[str, Any]], how: str = "last") -> float | No
 
 
 # ---------------------------------------------------------------- panel data
-def panel_data(db: Database, panel: dict[str, Any], start: float, end: float) -> dict[str, Any]:
+def panel_data(db: Database, panel: dict[str, Any], start: float, end: float,
+               scope: dict[str, Any] | None = None) -> dict[str, Any]:
+    from . import hud
+
     ptype = panel.get("type")
     opts = panel.get("options") or {}
     targets = panel.get("targets") or []
+    ids = hud.scope_device_ids(db, scope)
+    if ids is not None:  # a cluster dashboard: every metric and check query stays inside the group
+        targets = [{**t, "scope_ids": ids} if (t.get("source") or "metric") in ("metric", "check") else t
+                   for t in targets]
+        panel = {**panel, "targets": targets}
+    if ptype == "status_donut":
+        return hud.status_donut(db, opts, ids)
+    if ptype == "status_bars":
+        return hud.status_bars(db, opts, ids)
+    if ptype == "state_changes":
+        return hud.state_changes(db, opts, ids)
+    if ptype == "bars":
+        return hud.ranked_bars(db, panel, ids)
+    if ptype == "group_status":
+        return hud.group_status(db, opts, ids, scope)
+    if ptype == "treemap":
+        return hud.treemap(db, opts, ids)
+    if ptype == "hypermap":
+        return hud.hypermap(db, opts, ids)
+    if ptype == "device_services":
+        return hud.device_services(db, opts, ids)
+    if ptype == "log_queries":
+        return hud.log_queries(db, panel, start, end)
+    if ptype == "log_field":
+        return hud.log_field(db, panel, start, end)
     if ptype == "timeseries":
         series = []
         for t in targets:
@@ -323,11 +365,15 @@ def panel_data(db: Database, panel: dict[str, Any], start: float, end: float) ->
             now = time.time()
             items = []
             for c in db.query("SELECT * FROM checks WHERE enabled = 1 ORDER BY name COLLATE NOCASE"):
+                if ids is not None and c["device_id"] not in ids:
+                    continue
                 items.append({"id": c["id"], "name": c["name"], "state": c["state"], "since": c["state_since"],
                               "latency": c["last_latency_ms"], "link": f"/checks/{c['id']}",
                               "uptime": reports.availability(db, c, now - 86400, now, now)["uptime_pct"]})
         else:
             rows = db.query("SELECT * FROM devices WHERE enabled = 1 ORDER BY name COLLATE NOCASE")
+            if ids is not None:
+                rows = [d for d in rows if d["id"] in ids]
             if tag:
                 rows = [d for d in rows if tag in loads(d["tags"], [])]
             items = [{"id": d["id"], "name": d["name"], "state": d["status"], "since": d["status_since"],
@@ -395,6 +441,16 @@ def normalize_config(config: dict[str, Any]) -> dict[str, Any]:
     config = dict(config or {})
     config.setdefault("time", "24h")
     config.setdefault("refresh", 60)
+    scope = config.get("scope") or {}
+    if not isinstance(scope, dict):
+        raise ValueError("scope must be an object with tag, site and/or devices")
+    scope = {k: v for k, v in scope.items() if k in ("tag", "site", "devices") and v}
+    if "devices" in scope and not isinstance(scope["devices"], list):
+        raise ValueError("scope.devices must be a list of device names or ids")
+    if scope:
+        config["scope"] = scope
+    else:
+        config.pop("scope", None)
     panels = []
     for i, p in enumerate(config.get("panels") or []):
         if p.get("type") not in PANEL_TYPES:
@@ -528,9 +584,23 @@ DEFAULT_DASHBOARDS: list[dict[str, Any]] = [
 
 
 def seed_dashboards(db: Database) -> int:
-    if db.get_meta("dashboards_seeded"):
-        return 0
+    from . import hud
+
     n = 0
+    # Added in 0.7: also for installs that were seeded before.
+    extra = [("hud_seeded", {"name": "Main HUD", "slug": "main-hud", "position": -1,
+                             "description": "The whole network at a glance (also the Overview page).",
+                             "config": hud.hud_config()}),
+             ("logs_dashboard_seeded", {"name": "Log Analysis", "description": "Log volume by query, top hosts, "
+                                        "apps, sources and failed logins.", "config": hud.logs_config()})]
+    for key, d in extra:
+        if not db.get_meta(key):
+            if not db.one("SELECT 1 FROM dashboards WHERE slug = ?", (slugify(d.get("slug") or d["name"]),)):
+                save_dashboard(db, d)
+                n += 1
+            db.set_meta(key, str(time.time()))
+    if db.get_meta("dashboards_seeded"):
+        return n
     for i, d in enumerate(DEFAULT_DASHBOARDS):
         if not db.one("SELECT 1 FROM dashboards WHERE slug = ?", (slugify(d["name"]),)):
             save_dashboard(db, {**d, "position": i})

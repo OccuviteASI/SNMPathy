@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "snmpathy"
-version = "0.6.3"
+version = "0.7.0"
 description = "Self-hosted network monitoring: SNMP polling, syslog ingest, and uptime/SLA reporting."
 readme = "README.md"
 requires-python = ">=3.10"

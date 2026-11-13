@@ -4,6 +4,18 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 `snmpathy version`. Executables built with `scripts/build_executable` also show the git
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
+## 0.7.0
+- **Nagios-style dashboards.** New dashlets: status donuts (devices, checks, ports, alerts),
+  status bars by site / collector / device type / tag, latest state changes with
+  CRITICAL / WARNING / OK pills, ranked bars with thresholds, group status tile, device &
+  service treemap, Hypermap (radial map), devices with service chips, log events per query
+  and log field top values. Compact dashlet chrome with a ⋯ menu.
+- **Overview is now the Main HUD** dashboard (editable; the old page is at `/?classic=1`).
+  Donut segments open the matching devices or checks (`/devices?state=…`, `/checks?state=…`).
+- **Cluster dashboards**: limit any dashboard to a group of devices (tag, site and/or device
+  list), or create one from *New cluster dashboard*.
+- **Log Analysis** built-in dashboard.
+
 ## 0.6.3
 - **Network map redesign.** Sites are boxes that never overlap; devices inside a site are
   arranged as a tree by their links, with unlinked devices in a grid by type and name.

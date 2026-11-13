@@ -605,14 +605,229 @@
     }));
   };
 
+  // ------------------------------------------------------- Nagios-style dashlets
+  // States: ok / warning / serious / critical / unknown (see snmpathy/hud.py).
+  const STATE_VAR = { ok: "--good", warning: "--warning", serious: "--serious", critical: "--critical", unknown: "--unknown" };
+  const stateColor = (s) => cssVar(STATE_VAR[s] || "--unknown");
+  const onFill = (s) => (s === "warning" ? "#0b0b0b" : "#fff");  // readable text on a status fill
+  const STATE_WORD = { ok: "OK", warning: "WARNING", serious: "UNREACHABLE", critical: "CRITICAL", unknown: "UNKNOWN" };
+  SP.pill = (state, label) => `<span class="pill ${esc(state)}">${esc(label || STATE_WORD[state] || state)}</span>`;
+
+  // One floating tooltip shared by the dashlets.
+  let dashTip = null;
+  function tipOn(el, text) {
+    el.addEventListener("mousemove", (ev) => {
+      if (!dashTip) { dashTip = document.createElement("div"); dashTip.className = "dash-tip"; document.body.appendChild(dashTip); }
+      dashTip.textContent = typeof text === "function" ? text() : text;
+      dashTip.style.left = Math.min(ev.clientX + 14, window.innerWidth - dashTip.offsetWidth - 8) + "px";
+      dashTip.style.top = (ev.clientY + 14) + "px";
+      dashTip.style.display = "block";
+    });
+    el.addEventListener("mouseleave", () => { if (dashTip) dashTip.style.display = "none"; });
+  }
+
+  // Donut with the total in the middle and a legend that carries every count (so no one has to judge angles).
+  function donut(body, parts, opts) {
+    const total = parts.reduce((a, p) => a + p.count, 0);
+    const avail = (body.clientWidth || 320) - 28, bh = body.clientHeight || 220;  // minus the panel padding
+    const side = avail >= 264;  // legend (150px) beside the ring when there is room, below it otherwise
+    const size = Math.max(96, Math.min(170, bh - (side ? 24 : 120), side ? avail - 190 : avail));
+    const R = 44, C = 2 * Math.PI * R, gap = parts.length > 1 ? 1.6 : 0;
+    const wrap = document.createElement("div");
+    wrap.className = "donut-wrap" + (side ? "" : " stacked");
+    const svg = svgEl("svg", { viewBox: "0 0 120 120", width: size, height: size, role: "img", "aria-label": opts.aria || "" });
+    svgEl("circle", { cx: 60, cy: 60, r: R, fill: "none", stroke: cssVar("--surface-3"), "stroke-width": 15 }, svg);
+    let offset = 0;
+    parts.forEach((p) => {
+      const len = total ? (p.count / total) * C : 0;
+      const seg = svgEl("circle", { cx: 60, cy: 60, r: R, fill: "none", stroke: p.color, "stroke-width": 15,
+        "stroke-dasharray": `${Math.max(0, len - gap)} ${C}`, "stroke-dashoffset": -offset, transform: "rotate(-90 60 60)", class: "seg" }, svg);
+      tipOn(seg, `${p.label}: ${p.count.toLocaleString()} (${total ? ((p.count / total) * 100).toFixed(1) : 0}%)`);
+      if (p.href) { seg.style.cursor = "pointer"; seg.addEventListener("click", () => (location.href = p.href)); }
+      offset += len;
+    });
+    if (!parts.length && opts.emptyColor) svgEl("circle", { cx: 60, cy: 60, r: R, fill: "none", stroke: opts.emptyColor, "stroke-width": 15 }, svg);
+    const big = svgEl("text", { x: 60, y: opts.sub ? 61 : 66, "text-anchor": "middle", class: "donut-num" }, svg);
+    big.textContent = opts.center != null ? opts.center : total.toLocaleString();
+    if (opts.sub) { const t = svgEl("text", { x: 60, y: 77, "text-anchor": "middle", class: "donut-sub" }, svg); t.textContent = opts.sub; }
+    wrap.appendChild(svg);
+    const legend = document.createElement("div");
+    legend.className = "donut-legend";
+    legend.innerHTML = parts.map((p) => `<${p.href ? `a href="${esc(p.href)}"` : "div"} class="dl-row"><i style="background:${p.color}"></i><span class="dl-name">${esc(p.label)}</span><span class="dl-val">${p.count.toLocaleString()}</span><span class="dl-pct">${total ? Math.round((p.count / total) * 100) : 0}%</span></${p.href ? "a" : "div"}>`).join("")
+      || `<div class="dl-empty muted">${esc(opts.emptyText || "Nothing to show")}</div>`;
+    wrap.appendChild(legend);
+    body.innerHTML = "";
+    body.appendChild(wrap);
+  }
+
+  // Squarified treemap layout: values -> rectangles filling (x, y, w, h).
+  function squarify(values, x, y, w, h) {
+    const total = values.reduce((a, b) => a + b, 0) || 1;
+    const items = values.map((v, i) => ({ i, a: (v / total) * w * h })).sort((a, b) => b.a - a.a);
+    const out = new Array(values.length);
+    let row = [];
+    const worst = (r, side) => { const s = r.reduce((a, b) => a + b.a, 0); const mx = Math.max(...r.map((t) => t.a)), mn = Math.min(...r.map((t) => t.a)); return Math.max((side * side * mx) / (s * s), (s * s) / (side * side * mn)); };
+    const layoutRow = (r) => {
+      const s = r.reduce((a, b) => a + b.a, 0);
+      if (w >= h) { const cw = s / h; let cy = y; r.forEach((t) => { const ch = t.a / cw; out[t.i] = { x, y: cy, w: cw, h: ch }; cy += ch; }); x += cw; w -= cw; }
+      else { const ch = s / w; let cx = x; r.forEach((t) => { const cw = t.a / ch; out[t.i] = { x: cx, y, w: cw, h: ch }; cx += cw; }); y += ch; h -= ch; }
+    };
+    items.forEach((t) => {
+      const side = Math.min(w, h);
+      if (!row.length || worst(row.concat([t]), side) <= worst(row, side)) row.push(t);
+      else { layoutRow(row); row = [t]; }
+    });
+    if (row.length) layoutRow(row);
+    return out;
+  }
+
+  // Radial tree: SNMPathy in the centre, then collectors, then devices by parent (Nagios Hypermap style).
+  function hypermap(body, nodes) {
+    const W = Math.max(260, body.clientWidth - 4), H = Math.max(200, body.clientHeight - 4);
+    const byId = {}, kids = {};
+    nodes.forEach((n) => { byId[n.id] = n; kids[n.id] = []; });
+    nodes.forEach((n) => { if (n.parent && byId[n.parent]) kids[n.parent].push(n); });
+    const leaves = (n) => (n._leaves = kids[n.id].length ? kids[n.id].reduce((a, c) => a + leaves(c), 0) : 1);
+    const root = byId.root; leaves(root);
+    let depth = 0;
+    const place = (n, a0, a1, d) => {
+      n._a = (a0 + a1) / 2; n._d = d; depth = Math.max(depth, d);
+      let a = a0;
+      kids[n.id].sort((x, y) => x.name.localeCompare(y.name, undefined, { numeric: true }))
+        .forEach((c) => { const span = ((a1 - a0) * c._leaves) / n._leaves; place(c, a, a + span, d + 1); a += span; });
+    };
+    place(root, -Math.PI / 2, Math.PI * 1.5, 0);
+    const R = Math.min(W, H) / 2 - 46, ring = depth ? R / depth : R, cx = W / 2, cy = H / 2;
+    const xy = (n) => [cx + Math.cos(n._a) * n._d * ring, cy + Math.sin(n._a) * n._d * ring];
+    const svg = svgEl("svg", { width: W, height: H, class: "hypermap", role: "img", "aria-label": "Hypermap" });
+    for (let d = 1; d <= depth; d++) svgEl("circle", { cx, cy, r: d * ring, fill: "none", class: "hm-ring" }, svg);
+    nodes.forEach((n) => {
+      if (!n.parent || !byId[n.parent]) return;
+      const [x1, y1] = xy(byId[n.parent]), [x2, y2] = xy(n);
+      svgEl("line", { x1, y1, x2, y2, class: "hm-edge" + (n.state === "critical" || n.state === "serious" ? " bad" : "") }, svg);
+    });
+    const many = nodes.length > 40;
+    nodes.forEach((n) => {
+      const [x, y] = xy(n), g = svgEl("g", { class: "hm-node", transform: `translate(${x},${y})` }, svg);
+      svgEl("circle", { r: n.kind === "root" ? 9 : n.kind === "collector" ? 7 : 5.5, fill: stateColor(n.state), stroke: cssVar("--surface"), "stroke-width": 2 }, g);
+      if (!many || n.kind !== "device" || n.state !== "ok") {
+        const left = n.kind !== "root" && Math.cos(n._a) < -0.1;
+        const t = svgEl("text", { x: n.kind === "root" ? 0 : left ? -9 : 9, y: n.kind === "root" ? -14 : 3.5, "text-anchor": n.kind === "root" ? "middle" : left ? "end" : "start", class: n.kind === "root" ? "hm-root" : "" }, g);
+        t.textContent = n.name.length > 22 ? n.name.slice(0, 21) + "…" : n.name;
+      }
+      tipOn(g, `${n.name}${n.detail ? " (" + n.detail + ")" : ""} · ${STATE_WORD[n.state] || n.state}`);
+      if (n.href) { g.style.cursor = "pointer"; g.addEventListener("click", () => (location.href = n.href)); }
+    });
+    body.innerHTML = ""; body.appendChild(svg);
+  }
+
+  // Returns true when the panel type was handled.
+  SP.renderDashlet = function (body, panel, data, h) {
+    const o = panel.options || {}, type = panel.type;
+    if (type === "status_donut") {
+      const parts = data.segments.map((s) => ({ label: s.label, count: s.count, color: stateColor(s.state), href: s.href }));
+      const alerts = data.of === "alerts";
+      donut(body, parts, { sub: alerts ? (data.total ? "firing" : "all clear") : data.noun, center: data.total,
+        emptyColor: alerts ? stateColor("ok") : null, emptyText: alerts ? "No alerts are firing" : "Nothing monitored yet", aria: panel.title });
+      return true;
+    }
+    if (type === "status_bars") {
+      if (!data.rows.length) { body.innerHTML = `<div class="empty">Nothing to show</div>`; return true; }
+      const present = data.states.filter((s) => data.rows.some((r) => r.counts[s]));
+      body.innerHTML = `<div class="sb-legend">${present.map((s) => `<span><i style="background:${stateColor(s)}"></i>${esc(data.labels[s])}</span>`).join("")}</div>` +
+        `<div class="sb-rows">${data.rows.map((r) => `<div class="sb-row"><span class="sb-name" title="${esc(r.name)}">${esc(r.name)}</span><span class="sb-bar">` +
+          data.states.filter((s) => r.counts[s]).map((s) => `<i style="flex-grow:${r.counts[s]};background:${stateColor(s)}" data-tip="${esc(r.name)} · ${esc(data.labels[s])}: ${r.counts[s]}"></i>`).join("") +
+          `</span><span class="sb-total">${r.total}</span></div>`).join("")}</div>`;
+      $$("[data-tip]", body).forEach((i) => tipOn(i, i.dataset.tip));
+      return true;
+    }
+    if (type === "state_changes") {
+      body.innerHTML = data.rows.length ? `<table class="table compact sc-table"><thead><tr><th>Last status</th><th>Name</th><th>Output</th><th class="num">When</th></tr></thead><tbody>` +
+        data.rows.map((r) => `<tr><td>${SP.pill(r.state, r.label)}</td><td class="nowrap">${r.href ? `<a href="${esc(r.href)}">${esc(r.name)}</a>` : esc(r.name)}</td><td class="sc-out" title="${esc(r.output)}">${esc(r.output)}</td><td class="num nowrap muted small">${esc(SP.ago(r.ts))}</td></tr>`).join("") + `</tbody></table>`
+        : `<div class="empty">${SP.pill("ok", "OK")}<br><span class="small">No state changes yet</span></div>`;
+      return true;
+    }
+    if (type === "bars") {
+      if (!data.rows.length) { body.innerHTML = `<div class="empty">No data</div>`; return true; }
+      const th = o.thresholds || [], unit = o.unit || data.rows[0].unit;
+      const max = unit === "%" ? 100 : Math.max(...data.rows.map((r) => r.value)) || 1;
+      const color = (v) => th[1] != null && v >= th[1] ? stateColor("critical") : th[0] != null && v >= th[0] ? stateColor("warning") : cssVar("--" + (o.color || "s1"));
+      body.innerHTML = `<div class="rb-rows">${data.rows.map((r) => `<a class="rb-row" href="/devices/${r.device_id}"><span class="rb-name" title="${esc(r.name)}">${esc(r.name)}</span><span class="rb-track"><i style="width:${Math.max(1.5, Math.min(100, (r.value / max) * 100))}%;background:${color(r.value)}"></i></span><span class="rb-val">${esc(SP.fmt(r.value, unit))}</span></a>`).join("")}</div>`;
+      return true;
+    }
+    if (type === "group_status") {
+      body.innerHTML = `<div class="gs-tile" style="background:${stateColor(data.state)};color:${onFill(data.state)}"><div class="gs-label">${esc(data.label)}</div><div class="gs-name">${esc(data.name)}</div>` +
+        `<div class="gs-sub">${data.devices} device${data.devices === 1 ? "" : "s"} · ${data.checks} check${data.checks === 1 ? "" : "s"} · ${data.problems ? data.problems + " problem" + (data.problems === 1 ? "" : "s") : "no problems"}</div></div>`;
+      return true;
+    }
+    if (type === "treemap") {
+      if (!data.groups.length) { body.innerHTML = `<div class="empty">No devices</div>`; return true; }
+      const W = Math.max(200, body.clientWidth - 2), H = Math.max(160, body.clientHeight - 2);
+      body.innerHTML = `<div class="tm" style="height:${H}px"></div>`;
+      const box = $(".tm", body);
+      squarify(data.groups.map((g) => g.items.length), 0, 0, W, H).forEach((r, gi) => {
+        const g = data.groups[gi], cells = squarify(g.items.map(() => 1), 0, 0, r.w - 2, r.h - 2);
+        const gEl = document.createElement("a");
+        gEl.className = "tm-group"; gEl.href = g.href;
+        Object.assign(gEl.style, { left: r.x + "px", top: r.y + "px", width: r.w - 2 + "px", height: r.h - 2 + "px" });
+        gEl.innerHTML = g.items.map((it, k) => { const c = cells[k]; return `<span class="tm-cell" data-tip="${esc(g.name)} · ${esc(it.name)}: ${STATE_WORD[it.state]}" style="left:${c.x}px;top:${c.y}px;width:${Math.max(0, c.w - 2)}px;height:${Math.max(0, c.h - 2)}px;background:${stateColor(it.state)};color:${onFill(it.state)}">${c.w > 56 && c.h > 22 ? esc(it.name) : ""}</span>`; }).join("") +
+          (r.w > 60 && r.h > 34 ? `<span class="tm-label">${esc(g.name)}</span>` : "");
+        box.appendChild(gEl);
+      });
+      $$("[data-tip]", body).forEach((i) => tipOn(i, i.dataset.tip));
+      return true;
+    }
+    if (type === "hypermap") {
+      if (data.nodes.length < 2) { body.innerHTML = `<div class="empty">No devices</div>`; return true; }
+      body.innerHTML = "";
+      requestAnimationFrame(() => hypermap(body, data.nodes));
+      return true;
+    }
+    if (type === "device_services") {
+      body.innerHTML = data.rows.length ? `<table class="table compact ds-table"><thead><tr><th>Device</th><th>Status</th><th>Services</th></tr></thead><tbody>` +
+        data.rows.map((r) => `<tr><td class="nowrap"><a href="${esc(r.href)}">${esc(r.name)}</a></td><td class="nowrap"><span class="status ${esc(r.status)}">${esc(r.status)}</span></td><td><div class="chips">${r.chips.map((c) => `<a class="chip" href="${esc(c.href)}" style="background:${stateColor(c.state)};color:${onFill(c.state)}" title="${esc(c.name)}: ${STATE_WORD[c.state]}">${esc(c.name)}</a>`).join("") || '<span class="muted small">none</span>'}</div></td></tr>`).join("") + `</tbody></table>`
+        : `<div class="empty">No devices</div>`;
+      return true;
+    }
+    if (type === "log_queries") {
+      body.innerHTML = "";
+      const div = document.createElement("div"); body.appendChild(div);
+      const series = data.series.map((s) => ({ name: s.name, points: s.points }));
+      SP.chart(div, series, { type: o.chart || "area", unit: "msgs", start: data.start, end: data.end, height: Math.max(120, h - 40), legend: "list", title: panel.title });
+      return true;
+    }
+    if (type === "log_field") {
+      if (!data.rows.length) { body.innerHTML = `<div class="empty">No messages with a <code>${esc(data.field)}</code> field</div>`; return true; }
+      const link = (r) => `/syslog?q=${encodeURIComponent((data.q ? "(" + data.q + ") " : "") + data.field + ":" + JSON.stringify(String(r.value == null ? "" : r.value)))}`;
+      const style = o.style || "bars";
+      if (style === "donut") {
+        const top = data.rows.slice(0, 7), rest = data.rows.slice(7).reduce((a, r) => a + r.count, 0);
+        const SEV = { emerg: "critical", alert: "critical", crit: "critical", err: "serious", warning: "warning" };
+        const colorOf = (r, i) => data.field === "severity" ? (SEV[r.label] ? stateColor(SEV[r.label]) : cssVar({ notice: "--s1", info: "--s3", debug: "--s-other" }[r.label] || "--s-other")) : SP.seriesColor(i);
+        const parts = top.map((r, i) => ({ label: r.label, count: r.count, color: colorOf(r, i), href: link(r) }));
+        if (rest) parts.push({ label: "Other", count: rest, color: cssVar("--s-other") });
+        donut(body, parts, { sub: "messages", aria: panel.title });
+      } else if (style === "table") {
+        const max = Math.max(...data.rows.map((r) => r.count));
+        body.innerHTML = `<table class="table compact"><thead><tr><th>${esc(data.field)}</th><th class="num">Messages</th><th style="width:30%"></th></tr></thead><tbody>` +
+          data.rows.map((r) => `<tr><td class="sc-out"><a href="${link(r)}">${esc(r.label)}</a></td><td class="num">${r.count.toLocaleString()}</td><td><span class="rb-track"><i style="width:${(r.count / max) * 100}%;background:${cssVar("--" + (o.color || "s1"))}"></i></span></td></tr>`).join("") + `</tbody></table>`;
+      } else {
+        const max = Math.max(...data.rows.map((r) => r.count));
+        body.innerHTML = `<div class="rb-rows">${data.rows.map((r) => `<a class="rb-row" href="${link(r)}"><span class="rb-name" title="${esc(r.label)}">${esc(r.label)}</span><span class="rb-track"><i style="width:${Math.max(1.5, (r.count / max) * 100)}%;background:${cssVar("--" + (o.color || "s1"))}"></i></span><span class="rb-val">${r.count.toLocaleString()}</span></a>`).join("")}</div>`;
+      }
+      return true;
+    }
+    return false;
+  };
+
   // ------------------------------------------------------------ dashboards
   const PANEL_H = { 1: 110, 2: 250, 3: 390, 4: 540 };
-  SP.renderPanel = async function (card, panel, state) {
+  SP.renderPanel = async function (card, panel, state, scope) {
     const body = $(".panel-body", card);
     const b = SP.rangeBounds(state);
     let data;
     try {
-      data = await SP.api("POST", "/api/panel-data", Object.assign({ panel }, state.start ? { start: state.start, end: state.end } : { range: state.range }));
+      data = await SP.api("POST", "/api/panel-data", Object.assign({ panel, scope: scope || null }, state.start ? { start: state.start, end: state.end } : { range: state.range }));
     } catch (e) {
       body.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
       return;
@@ -621,6 +836,7 @@
     const h = PANEL_H[panel.h] || 250;
     const type = panel.type;
     if (data.error) { body.innerHTML = `<div class="empty">${esc(data.error)}</div>`; return; }
+    if (SP.renderDashlet(body, panel, data, h)) return;
     if (type === "timeseries") {
       body.innerHTML = "";
       const div = document.createElement("div");
@@ -710,7 +926,8 @@
     let timer = null;
     let editing = false;
 
-    const renderAll = () => { $$(".panel", grid).forEach((card) => SP.renderPanel(card, config.panels[+card.dataset.idx], state)); $("#dash-updated") && ($("#dash-updated").textContent = "updated " + SP.fmtTime(Date.now() / 1000, "timesec")); };
+    SP.dashScope = config.scope || null;  // the panel editor preview uses it too
+    const renderAll = () => { $$(".panel", grid).forEach((card) => SP.renderPanel(card, config.panels[+card.dataset.idx], state, config.scope)); $("#dash-updated") && ($("#dash-updated").textContent = "updated " + SP.fmtTime(Date.now() / 1000, "timesec")); };
     const layout = () => {
       grid.innerHTML = "";
       grid.classList.toggle("editing", editing);
@@ -720,15 +937,26 @@
         card.dataset.idx = i;
         card.style.gridColumn = `span ${p.w}`;
         card.innerHTML = `<div class="card-head"><h3 title="${esc(p.title)}">${esc(p.title)}</h3><span class="panel-actions no-print">` +
-          (editing ? `<button class="btn ghost sm" data-p="left" title="Move earlier">&larr;</button><button class="btn ghost sm" data-p="right" title="Move later">&rarr;</button><button class="btn ghost sm" data-p="narrow" title="Narrower">&minus;</button><button class="btn ghost sm" data-p="wide" title="Wider">+</button><button class="btn ghost sm" data-p="dup" title="Duplicate">&#x2398;</button><button class="btn ghost sm danger" data-p="del" title="Remove">&times;</button>` : "") +
-          `<button class="btn ghost sm" data-p="edit" title="Edit panel">Edit</button><button class="btn ghost sm" data-p="view" title="View larger">&#x2922;</button></span></div><div class="panel-body" style="min-height:${PANEL_H[p.h]}px"><div class="muted small">Loading…</div></div>`;
+          (editing ? `<button class="btn ghost sm" data-p="left" title="Move earlier">&larr;</button><button class="btn ghost sm" data-p="right" title="Move later">&rarr;</button><button class="btn ghost sm" data-p="narrow" title="Narrower">&minus;</button><button class="btn ghost sm" data-p="wide" title="Wider">+</button>` : "") +
+          `</span><span class="panel-more-wrap no-print"><button class="btn ghost sm panel-more" data-more aria-label="Panel menu" title="Panel menu">&#x22EF;</button>` +
+          `<span class="panel-menu hidden"><button data-p="edit">Edit dashlet</button><button data-p="view">View larger</button><button data-p="dup">Duplicate</button><button data-p="del" class="danger">Remove</button></span></span></div>` +
+          `<div class="panel-body" style="min-height:${PANEL_H[p.h]}px"><div class="muted small">Loading…</div></div>`;
         grid.appendChild(card);
       });
       renderAll();
     };
     grid.addEventListener("click", (ev) => {
+      const more = ev.target.closest("[data-more]");
+      if (more) {
+        const menu = more.nextElementSibling, open = menu.classList.contains("hidden");
+        $$(".panel-menu", grid).forEach((m) => m.classList.add("hidden"));
+        menu.classList.toggle("hidden", !open);
+        ev.stopPropagation();
+        return;
+      }
       const btn = ev.target.closest("[data-p]");
       if (!btn) return;
+      $$(".panel-menu", grid).forEach((m) => m.classList.add("hidden"));
       const card = btn.closest(".panel");
       const i = +card.dataset.idx;
       const ps = config.panels;
@@ -744,12 +972,13 @@
       dirty();
       layout();
     });
+    document.addEventListener("click", () => $$(".panel-menu", grid).forEach((m) => m.classList.add("hidden")));
     const viewPanel = (p) => {
       const back = document.createElement("div");
       back.className = "modal-back";
       back.innerHTML = `<div class="modal wide"><div class="card-head"><h2>${esc(p.title)}</h2><button class="btn ghost" data-action="close-modal">&times;</button></div><div class="modal-body"><div class="card panel h4" style="box-shadow:none;border:0"><div class="panel-body"></div></div></div></div>`;
       document.body.appendChild(back);
-      SP.renderPanel($(".panel", back), Object.assign({}, p, { h: 4 }), state);
+      SP.renderPanel($(".panel", back), Object.assign({}, p, { h: 4 }), state, config.scope);
       back.addEventListener("click", (e) => { if (e.target === back || e.target.closest("[data-action=close-modal]")) back.remove(); });
     };
     let isDirty = false;
@@ -778,7 +1007,7 @@
     $("#dash-reload") && $("#dash-reload").addEventListener("click", renderAll);
     $("#dash-save") && $("#dash-save").addEventListener("click", save);
     $("#dash-edit") && $("#dash-edit").addEventListener("click", () => { editing = !editing; $("#dash-edit").classList.toggle("primary", editing); $("#dash-edit").textContent = editing ? "Done editing" : "Edit layout"; layout(); });
-    $("#dash-add") && $("#dash-add").addEventListener("click", () => SP.panelEditor({ type: "timeseries", title: "New panel", w: 6, h: 2, options: {}, targets: [{ key: "if.in_bps" }] }, (np) => { config.panels.push(np); dirty(); layout(); }));
+    $("#dash-add") && $("#dash-add").addEventListener("click", () => SP.panelEditor({ type: "status_donut", title: "Device status", w: 3, h: 2, options: { of: "devices" }, targets: [] }, (np) => { config.panels.push(np); dirty(); layout(); }));
     $("#dash-kiosk") && $("#dash-kiosk").addEventListener("click", () => {
       document.body.classList.toggle("kiosk");
       if (document.body.classList.contains("kiosk") && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
@@ -818,7 +1047,7 @@
     editorMeta = { keys, devices, checks, types, tags };
     return editorMeta;
   }
-  const TARGET_TYPES = ["timeseries", "stat", "gauge", "table", "syslog_histogram", "syslog_stream", "syslog_top"];
+  const TARGET_TYPES = ["timeseries", "stat", "gauge", "table", "bars", "syslog_histogram", "syslog_stream", "syslog_top", "log_queries", "log_field"];
   SP.panelEditor = async function (panel, onSave, onDelete) {
     const meta = await loadEditorMeta();
     const p = JSON.parse(JSON.stringify(panel));
@@ -831,6 +1060,12 @@
     const opt = (v, cur, label) => `<option value="${esc(v)}" ${String(cur) === String(v) ? "selected" : ""}>${esc(label == null ? v : label)}</option>`;
     const keyList = `<datalist id="pe-keys">${meta.keys.map((k) => `<option value="${esc(k.key)}">${esc(k.name)}</option>`).join("")}</datalist>`;
     const targetRow = (t, i) => {
+      if (p.type === "log_queries" || p.type === "log_field") {
+        return `<div class="card mb target" data-i="${i}" style="box-shadow:none"><div class="card-body"><div class="form-grid">
+          <label class="field wide">Log search<input data-t="q" value="${esc(t.q || "")}" placeholder="all messages, or e.g. status:5* , severity:<=3 , fail* login"></label>` +
+          (p.type === "log_queries" ? `<label class="field">Label<input data-t="label" value="${esc(t.label || "")}" placeholder="shown in the legend"></label>` : "") +
+          `</div>${p.targets.length > 1 ? `<button class="btn sm danger mt" data-rm="${i}">Remove query</button>` : ""}</div></div>`;
+      }
       const src = t.source || (p.type.startsWith("syslog") ? "syslog" : "metric");
       const syslogOnly = p.type.startsWith("syslog");
       return `<div class="card mb target" data-i="${i}" style="box-shadow:none"><div class="card-body"><div class="form-grid">
@@ -875,6 +1110,17 @@
       if (t === "syslog_top") h += optField("field", "Group by", `<select data-o="field">${["host", "app", "severity", "facility", "source_ip"].map((f) => opt(f, o.field || "host")).join("")}</select>`);
       if (t === "syslog_histogram") h += optField("buckets", "Bars", `<input data-o="buckets" type="number" min="10" max="300" value="${esc(o.buckets || 80)}">`);
       if (t === "text") h += `<label class="field wide">Text<textarea data-o="text">${esc(o.text || "")}</textarea></label>`;
+      if (t === "status_donut") h += optField("of", "Show", `<select data-o="of">${opt("devices", o.of || "devices", "Devices")}${opt("checks", o.of, "Checks / services")}${opt("interfaces", o.of, "Interfaces (ports)")}${opt("alerts", o.of, "Firing alerts")}</select>`);
+      if (t === "status_bars") h += optField("of", "Count", `<select data-o="of">${opt("devices", o.of || "devices", "Devices")}${opt("checks", o.of, "Checks / services")}</select>`) +
+        optField("group_by", "One bar per", `<select data-o="group_by">${["site", "collector", "kind", "tag", "device"].map((g) => opt(g, o.group_by || "site", { kind: "device type" }[g] || g)).join("")}</select>`);
+      if (["status_bars", "state_changes", "bars", "treemap", "device_services", "log_field"].includes(t)) h += optField("limit", "Rows", `<input data-o="limit" type="number" min="1" value="${esc(o.limit || "")}" placeholder="10">`);
+      if (t === "bars") h += optField("unit", "Unit override", `<select data-o="unit">${opt("", o.unit || "", "Automatic")}${["%", "bps", "B", "ms"].map((u) => opt(u, o.unit)).join("")}</select>`) +
+        optField("thresholds", "Thresholds (warn, crit)", `<input data-o="thresholds" value="${esc((o.thresholds || []).join(", "))}" placeholder="70, 90">`);
+      if (["bars", "log_field"].includes(t)) h += optField("color", "Bar colour", `<select data-o="color">${[1, 2, 3, 4, 5, 6, 7, 8].map((n) => opt("s" + n, o.color || "s1", "Colour " + n)).join("")}</select>`);
+      if (t === "group_status") h += optField("label", "Group name", `<input data-o="label" value="${esc(o.label || "")}" placeholder="from the dashboard's device group">`);
+      if (t === "log_field") h += optField("field", "Field", `<input data-o="field" value="${esc(o.field || "host")}" placeholder="host, app, severity, status, client_ip, url">`) +
+        optField("style", "Show as", `<select data-o="style">${opt("bars", o.style || "bars", "Bars")}${opt("donut", o.style, "Donut")}${opt("table", o.style, "Table")}</select>`);
+      if (t === "log_queries") h += optField("chart", "Style", `<select data-o="chart">${opt("area", o.chart || "area", "Area")}${opt("line", o.chart, "Lines")}${opt("stacked", o.chart, "Stacked bars")}</select>`);
       return h;
     };
     const render = () => {
@@ -886,7 +1132,7 @@
             <label class="field">Width (1-12 columns)<input data-f="w" type="number" min="1" max="12" value="${p.w || 6}"></label>
             <label class="field">Height<select data-f="h">${[1, 2, 3, 4].map((n) => opt(n, p.h || 2, ["", "Small", "Medium", "Large", "Extra large"][n])).join("")}</select></label>
           </div>
-          ${TARGET_TYPES.includes(p.type) ? `<h3 class="mb">Queries</h3><div class="targets">${p.targets.map(targetRow).join("")}</div>${["timeseries", "stat", "gauge"].includes(p.type) ? `<button class="btn sm" data-add>+ Add query</button>` : ""}` : ""}
+          ${TARGET_TYPES.includes(p.type) ? `<h3 class="mb">Queries</h3><div class="targets">${p.targets.map(targetRow).join("")}</div>${["timeseries", "stat", "gauge", "log_queries"].includes(p.type) ? `<button class="btn sm" data-add>+ Add query</button>` : ""}` : ""}
           <h3 class="mt mb">Display options</h3><div class="form-grid">${optionsHtml() || `<span class="muted">No options for this panel type.</span>`}</div>
           <h3 class="mt mb">Preview</h3><div class="card panel h${p.h || 2}" style="box-shadow:none"><div class="panel-body preview"></div></div>
         </div>
@@ -898,7 +1144,7 @@
       $$(".target", back).forEach((row) => {
         const t = {};
         $$("[data-t]", row).forEach((el) => { if (el.value !== "" && !el.disabled) t[el.dataset.t] = ["limit", "severity"].includes(el.dataset.t) ? +el.value : el.value; });
-        if (p.type.startsWith("syslog")) delete t.source;
+        if (p.type.startsWith("syslog") || p.type.startsWith("log_")) delete t.source;
         p.targets[+row.dataset.i] = t;
       });
       const o = {};
@@ -913,7 +1159,7 @@
       p.options = o;
       return p;
     };
-    const preview = () => SP.renderPanel($(".preview", back).closest(".panel"), collect(), SP.urlState({ range: "24h" }));
+    const preview = () => SP.renderPanel($(".preview", back).closest(".panel"), collect(), SP.urlState({ range: "24h" }), SP.dashScope);
     back.addEventListener("change", (e) => {
       if (e.target.matches("[data-f=type], [data-t=source], [data-f=h]")) { collect(); render(); }
     });

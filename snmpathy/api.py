@@ -755,6 +755,15 @@ class PanelQuery(BaseModel):
     range: str = "24h"
     start: Optional[float] = None
     end: Optional[float] = None
+    scope: Optional[dict[str, Any]] = None  # the dashboard's device group: {"tag", "site", "devices"}
+
+
+class ClusterIn(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    description: str = ""
+    tag: str = ""
+    site: str = ""
+    devices: list[str] = []
 
 
 @router.get("/dashboards", tags=["dashboards"])
@@ -804,10 +813,27 @@ def duplicate_dashboard(dashboard_id: int, db: Database = Depends(get_db)):
                                           "config": d["config"]})
 
 
+@router.post("/dashboards/cluster", status_code=201, tags=["dashboards"])
+def create_cluster_dashboard(body: ClusterIn, db: Database = Depends(get_db)):
+    """A Nagios-style cluster dashboard for one group of devices (by tag, site and/or device list)."""
+    from . import hud
+
+    scope = {k: v for k, v in {"tag": body.tag.strip(), "site": body.site.strip(),
+                               "devices": [d.strip() for d in body.devices if d.strip()]}.items() if v}
+    if not scope:
+        raise HTTPException(422, "pick a tag, a site or some devices for the group")
+    found = hud.scope_device_ids(db, scope) or set()
+    if not found:
+        raise HTTPException(422, "no devices match that group")
+    description = body.description or f"Cluster of {len(found)} device{'s' if len(found) != 1 else ''}: {hud.describe_scope(scope)}"
+    return dashboards.save_dashboard(db, {"name": body.name, "description": description,
+                                          "config": hud.cluster_config(scope)})
+
+
 @router.post("/dashboards/reset", tags=["dashboards"])
 def reset_dashboards(db: Database = Depends(get_db)):
     """Re-create any built-in dashboard that was deleted."""
-    db.execute("DELETE FROM meta WHERE key = 'dashboards_seeded'")
+    db.execute("DELETE FROM meta WHERE key IN ('dashboards_seeded', 'hud_seeded', 'logs_dashboard_seeded')")
     return {"created": dashboards.seed_dashboards(db)}
 
 
@@ -830,7 +856,7 @@ def panel_types():
 def panel_data(body: PanelQuery, db: Database = Depends(get_db)):
     """Data for one dashboard panel (used by the built-in dashboards)."""
     s, e = _time_range(body.range, body.start, body.end)
-    return dashboards.panel_data(db, body.panel, s, e)
+    return dashboards.panel_data(db, body.panel, s, e, body.scope)
 
 
 @router.post("/query", tags=["dashboards"])
