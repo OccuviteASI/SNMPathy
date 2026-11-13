@@ -445,17 +445,38 @@ SLA calculations.
 
 ### Dashboards
 
-**Dashboards** lists the built-in boards (Network Overview, Traffic & Interfaces, Server &
-Device Health, Availability, Syslog) and any you create. On any board you can:
+The **Overview** page is the **Main HUD** dashboard (Nagios Fusion style): device and check
+status donuts, device status by site, the latest state changes with CRITICAL / WARNING / OK
+pills, firing alerts, traffic, CPU by device, interfaces, busiest ports and syslog volume.
+Click a donut segment or legend row to open exactly those devices or checks. It is an
+ordinary dashboard, so you can rearrange or extend it (the old overview is at `/?classic=1`).
+
+**Dashboards** lists the built-in boards (Main HUD, Network Overview, Traffic & Interfaces,
+Server & Device Health, Availability, Syslog, Log Analysis) and any you create. On any board:
 
 * pick a time range (15 minutes to 1 year, or a custom range) and an auto-refresh interval
-* **Edit layout**: add, remove, reorder, resize or duplicate panels
-* **Edit** a panel: choose the visualisation (time series lines / area / stacked bars,
-  stat, gauge, top-N table, status grid, uptime bars, syslog volume / stream / top,
-  firing alerts, events, overview counters, text), its queries (metric key + device /
-  tag / instance filters + aggregation), units, thresholds, Y-axis limits and legend
-  style, with a live preview
+* **Add dashlet** and **Edit layout**: add, remove, reorder, resize or duplicate dashlets;
+  each dashlet's **⋯** menu edits, enlarges, duplicates or removes it
+* dashlets: status donut (devices, checks, ports or alerts), status bars by site /
+  collector / device type / tag, latest state changes, ranked bars (e.g. CPU or memory per
+  device, with warning / critical thresholds), group status tile, device & service treemap,
+  **Hypermap** (radial map: SNMPathy in the middle, then collectors and devices by parent),
+  devices with their service chips, log events over time (one line per query), log field
+  top values (donut, bars or table), plus time series, stat, gauge, top-N table, status
+  grid, uptime bars, syslog volume / stream / top, firing alerts, events and text
 * **Kiosk** mode for a wall display, **JSON** to export or import a board, **Duplicate**
+
+**Cluster dashboards (device groups).** *Dashboards → New cluster dashboard* builds a board
+for one group of devices, chosen by tag, site and/or a list of devices: cluster status
+tile, treemap, hypermap, services donut, key services, memory, CPU, disk, traffic and state
+changes. Any dashboard can be limited to a group the same way under its settings (⚙ →
+*Device group*); every dashlet on it then shows only those devices. API:
+`POST /api/dashboards/cluster` with `name` and `tag` / `site` / `devices`.
+
+**Log Analysis** shows log volume per query (all, errors, failures, warnings), messages by
+severity, top hosts, applications and source IPs, failed logins by user and the latest
+errors. For web server logs sent as JSON / GELF, add *log field* dashlets on `status`,
+`client_ip` or `url` for response codes, top visitors and top URLs.
 
 ### Grafana
 

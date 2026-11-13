@@ -66,8 +66,11 @@ def render(request: Request, name: str, **context: Any) -> HTMLResponse:
 
 # --------------------------------------------------------------------- pages
 @router.get("/", response_class=HTMLResponse)
-def dashboard(request: Request):
+def dashboard(request: Request, classic: bool = False):
     db = db_of(request)
+    hud_row = None if classic else db.one("SELECT * FROM dashboards WHERE slug = 'main-hud'")
+    if hud_row:  # the Overview is the Main HUD dashboard (Nagios-style); ?classic=1 shows the old page
+        return _render_dashboard(request, db, hud_row, overview=True)
     now = time.time()
     down_devices = db.query("SELECT * FROM devices WHERE enabled = 1 AND status IN ('down', 'unreachable') "
                             "ORDER BY status = 'unreachable', status_since")
@@ -99,12 +102,16 @@ def dashboard(request: Request):
 
 
 @router.get("/devices", response_class=HTMLResponse)
-def devices(request: Request, tag: str = "", q: str = ""):
+def devices(request: Request, tag: str = "", q: str = "", state: str = ""):
+    from ..hud import LABEL, device_state
+
     db = db_of(request)
     rows = [services.public_device(d) for d in db.query("SELECT * FROM devices ORDER BY name COLLATE NOCASE")]
     all_tags = sorted({t for d in rows for t in d["tags"]})
     if tag:
         rows = [d for d in rows if tag in d["tags"]]
+    if state in LABEL:  # from a dashboard donut: e.g. ?state=critical lists the devices that are down
+        rows = [d for d in rows if d["enabled"] and device_state(d) == state]
     counts = {r["device_id"]: r for r in db.query(
         "SELECT device_id, COUNT(*) AS ifaces, SUM(CASE WHEN admin_status = 1 AND oper_status = 2 THEN 1 ELSE 0 END) "
         "AS down FROM interfaces GROUP BY device_id")}
@@ -113,7 +120,9 @@ def devices(request: Request, tag: str = "", q: str = ""):
     mem = {r["device_id"]: r["last_value"] for r in db.query(
         "SELECT device_id, last_value FROM metrics WHERE key = 'mem.used_pct'")}
     return render(request, "devices.html", devices=rows, tags=all_tags, tag=tag, q=q,
-                  counts=counts, cpu=cpu, mem=mem)
+                  counts=counts, cpu=cpu, mem=mem, state=state if state in LABEL else "",
+                  state_label={"ok": "up", "warning": "degraded", "serious": "unreachable", "critical": "down",
+                               "unknown": "unknown"}.get(state, ""))
 
 
 def _device_names(db: Database) -> list[dict[str, Any]]:
@@ -169,18 +178,22 @@ def device_detail(request: Request, device_id: int, tab: str = "overview"):
 
 
 @router.get("/checks", response_class=HTMLResponse)
-def checks(request: Request):
+def checks(request: Request, state: str = ""):
+    from ..hud import LABEL, check_state
+
     db = db_of(request)
     now = time.time()
     rows = db.query(
         "SELECT checks.*, devices.name AS device_name FROM checks LEFT JOIN devices ON devices.id = checks.device_id "
         "ORDER BY CASE checks.state WHEN 'down' THEN 0 WHEN 'unknown' THEN 1 ELSE 2 END, checks.name COLLATE NOCASE")
+    if state in LABEL:  # from a dashboard donut
+        rows = [c for c in rows if c["enabled"] and check_state(c) == state]
     for c in rows:
         c["options"] = loads(c["options"], {})
         c["uptime_24h"] = reports.availability(db, c, now - 86400, now, now)["uptime_pct"]
         c["uptime_30d"] = reports.availability(db, c, now - 30 * 86400, now, now)["uptime_pct"]
     devices = db.query("SELECT id, name, hostname FROM devices ORDER BY name COLLATE NOCASE")
-    return render(request, "checks.html", checks=rows, devices=devices)
+    return render(request, "checks.html", checks=rows, devices=devices, state=state if state in LABEL else "")
 
 
 @router.get("/checks/{check_id}", response_class=HTMLResponse)
@@ -286,20 +299,43 @@ def dashboards_index(request: Request):
     from .. import dashboards as dash
 
     db = db_of(request)
+    from ..topology import site_of
+
     rows = [dash.public_dashboard(d) for d in db.query("SELECT * FROM dashboards ORDER BY position, name")]
-    return render(request, "dashboards.html", dashboards=rows)
+    devices = db.query("SELECT * FROM devices ORDER BY name COLLATE NOCASE")
+    collectors = {c["id"]: c for c in db.query("SELECT id, name, site FROM collectors")}
+    return render(request, "dashboards.html", dashboards=rows,
+                  all_tags=sorted({t for x in devices for t in loads(x["tags"], [])}),
+                  all_sites=sorted({s for x in devices if (s := site_of(x, collectors))}),
+                  device_names=[x["name"] for x in devices])
 
 
 @router.get("/dashboards/{slug}", response_class=HTMLResponse)
 def dashboard_view(request: Request, slug: str):
-    from .. import dashboards as dash
-
     db = db_of(request)
     row = db.one("SELECT * FROM dashboards WHERE slug = ? OR id = ?", (slug, int(slug) if slug.isdigit() else -1))
     if not row:
         raise HTTPException(404)
+    return _render_dashboard(request, db, row)
+
+
+def _render_dashboard(request: Request, db: Any, row: dict[str, Any], overview: bool = False):
+    from .. import dashboards as dash
+    from ..hud import describe_scope, scope_device_ids
+    from ..topology import site_of
+
+    d = dash.public_dashboard(row)
+    scope = d["config"].get("scope") or {}
+    ids = scope_device_ids(db, scope)
     others = db.query("SELECT name, slug FROM dashboards ORDER BY position, name")
-    return render(request, "dashboard_view.html", nav="dashboards", dash=dash.public_dashboard(row), others=others)
+    devices = db.query("SELECT * FROM devices ORDER BY name COLLATE NOCASE")
+    collectors = {c["id"]: c for c in db.query("SELECT id, name, site FROM collectors")}
+    return render(request, "dashboard_view.html", nav="dashboard" if overview else "dashboards", dash=d, others=others,
+                  is_overview=overview, scope=scope, scope_text=describe_scope(scope),
+                  scope_count=len(ids) if ids is not None else None,
+                  all_tags=sorted({t for x in devices for t in loads(x["tags"], [])}),
+                  all_sites=sorted({s for x in devices if (s := site_of(x, collectors))}),
+                  device_names=[x["name"] for x in devices])
 
 
 @router.get("/maintenance", response_class=HTMLResponse)

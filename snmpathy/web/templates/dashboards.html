@@ -3,6 +3,7 @@
 {% block title %}Dashboards{% endblock %}
 {% block actions %}
 <button class="btn" data-action="api" data-url="/api/dashboards/reset" data-success="Restored {created} built-in dashboard(s)">Restore built-ins</button>
+<button class="btn" data-action="modal" data-target="#new-cluster">{{ icon('plus') }} New cluster dashboard</button>
 <button class="btn primary" data-action="modal" data-target="#new-dash">{{ icon('plus') }} New dashboard</button>
 {% endblock %}
 {% block content %}
@@ -11,6 +12,7 @@
   <div class="card report-card">
     <a href="/dashboards/{{ d.slug }}" class="row" style="color:inherit">{{ icon('dash') }}<h2>{{ d.name }}</h2></a>
     <p>{{ d.description or 'No description' }}</p>
+    {% if d.config.scope %}<div class="mb"><span class="scope-chip">Group: {% if d.config.scope.tag %}tag {{ d.config.scope.tag }} {% endif %}{% if d.config.scope.site %}site {{ d.config.scope.site }} {% endif %}{% if d.config.scope.devices %}{{ d.config.scope.devices|length }} devices{% endif %}</span></div>{% endif %}
     <div class="small muted">{{ d.config.panels|length }} panels · default range {{ d.config.time }} · refresh {{ d.config.refresh ~ 's' if d.config.refresh else 'off' }}</div>
     <div class="row mt">
       <a class="btn sm primary" href="/dashboards/{{ d.slug }}">Open</a>
@@ -24,6 +26,23 @@
 </div>
 <p class="muted small mt">Prefer Grafana? SNMPathy is also a Grafana data source. See <a href="/settings#grafana">Settings → Grafana</a>.</p>
 
+<div class="modal-back hidden" id="new-cluster">
+  <div class="modal">
+    <div class="card-head"><h2>New cluster dashboard</h2><button class="btn ghost" data-action="close-modal">&times;</button></div>
+    <form data-api="/api/dashboards/cluster" data-redirect="/dashboards/{id}">
+      <div class="modal-body">
+        <p class="small muted" style="margin-top:0">One dashboard for a group of devices, like a Nagios cluster view: overall status, a treemap of every device and service, a hypermap, key services, memory, CPU, disk, traffic and recent state changes. Pick the group by tag, site and/or a list of devices.</p>
+        <div class="form-grid">
+          <label class="field wide">Name<input name="name" required placeholder="Trailer cluster"></label>
+          <label class="field">Tag<select name="tag"><option value="">Any</option>{% for t in all_tags %}<option>{{ t }}</option>{% endfor %}</select></label>
+          <label class="field">Site<select name="site"><option value="">Any</option>{% for s in all_sites %}<option>{{ s }}</option>{% endfor %}</select></label>
+          <label class="field wide">Devices <span class="hint">optional · Ctrl/⌘-click for several</span><select name="devices" multiple size="8">{% for n in device_names %}<option>{{ n }}</option>{% endfor %}</select></label>
+        </div>
+      </div>
+      <div class="modal-foot"><button type="button" class="btn" data-action="close-modal">Cancel</button><button class="btn primary" type="submit">Create</button></div>
+    </form>
+  </div>
+</div>
 <div class="modal-back hidden" id="new-dash">
   <div class="modal">
     <div class="card-head"><h2>New dashboard</h2><button class="btn ghost" data-action="close-modal">&times;</button></div>

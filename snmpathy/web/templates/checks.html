@@ -8,6 +8,7 @@
 <button class="btn primary" data-action="modal" data-target="#new-check">{{ icon('plus') }} Add check</button>
 {% endblock %}
 {% block content %}
+{% if state %}<div class="row mb"><span class="tag" style="background:var(--accent-soft);color:var(--accent)">Showing only checks that are {{ {'ok': 'OK', 'warning': 'in WARNING', 'critical': 'down', 'unknown': 'unknown'}[state] or state }}</span><a class="small" href="/checks">Show all checks</a></div>{% endif %}
 {% set up = checks|selectattr('state', 'equalto', 'up')|list|length %}
 {% set down = checks|selectattr('state', 'equalto', 'down')|list|length %}
 <div class="tiles mb">

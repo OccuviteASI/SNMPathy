@@ -1,11 +1,14 @@
 {% extends "base.html" %}
 {% from "_macros.html" import icon %}
-{% block title %}{{ dash.name }}{% endblock %}
-{% block crumbs %}<div class="crumbs"><a href="/dashboards">Dashboards</a>{% if dash.description %} · {{ dash.description }}{% endif %}</div>{% endblock %}
+{% block title %}{{ 'Overview' if is_overview else dash.name }}{% endblock %}
+{% block crumbs %}<div class="crumbs">{% if is_overview %}<a href="/dashboards/{{ dash.slug }}">{{ dash.name }}</a> · edit it like any dashboard{% else %}<a href="/dashboards">Dashboards</a>{% if dash.description %} · {{ dash.description }}{% endif %}{% endif %}</div>{% endblock %}
 {% block heading %}
+{% if is_overview %}Overview{% else %}
 <select onchange="location.href='/dashboards/' + this.value" aria-label="Switch dashboard" style="font-size:18px;font-weight:600;border:0;background:transparent;padding:0 4px;margin-left:-4px">
   {% for o in others %}<option value="{{ o.slug }}" {{ 'selected' if o.slug == dash.slug }}>{{ o.name }}</option>{% endfor %}
 </select>
+{% endif %}
+{% if scope_text %}<span class="scope-chip" title="Every dashlet shows only this group of devices">Group: {{ scope_text }}{% if scope.tag or scope.site %} · {{ scope_count }} device{{ '' if scope_count == 1 else 's' }}{% endif %}</span>{% endif %}
 {% endblock %}
 {% block actions %}
 <div id="dash-time" class="no-print"></div>
@@ -15,7 +18,7 @@
 <button class="btn" id="dash-reload" title="Reload all panels">{{ icon('refresh') }}</button>
 <button class="btn primary hidden" id="dash-save">Save</button>
 <span class="hide-kiosk row">
-<button class="btn" id="dash-add">{{ icon('plus') }} Panel</button>
+<button class="btn" id="dash-add">{{ icon('plus') }} Add dashlet</button>
 <button class="btn" id="dash-edit">Edit layout</button>
 <button class="btn" id="dash-settings" title="Dashboard settings">{{ icon('settings') }}</button>
 <button class="btn" id="dash-json" title="JSON model">JSON</button>
@@ -25,17 +28,24 @@
 {% block content %}
 <div id="dash-root">
   <div class="dash-grid"></div>
-  <p class="small muted mt no-print"><span id="dash-updated"></span> · Tips: click legend entries to isolate a series (Ctrl/⌘-click to toggle), and use the ⤢ button on a panel to enlarge it.</p>
+  <p class="small muted mt no-print"><span id="dash-updated"></span> · Tips: click a donut segment or legend row to open those devices, click legend entries on graphs to isolate a series, and use a dashlet's ⋯ menu to edit or enlarge it.</p>
 </div>
 <div class="modal-back hidden" id="dash-settings-modal">
   <div class="modal">
     <div class="card-head"><h2>Dashboard settings</h2><button class="btn ghost" data-action="close-modal">&times;</button></div>
-    <form data-api="/api/dashboards/{{ dash.id }}" data-method="PATCH" data-transform="dashSettings" data-redirect="/dashboards/{{ dash.slug }}">
+    <form data-api="/api/dashboards/{{ dash.id }}" data-method="PATCH" data-transform="dashSettings" data-redirect="{{ '/' if is_overview else '/dashboards/' ~ dash.slug }}">
       <div class="modal-body"><div class="form-grid">
         <label class="field">Name<input name="name" value="{{ dash.name }}" required></label>
         <label class="field">Default time range<select name="time">{% for r in ['15m', '1h', '6h', '24h', '7d', '30d', '90d'] %}<option {{ 'selected' if dash.config.time == r }}>{{ r }}</option>{% endfor %}</select></label>
         <label class="field">Default auto-refresh (seconds, 0 = off)<input name="refresh" type="number" data-type="int" min="0" value="{{ dash.config.refresh or 0 }}"></label>
         <label class="field wide">Description<input name="description" value="{{ dash.description }}"></label>
+      </div>
+      <h3 class="mt mb">Device group (cluster)</h3>
+      <p class="small muted" style="margin-top:0">Limit every dashlet on this dashboard to a group of devices. Leave all three empty to show everything.</p>
+      <div class="form-grid">
+        <label class="field">Tag<select name="scope_tag"><option value="">Any</option>{% for t in all_tags %}<option {{ 'selected' if scope.tag == t }}>{{ t }}</option>{% endfor %}</select></label>
+        <label class="field">Site<select name="scope_site"><option value="">Any</option>{% for s in all_sites %}<option {{ 'selected' if scope.site == s }}>{{ s }}</option>{% endfor %}</select></label>
+        <label class="field wide">Devices <span class="hint">Ctrl/⌘-click for several</span><select name="scope_devices" multiple size="6">{% for n in device_names %}<option {{ 'selected' if n in (scope.devices or []) }}>{{ n }}</option>{% endfor %}</select></label>
       </div></div>
       <div class="modal-foot"><button type="button" class="btn" data-action="close-modal">Cancel</button><button class="btn primary" type="submit">Save</button></div>
     </form>
@@ -48,7 +58,8 @@ const DASH = {{ dash|tojson }};
 document.addEventListener("DOMContentLoaded", () => {
   const d = SP.dashboard(SP.$("#dash-root"), DASH);
   SP.transforms.dashSettings = (b) => {
-    const config = Object.assign({}, d.config, { time: b.time, refresh: b.refresh });
+    const scope = { tag: b.scope_tag || undefined, site: b.scope_site || undefined, devices: (b.scope_devices || []).length ? b.scope_devices : undefined };
+    const config = Object.assign({}, d.config, { time: b.time, refresh: b.refresh, scope });
     return { name: b.name, description: b.description, config };
   };
 });
