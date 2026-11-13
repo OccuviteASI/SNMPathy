@@ -365,6 +365,13 @@ def cmd_version(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_self_update(args: argparse.Namespace) -> int:
+    """Download the latest SNMPathy release and replace this executable with it."""
+    from . import selfupdate
+
+    return selfupdate.main(gui=args.gui, check=args.check, force=args.force, restart=not args.no_restart)
+
+
 # -------------------------------------------------------------------- parser
 def _snmp_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("-v", "--version", default="2c", choices=["1", "2c", "3"], help="SNMP version")
@@ -664,6 +671,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--include", help="comma-separated groups: syslog (default), web, logs, flows")
     p.add_argument("--config")
     p.set_defaults(func=cmd_firewall)
+
+    p = sub.add_parser("self-update", help="update this executable to the latest release from GitHub")
+    p.add_argument("--gui", action="store_true", help="show a progress window (what the tray uses)")
+    p.add_argument("--check", action="store_true", help="only say whether an update is available")
+    p.add_argument("--force", action="store_true", help="download the latest release even if this is it")
+    p.add_argument("--no-restart", action="store_true", help="do not start SNMPathy again afterwards")
+    p.set_defaults(func=cmd_self_update)
 
     p = sub.add_parser("version", help="print version information")
     p.set_defaults(func=cmd_version)

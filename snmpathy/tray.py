@@ -7,8 +7,10 @@ server in a background thread and shows a tray icon with:
 * a live status line (devices down / unreachable, checks down), and a red marker on the
   icon when something is down
 * **Start at login** - the same switch as Settings > Startup
-* **Update SNMPathy** - pulls, rebuilds and restarts, showing a progress window
-  (``scripts/update_gui.py``, recorded in ``updater.json`` next to the executable)
+* **Update SNMPathy** - downloads the latest release from GitHub and restarts, showing a
+  progress window (``snmpathy/selfupdate.py``; nothing else needs to be installed). Checked
+  every few hours; the menu says when a new version is available. Running from source, it
+  pulls and rebuilds instead (``scripts/update_gui.py``, recorded in ``updater.json``).
 * **Open data folder**, **View log** (the log goes to ``snmpathy.log`` in tray mode)
 * **Quit SNMPathy**
 
@@ -145,6 +147,7 @@ def open_path(path: Path) -> None:
 # (a synced Desktop / OneDrive folder, a USB stick) where those paths do not exist. Then the
 # source is looked for elsewhere, or downloaded once with git into SOURCE_HOME.
 DEFAULT_REMOTE = "https://github.com/OccuviteASI/SNMPathy.git"
+UPDATE_CHECK_INTERVAL = 6 * 3600  # seconds between looks for a new release
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
@@ -290,6 +293,7 @@ class TrayApp:
         self.icon: Any = None
         self.state, self.status = "ok", "Starting…"
         self.error = ""
+        self.available = ""  # a newer release, when the update check found one
         self._stop = threading.Event()
 
     # ------------------------------------------------------------ server
@@ -352,6 +356,10 @@ class TrayApp:
             return False
 
     def run_update(self, *_: Any) -> None:
+        if is_frozen():
+            # The executable updates itself from the latest GitHub release: no Python or Git needed.
+            self._launch([sys.executable, "self-update", "--gui"], cwd=Path(sys.executable).parent)
+            return
         command = updater_command()
         if command is None and find_source() is None and not missing_for_update():
             # A copy built on another computer: download the source here once, then update.
@@ -383,6 +391,42 @@ class TrayApp:
             subprocess.Popen(["cmd", "/c", "start", "SNMPathy update", str(launcher), "--from-tray"])
         else:
             subprocess.Popen([str(launcher)], start_new_session=True)
+
+    def _launch(self, command: list[str], cwd: Path) -> None:
+        flags = 0
+        if sys.platform.startswith("win"):
+            flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
+        try:
+            subprocess.Popen(command, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, creationflags=flags,
+                             start_new_session=not sys.platform.startswith("win"))
+        except OSError as exc:
+            show_message(f"Could not start the updater: {exc}")
+
+    def _update_check_loop(self) -> None:
+        """Look for a new release now and then, so the menu can say one is available."""
+        from . import selfupdate
+
+        if self._stop.wait(60):
+            return
+        while not self._stop.is_set():
+            try:
+                release = selfupdate.latest_release()
+                if release is not None and release.is_newer():
+                    if release.version != self.available:
+                        self.available = release.version
+                        self.notify(f"SNMPathy {release.version} is available: choose Update SNMPathy in this menu.")
+                        try:
+                            self.icon.update_menu()
+                        except Exception:
+                            pass
+            except Exception as exc:  # offline, rate-limited, ...: try again later
+                log.debug("update check failed: %s", exc)
+            if self._stop.wait(UPDATE_CHECK_INTERVAL):
+                return
+
+    def update_label(self, *_: Any) -> str:
+        return f"Update SNMPathy ({self.available} available)" if self.available else "Update SNMPathy"
 
     def _fetch_source_then_update(self) -> None:
         dest = source_home()
@@ -434,7 +478,7 @@ class TrayApp:
             item(lambda _i: self.status, None, enabled=False),
             pystray.Menu.SEPARATOR,
             item("Start at login", self.toggle_autostart, checked=self.autostart_enabled),
-            item("Update SNMPathy", self.run_update, visible=lambda _i: update_available()),
+            item(self.update_label, self.run_update, visible=lambda _i: update_available()),
             item("Open data folder", self.open_folder),
             item("View log", self.view_log),
             pystray.Menu.SEPARATOR,
@@ -447,6 +491,11 @@ class TrayApp:
         self.thread = threading.Thread(target=self._run_server, name="snmpathy-server", daemon=True)
         self.thread.start()
         threading.Thread(target=self._status_loop, name="snmpathy-tray-status", daemon=True).start()
+        if is_frozen():
+            from .selfupdate import cleanup_old
+
+            cleanup_old(Path(sys.executable).resolve())  # the previous version, kept until now
+            threading.Thread(target=self._update_check_loop, name="snmpathy-update-check", daemon=True).start()
         self.icon = pystray.Icon("SNMPathy", make_icon("ok"), "SNMPathy - starting", self.menu())
         self.icon.run()
         self._stop.set()
