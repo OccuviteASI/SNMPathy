@@ -8,34 +8,87 @@
 {% endblock %}
 {% block content %}
 <style>
-  .map-wrap { position: relative; height: calc(100vh - 170px); min-height: 460px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); overflow: hidden; }
+  .map-wrap { position: relative; height: calc(100vh - 170px); min-height: 480px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); overflow: hidden; }
   .map-wrap svg { width: 100%; height: 100%; display: block; cursor: grab; user-select: none; touch-action: none; }
   .map-wrap svg.panning { cursor: grabbing; }
   .map-toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px; }
+  .map-toolbar .sep { width: 1px; align-self: stretch; background: var(--border); margin: 0 4px; }
   .map-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--muted); margin-left: auto; }
   .map-legend i { display: inline-block; width: 18px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 4px; }
   .map-legend b { display: inline-block; width: 9px; height: 9px; border-radius: 50%; vertical-align: middle; margin-right: 4px; }
+
+  /* sites */
+  .map-site .body { fill: var(--surface); stroke: var(--border-strong); stroke-width: 1.2; }
+  .map-site.unassigned .body { fill: var(--surface-2); stroke-dasharray: 7 5; }
+  .map-site .head { cursor: move; }
+  .map-site .head-bg { fill: transparent; }
+  .map-site .head-line { stroke: var(--border); }
+  .map-site .title { font-size: 13px; font-weight: 650; fill: var(--text); }
+  .map-site .title .muted { font-weight: 500; fill: var(--muted); }
+  .map-site .title .bad { font-weight: 650; fill: var(--critical-text); }
+  .map-site .title .warn { font-weight: 650; fill: var(--warning-text); }
+  .map-site .tog { font-size: 12px; fill: var(--muted); cursor: pointer; }
+  .map-site .hint { font-size: 11.5px; fill: var(--muted); font-style: italic; }
+  .map-site.collapsed .body { fill: var(--surface-2); }
+  .map-site.drop .body { stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: none; fill: var(--accent-soft); }
+  .map-site.hit .body { stroke: var(--accent); stroke-width: 2; }
+
+  /* nodes and edges */
   .map-node text { font-size: 11px; fill: var(--text); paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
   .map-node .sub { fill: var(--muted); font-size: 10px; }
   .map-node { cursor: pointer; }
+  .map-node .sel-ring { fill: none; stroke: var(--accent); stroke-width: 2.5; opacity: 0; }
+  .map-node.sel .sel-ring { opacity: 1; }
   .map-node.dim, .map-edge.dim { opacity: .18; }
   .map-node.hit circle.ring { stroke-width: 5; }
+  .map-node.dragging { opacity: .85; }
   .map-edge { cursor: pointer; }
+  .map-edge path { fill: none; }
+  .map-edge.x path.vis { stroke-opacity: .55; }
+  .map-edge.x.focus path.vis { stroke-opacity: 1; }
   .map-edge text { font-size: 9.5px; fill: var(--text-2); paint-order: stroke; stroke: var(--surface); stroke-width: 3px; }
-  .map-site rect { fill: var(--surface-2); stroke: var(--border); }
-  .map-site text { font-size: 12px; font-weight: 650; fill: var(--text-2); }
-  .map-panel { position: absolute; top: 10px; right: 10px; width: 300px; max-width: calc(100% - 20px); max-height: calc(100% - 20px); overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.12); padding: 12px 14px; font-size: 13px; }
-  .map-panel h3 { margin: 0 0 6px; font-size: 15px; }
+  .map-band { fill: var(--accent-soft); stroke: var(--accent); stroke-dasharray: 4 3; opacity: .7; }
+
+  /* overlays */
+  .map-panel { position: absolute; top: 10px; right: 10px; width: 310px; max-width: calc(100% - 20px); max-height: calc(100% - 20px); overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.14); padding: 12px 14px; font-size: 13px; z-index: 4; }
+  .map-panel h3 { margin: 0 0 6px; font-size: 15px; word-break: break-word; }
   .map-panel dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 8px 0; }
   .map-panel dt { color: var(--muted); }
-  .map-tip { position: absolute; pointer-events: none; background: var(--text); color: var(--surface); padding: 5px 8px; border-radius: 6px; font-size: 12px; max-width: 280px; z-index: 3; }
-  .map-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 30px; color: var(--muted); pointer-events: none; }
-  @media (max-width: 700px) { .map-wrap { height: 70vh; } .map-legend { margin-left: 0; } }
+  .map-panel .dev-list { max-height: 260px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; margin: 6px 0; }
+  .map-panel .dev-list label { display: flex; gap: 8px; align-items: center; padding: 5px 8px; border-bottom: 1px solid var(--border); }
+  .map-panel .dev-list label:last-child { border-bottom: 0; }
+  .site-chooser { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .site-chooser select, .site-chooser input { max-width: 190px; }
+  .map-tip { position: absolute; pointer-events: none; background: var(--text); color: var(--surface); padding: 5px 8px; border-radius: 6px; font-size: 12px; max-width: 280px; z-index: 6; white-space: pre-line; }
+  .map-hint { position: absolute; left: 12px; bottom: 12px; max-width: 520px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 32px 8px 12px; font-size: 12px; color: var(--muted); z-index: 3; }
+  .map-hint button { position: absolute; top: 4px; right: 6px; }
+  .map-selbar { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; gap: 10px; align-items: center; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px; padding: 8px 12px; box-shadow: 0 6px 24px rgba(0,0,0,.18); font-size: 13px; z-index: 5; white-space: nowrap; }
+
+  /* drawer */
+  .map-drawer { position: absolute; top: 10px; left: 10px; bottom: 10px; width: 268px; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.12); z-index: 4; font-size: 13px; }
+  .map-drawer .d-head { padding: 10px 10px 8px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+  .map-drawer .d-head input { width: 100%; }
+  .map-drawer .d-list { flex: 1; overflow: auto; padding: 4px 0; }
+  .map-drawer .d-site { display: flex; align-items: center; gap: 6px; padding: 7px 10px 4px; font-weight: 650; cursor: pointer; }
+  .map-drawer .d-site .n { color: var(--muted); font-weight: 500; margin-left: auto; font-size: 12px; }
+  .map-drawer .d-site.unassigned { color: var(--warning-text); }
+  .map-drawer .d-row { display: flex; align-items: center; gap: 7px; padding: 4px 10px 4px 14px; cursor: grab; border-radius: 6px; margin: 0 4px; }
+  .map-drawer .d-row:hover { background: var(--surface-2); }
+  .map-drawer .d-row .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .map-drawer .d-row .ip { color: var(--muted); font-size: 11px; }
+  .map-drawer .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .map-drawer .d-foot { border-top: 1px solid var(--border); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+  .map-drawer .empty { padding: 10px 14px; color: var(--muted); }
+  @media (max-width: 760px) { .map-wrap { height: 70vh; } .map-legend { margin-left: 0; } .map-drawer, #map-drawer-btn { display: none !important; } .map-selbar { left: 10px; right: 10px; transform: none; flex-wrap: wrap; white-space: normal; } }
 </style>
 <div class="map-toolbar">
+  <button class="btn sm" id="map-drawer-btn" aria-pressed="false">Sites &amp; devices</button>
+  <span class="sep"></span>
   <button class="btn sm" id="map-fit">Fit</button>
-  <button class="btn sm" id="map-relayout" title="Discard saved positions and lay out again">Auto layout</button>
-  <button class="btn sm" id="map-save">Save layout</button>
+  <button class="btn sm" id="map-relayout" title="Arrange every site and device neatly again">Auto layout</button>
+  <button class="btn sm" id="map-collapse-all">Collapse all</button>
+  <button class="btn sm" id="map-expand-all">Expand all</button>
+  <span class="sep"></span>
   <button class="btn sm" data-action="modal" data-target="#link-modal">Add link</button>
   <button class="btn sm" data-action="modal" data-target="#parents-modal">Set parents…</button>
   <label class="check small"><input type="checkbox" id="map-unmanaged" checked> Unmanaged neighbours</label>
@@ -46,11 +99,18 @@
   </div>
 </div>
 <div class="map-wrap" id="map-wrap">
-  <svg id="map-svg" role="img" aria-label="Network topology map"><g id="map-view"><g id="map-sites"></g><g id="map-edges"></g><g id="map-nodes"></g></g></svg>
-  <div class="map-empty hidden" id="map-empty"><div><strong>No links discovered yet.</strong><br>Links come from LLDP and CDP neighbour tables during SNMP discovery (enable LLDP/CDP on your switches and routers, then Rediscover). You can also draw links by hand with <em>Add link</em>, or set parent devices.</div></div>
+  <svg id="map-svg" role="img" aria-label="Network topology map"><g id="map-view"><g id="map-xedges"></g><g id="map-sites"></g><g id="map-edges"></g><g id="map-nodes"></g><g id="map-over"></g></g></svg>
+  <aside class="map-drawer hidden" id="map-drawer" aria-label="Sites and devices">
+    <div class="d-head"><input type="search" id="drawer-q" placeholder="Filter devices…" aria-label="Filter devices"><span class="small muted">Drag a device onto a site on the map, or tick devices and move them.</span></div>
+    <div class="d-list" id="drawer-list"></div>
+    <div class="d-foot hidden" id="drawer-foot"></div>
+  </aside>
+  <div class="map-hint hidden" id="map-hint"><button class="btn ghost sm" id="map-hint-close" aria-label="Dismiss">&times;</button><strong>No links discovered yet.</strong> Links come from LLDP and CDP neighbour tables during SNMP discovery (enable LLDP/CDP, then Rediscover). You can also draw links with <em>Add link</em> or set parent devices.</div>
+  <div class="map-selbar hidden" id="map-selbar"></div>
   <div class="map-tip hidden" id="map-tip"></div>
   <div class="map-panel hidden" id="map-panel"></div>
 </div>
+<p class="small muted mt">Drag a device onto another site to move it there (Shift-click or Shift-drag to select several). Drag a site by its title. Click a site title to rename it or move its devices. A device's site is the first part of its Location, e.g. <code>Trailer 47 / mast</code> is in site <em>Trailer 47</em>.</p>
 
 <div class="modal-back hidden" id="link-modal">
   <div class="modal">
@@ -84,13 +144,28 @@
 {% block scripts %}
 <script>
 document.addEventListener("DOMContentLoaded", () => {
-  const NS = "http://www.w3.org/2000/svg";
-  const svg = SP.$("#map-svg"), view = SP.$("#map-view"), gSites = SP.$("#map-sites"), gEdges = SP.$("#map-edges"), gNodes = SP.$("#map-nodes");
-  const tip = SP.$("#map-tip"), panel = SP.$("#map-panel"), wrap = SP.$("#map-wrap");
+  const NS = "http://www.w3.org/2000/svg", $ = SP.$, $$ = SP.$$;
+  const svg = $("#map-svg"), view = $("#map-view"), gSites = $("#map-sites"), gXEdges = $("#map-xedges"), gEdges = $("#map-edges"), gNodes = $("#map-nodes"), gOver = $("#map-over");
+  const tip = $("#map-tip"), panel = $("#map-panel"), wrap = $("#map-wrap"), drawer = $("#map-drawer"), selbar = $("#map-selbar");
   const params = new URLSearchParams(location.search);
   let site = params.get("site") || "", tag = params.get("tag") || "";
-  let data = null, pos = {}, zoom = { k: 1, x: 0, y: 0 }, dirty = false, selected = null;
+
+  // Geometry (world units). Nodes are stored relative to their site box: local[id] = [x, y].
+  const SX = 132, SY = 112, PADX = 66, HEAD = 40, PADT = 34, PADB = 52, GAP = 56, TILE_W = 236, TILE_H = 78, MAXROW = 7;
+  const KIND_RANK = { router: 0, firewall: 1, switch: 2, wireless: 3, server: 4, storage: 5, ups: 6, printer: 7, device: 8 };
+  const REDUCED = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  let data = null, byId = {}, members = {}, local = {}, boxes = {}, nodeSite = {};
+  let zoom = { k: 1, x: 0, y: 0 }, drag = null, anim = null, panelFor = null, saveTimer = null, dropSite = null;
+  const selection = new Set(), drawerChecked = new Set();
+  const collapsed = new Set(SP.store.get("map.collapsed", []));
+  let drawerOpen = SP.store.get("map.drawer", window.innerWidth > 1200);
+  let siteEls = {}, nodeEls = {}, edgeEls = {};
+
   const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const label = (s) => s === "" ? "Unassigned" : s;
+  const kindRank = (n) => KIND_RANK[n.kind] ?? 9;
+  const byKindName = (a, b) => kindRank(a) - kindRank(b) || a.name.localeCompare(b.name, undefined, { numeric: true });
   const statusColor = (n) => n.status === "down" ? css("--critical") : n.status === "unreachable" || n.degraded ? css("--warning")
     : n.status === "up" ? css("--good") : css("--muted");
   const utilColor = (e) => e.down ? css("--critical") : e.util == null ? css("--border-strong") : e.util >= 80 ? css("--critical") : e.util >= 50 ? css("--warning") : css("--good");
@@ -106,197 +181,710 @@ document.addEventListener("DOMContentLoaded", () => {
     storage: "M-6 -4a6 2 0 1 0 12 0a6 2 0 1 0 -12 0 M-6 -4v8a6 2 0 0 0 12 0v-8",
     device: "M-6 -5h12v10h-12z",
   };
-  const el = (tag, attrs, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
-  const fmtBps = (b) => b == null ? "-" : SP.fmtBps ? SP.fmtBps(b) : (b >= 1e9 ? (b / 1e9).toFixed(2) + " Gbps" : b >= 1e6 ? (b / 1e6).toFixed(1) + " Mbps" : b >= 1e3 ? (b / 1e3).toFixed(0) + " kbps" : Math.round(b) + " bps");
+  const el = (t, attrs, parent) => { const e = document.createElementNS(NS, t); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
+  const fmtBps = (b) => b == null ? "-" : SP.fmt ? SP.fmt(b, "bps") : Math.round(b) + " bps";
   const fmtSpeed = (s) => !s ? "unknown speed" : s >= 1e9 ? (s / 1e9) + "G" : s >= 1e6 ? (s / 1e6) + "M" : s + "";
+  const short = (s, n) => s.length > n ? s.slice(0, n - 1) + "…" : s;
+  const sitesPresent = () => Object.keys(members).sort((a, b) => (a === "" ? -1 : b === "" ? 1 : 0) || a.localeCompare(b, undefined, { numeric: true }));
+  const siteNames = () => (data ? data.sites : []).filter((s) => !s.unassigned).map((s) => s.name);
+
+  // ------------------------------------------------------------- geometry
+  // Wide enough for the title, counts and (for Unassigned) the hint.
+  const headerWidth = (s) => 64 + Math.min(40, label(s).length) * 7.8 + 150 + (s === "" ? 250 : 0);
+  function siteRect(s) {
+    const b = boxes[s] || { x: 0, y: 0 };
+    if (collapsed.has(s)) return { x: b.x, y: b.y, w: Math.max(TILE_W, headerWidth(s) - (s === "" ? 250 : 0)), h: TILE_H };
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    (members[s] || []).forEach((n) => {
+      // the device being dragged does not stretch its box; it is placed when dropped
+      const p = drag && drag.type === "node" && drag.n.id === n.id ? drag.start : local[n.id];
+      if (!p) return; x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); });
+    if (x0 === Infinity) x0 = y0 = x1 = y1 = 0;
+    return { x: b.x + x0, y: b.y + y0, w: Math.max(headerWidth(s), x1 - x0 + 2 * PADX), h: HEAD + PADT + (y1 - y0) + PADB };
+  }
+  function nodeXY(id) {
+    const n = byId[id], b = boxes[n.site] || { x: 0, y: 0 };
+    if (collapsed.has(n.site)) { const r = siteRect(n.site); return [r.x + r.w / 2, r.y + r.h / 2 + 8]; }
+    const p = local[id] || [0, 0];
+    return [b.x + PADX + p[0], b.y + HEAD + PADT + p[1]];
+  }
+  function normalize(s) {  // keep the top-left device at the box origin without moving anything on screen
+    let x0 = Infinity, y0 = Infinity;
+    (members[s] || []).forEach((n) => { const p = local[n.id]; if (p) { x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); } });
+    if (x0 === Infinity || (!x0 && !y0)) return;
+    (members[s] || []).forEach((n) => { const p = local[n.id]; if (p) local[n.id] = [p[0] - x0, p[1] - y0]; });
+    boxes[s].x += x0; boxes[s].y += y0;
+  }
 
   // ---------------------------------------------------------------- layout
-  function layout(force) {
-    const nodes = data.nodes, W = wrap.clientWidth || 900, H = wrap.clientHeight || 600;
-    const sites = [...new Set(nodes.map((n) => n.site))];
-    const sizes = {}; nodes.forEach((n) => (sizes[n.site] = (sizes[n.site] || 0) + 1));
-    const biggest = Math.max(1, ...Object.values(sizes));
-    const cols = Math.ceil(Math.sqrt(sites.length)), cell = Math.max(260, Math.sqrt(biggest) * 150);
-    const centre = {};
-    sites.sort((a, b) => (sizes[b] || 0) - (sizes[a] || 0)).forEach((s, i) => (centre[s] = [(i % cols) * cell * 1.15 + cell / 2, Math.floor(i / cols) * cell * 1.05 + cell / 2]));
-    const fresh = nodes.filter((n) => force || !pos[n.id]);
-    fresh.forEach((n, i) => { const c = centre[n.site]; const a = i * 2.39996; const r = 30 + 14 * Math.sqrt(i); pos[n.id] = [c[0] + r * Math.cos(a), c[1] + r * Math.sin(a)]; });
-    if (!fresh.length) return;
-    const movable = new Set(fresh.map((n) => n.id));
-    const edges = data.edges.filter((e) => pos[e.source] && pos[e.target]);
-    for (let it = 0; it < 300; it++) {
-      const t = 1 - it / 300, disp = {};
-      nodes.forEach((n) => (disp[n.id] = [0, 0]));
-      for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
-        const a = nodes[i], b = nodes[j]; let dx = pos[a.id][0] - pos[b.id][0], dy = pos[a.id][1] - pos[b.id][1];
-        let d2 = dx * dx + dy * dy || 0.01; if (d2 > 250000) continue;
-        const f = (a.site === b.site ? 5200 : 7000) / d2; dx *= f; dy *= f;
-        disp[a.id][0] += dx; disp[a.id][1] += dy; disp[b.id][0] -= dx; disp[b.id][1] -= dy;
+  // Inside a site: linked devices as a top-down tree (upstream on top), loose devices in a grid below.
+  function arrange(ns) {
+    const out = {}, ids = new Set(ns.map((n) => n.id)), adj = {};
+    ns.forEach((n) => (adj[n.id] = new Set()));
+    data.edges.forEach((e) => { if (e.source !== e.target && ids.has(e.source) && ids.has(e.target)) { adj[e.source].add(e.target); adj[e.target].add(e.source); } });
+    const linked = ns.filter((n) => adj[n.id].size), loose = ns.filter((n) => !adj[n.id].size).sort(byKindName);
+    const hasParent = (n) => (n.parent && ids.has(n.parent) ? 1 : 0);
+    const roots = linked.slice().sort((a, b) => hasParent(a) - hasParent(b) || (a.managed ? 0 : 1) - (b.managed ? 0 : 1)
+      || kindRank(a) - kindRank(b) || adj[b.id].size - adj[a.id].size || a.name.localeCompare(b.name));
+    const seen = new Set(), comps = [];
+    for (const root of roots) {
+      if (seen.has(root.id)) continue;
+      seen.add(root.id);
+      const layers = [], up = {};
+      let layer = [root];
+      while (layer.length) {
+        layers.push(layer);
+        const next = [];
+        layer.forEach((u) => [...adj[u.id]].filter((v) => !seen.has(v)).map((v) => byId[v]).sort(byKindName)
+          .forEach((c) => { seen.add(c.id); up[c.id] = u.id; next.push(c); }));
+        layer = next;
       }
-      edges.forEach((e) => { const a = pos[e.source], b = pos[e.target]; const dx = b[0] - a[0], dy = b[1] - a[1]; const d = Math.sqrt(dx * dx + dy * dy) || 1; const f = (d - 110) * 0.05;
-        disp[e.source][0] += dx / d * f; disp[e.source][1] += dy / d * f; disp[e.target][0] -= dx / d * f; disp[e.target][1] -= dy / d * f; });
-      nodes.forEach((n) => { const c = centre[n.site]; disp[n.id][0] += (c[0] - pos[n.id][0]) * 0.012; disp[n.id][1] += (c[1] - pos[n.id][1]) * 0.012; });
-      nodes.forEach((n) => { if (!movable.has(n.id)) return; const d = disp[n.id]; const m = Math.sqrt(d[0] * d[0] + d[1] * d[1]) || 1; const s = Math.min(m, 30 * t + 1) / m; pos[n.id][0] += d[0] * s; pos[n.id][1] += d[1] * s; });
+      const pos = {};
+      let y = 0;
+      layers.forEach((nodes, li) => {
+        if (li) nodes.sort((a, b) => pos[up[a.id]][0] - pos[up[b.id]][0]);
+        for (let i = 0; i < nodes.length; i += MAXROW) {
+          const chunk = nodes.slice(i, i + MAXROW), want = chunk.map((n) => (li ? pos[up[n.id]][0] : 0)), xs = [];
+          chunk.forEach((n, k) => (xs[k] = k ? Math.max(want[k], xs[k - 1] + SX) : want[k]));
+          const shift = (want.reduce((a, b) => a + b, 0) - xs.reduce((a, b) => a + b, 0)) / chunk.length;
+          chunk.forEach((n, k) => (pos[n.id] = [xs[k] + shift, y]));
+          y += SY;
+        }
+      });
+      const minX = Math.min(...Object.values(pos).map((p) => p[0]));
+      Object.values(pos).forEach((p) => (p[0] -= minX));
+      comps.push({ pos, w: Math.max(...Object.values(pos).map((p) => p[0])), h: y - SY });
     }
+    // components side by side, wrapping into rows
+    const rowLimit = Math.max(6 * SX, ...comps.map((c) => c.w));
+    let cx = 0, cy = 0, rowH = 0, maxX = 0;
+    comps.forEach((c) => {
+      if (cx > 0 && cx + c.w > rowLimit) { cx = 0; cy += rowH + SY; rowH = 0; }
+      for (const id in c.pos) out[id] = [c.pos[id][0] + cx, c.pos[id][1] + cy];
+      maxX = Math.max(maxX, cx + c.w); cx += c.w + SX * 1.4; rowH = Math.max(rowH, c.h);
+    });
+    if (loose.length) {
+      const top = comps.length ? cy + rowH + SY * 1.15 : 0;
+      const cols = comps.length ? Math.max(3, Math.min(10, Math.floor(maxX / SX) + 1)) : Math.max(1, Math.min(8, Math.ceil(Math.sqrt(loose.length * 1.8))));
+      loose.forEach((n, i) => (out[n.id] = [(i % cols) * SX, top + Math.floor(i / cols) * SY]));
+    }
+    return out;
+  }
+  function layoutSite(s, force) {
+    const ns = members[s] || [], missing = ns.filter((n) => force || !local[n.id]);
+    if (!missing.length) return false;
+    if (force || missing.length === ns.length) { Object.assign(local, arrange(ns)); return true; }
+    // newcomers go in a tidy row under what the user already arranged
+    const placed = ns.filter((n) => local[n.id]);
+    const bottom = Math.max(...placed.map((n) => local[n.id][1])), right = Math.max(...placed.map((n) => local[n.id][0]));
+    const cols = Math.max(3, Math.floor(right / SX) + 1);
+    missing.sort(byKindName).forEach((n, i) => (local[n.id] = [(i % cols) * SX, bottom + SY * (1 + Math.floor(i / cols))]));
+    return true;
+  }
+  const inset = () => (drawerOpen && window.innerWidth > 760 ? drawer.offsetWidth + 20 : 0);
+  function placeSites(force) {
+    const present = sitesPresent(), missing = present.filter((s) => force || !boxes[s]);
+    if (!missing.length) return false;
+    const existing = present.filter((s) => !missing.includes(s));
+    missing.forEach((s) => (boxes[s] = { x: 0, y: 0 }));
+    missing.sort((a, b) => (a === "" ? -1 : b === "" ? 1 : 0) || members[b].length - members[a].length || a.localeCompare(b, undefined, { numeric: true }));
+    const sizes = missing.map((s) => { const r = siteRect(s); return [r.w, r.h]; });
+    let x0 = 0, y = 0;
+    if (existing.length) { const rs = existing.map(siteRect); x0 = Math.min(...rs.map((r) => r.x)); y = Math.max(...rs.map((r) => r.y + r.h)) + GAP; }
+    const area = sizes.reduce((a, [w, h]) => a + (w + GAP) * (h + GAP), 0);
+    const aspect = Math.max(1.1, (wrap.clientWidth - inset()) / Math.max(320, wrap.clientHeight));
+    const rowW = Math.max(...sizes.map((s) => s[0]), Math.sqrt(area * aspect));
+    let x = x0, rowH = 0;
+    missing.forEach((s, i) => {
+      const [w, h] = sizes[i];
+      if (x > x0 && x - x0 + w > rowW) { x = x0; y += rowH + GAP; rowH = 0; }
+      boxes[s] = { x, y }; x += w + GAP; rowH = Math.max(rowH, h);
+    });
+    return true;
+  }
+  // Push boxes apart until none overlap. Of two overlapping boxes the lower (then right-hand) one
+  // moves further down or right, so boxes only ever move one way and the loop settles. The pinned
+  // box (just dragged or grown) stays put; then the other one moves away from it.
+  function resolveOverlaps(pinned) {
+    const ss = sitesPresent(), G = GAP / 2;
+    const later = (r, o) => r.y + r.h / 2 > o.y + o.h / 2 || (r.y + r.h / 2 === o.y + o.h / 2 && r.x >= o.x);
+    for (let it = 0; it < 400; it++) {
+      let moved = false;
+      for (let i = 0; i < ss.length; i++) for (let j = i + 1; j < ss.length; j++) {
+        const a = siteRect(ss[i]), b = siteRect(ss[j]);
+        const ox = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x) + G, oy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y) + G;
+        if (ox <= 0 || oy <= 0) continue;
+        let m = later(b, a) ? ss[j] : ss[i];
+        const forced = m === pinned;  // the pinned box stays: move the other one, whichever way is free
+        if (forced) m = m === ss[i] ? ss[j] : ss[i];
+        const mr = m === ss[i] ? a : b, fr = m === ss[i] ? b : a;
+        const sx = mr.x + mr.w / 2 >= fr.x + fr.w / 2 ? 1 : -1, sy = mr.y + mr.h / 2 >= fr.y + fr.h / 2 ? 1 : -1;
+        // sideways when that is the shorter way out (and, normally, only rightwards)
+        if (ox < oy && (sx > 0 || forced)) boxes[m].x += sx * ox;
+        else boxes[m].y += sy * oy;
+        moved = true;
+      }
+      if (!moved) return;
+    }
+    if (pinned !== null) resolveOverlaps(null);  // could not keep it pinned: settle without it
   }
 
   // ---------------------------------------------------------------- render
-  function render() {
-    gSites.innerHTML = gEdges.innerHTML = gNodes.innerHTML = "";
-    const bySite = {};
-    data.nodes.forEach((n) => (bySite[n.site] = bySite[n.site] || []).push(n));
-    if (!site && Object.keys(bySite).length > 1) Object.entries(bySite).forEach(([name, ns]) => {
-      const xs = ns.map((n) => pos[n.id][0]), ys = ns.map((n) => pos[n.id][1]);
-      const x0 = Math.min(...xs) - 60, y0 = Math.min(...ys) - 60, x1 = Math.max(...xs) + 60, y1 = Math.max(...ys) + 60;
-      const g = el("g", { class: "map-site" }, gSites);
-      el("rect", { x: x0, y: y0, width: x1 - x0, height: y1 - y0, rx: 18 }, g);
-      const s = data.sites.find((x) => x.name === name) || {};
-      const t = el("text", { x: x0 + 14, y: y0 + 20 }, g); t.textContent = `${name} · ${s.devices || ns.length} devices${s.down ? ` · ${s.down} down` : ""}${s.unreachable ? ` · ${s.unreachable} unreachable` : ""}`;
-      g.addEventListener("dblclick", () => setSite(name));
-    });
-    const showPorts = SP.$("#map-ports").checked;
+  function build() {
+    gSites.innerHTML = gXEdges.innerHTML = gEdges.innerHTML = gNodes.innerHTML = "";
+    siteEls = {}; nodeEls = {}; edgeEls = {};
+    for (const s of sitesPresent()) {
+      const ns = members[s], managed = ns.filter((n) => n.managed);
+      const down = managed.filter((n) => n.status === "down").length, warn = managed.filter((n) => n.status === "unreachable" || n.degraded).length;
+      const g = el("g", { class: `map-site${s === "" ? " unassigned" : ""}${collapsed.has(s) ? " collapsed" : ""}`, "data-site": s }, gSites);
+      const body = el("rect", { class: "body", rx: 14 }, g);
+      const head = el("g", { class: "head" }, g);
+      const headBg = el("rect", { class: "head-bg", height: HEAD }, head);
+      const line = el("line", { class: "head-line" }, g);
+      const tog = el("text", { class: "tog" }, head); tog.textContent = collapsed.has(s) ? "▸" : "▾";
+      const title = el("text", { class: "title" }, head);
+      title.appendChild(document.createTextNode(short(label(s), 40)));
+      const t2 = el("tspan", { class: "muted" }, title); t2.textContent = `  ${managed.length} device${managed.length === 1 ? "" : "s"}`;
+      if (down) { const t = el("tspan", { class: "bad" }, title); t.textContent = ` · ${down} down`; }
+      if (warn) { const t = el("tspan", { class: "warn" }, title); t.textContent = ` · ${warn} warning`; }
+      const hint = el("text", { class: "hint" }, g);
+      hint.textContent = collapsed.has(s) ? "collapsed · click ▸ to expand" : s === "" ? "No site yet: drag devices onto a site" : "";
+      siteEls[s] = { g, body, headBg, line, tog, title, hint };
+    }
+    const showPorts = $("#map-ports").checked;
     data.edges.forEach((e) => {
-      if (!pos[e.source] || !pos[e.target]) return;
-      const [x1, y1] = pos[e.source], [x2, y2] = pos[e.target];
-      const g = el("g", { class: "map-edge", "data-id": e.id }, gEdges);
-      el("line", { x1, y1, x2, y2, stroke: "transparent", "stroke-width": 12 }, g);
-      el("line", { x1, y1, x2, y2, stroke: e.parent ? css("--border-strong") : utilColor(e), "stroke-width": width(e),
+      if (!byId[e.source] || !byId[e.target]) return;
+      // Links between sites run underneath the site boxes (visible in the gaps) unless focused.
+      const cross = byId[e.source].site !== byId[e.target].site;
+      const g = el("g", { class: "map-edge" + (cross ? " x" : ""), "data-id": e.id }, cross ? gXEdges : gEdges);
+      const hit = el("path", { stroke: "transparent", "stroke-width": 12 }, g);
+      const line = el("path", { class: "vis", stroke: e.parent ? css("--border-strong") : utilColor(e), "stroke-width": width(e),
         "stroke-dasharray": e.parent ? "2 5" : e.manual ? "8 4" : e.down ? "4 3" : "", "stroke-linecap": "round" }, g);
-      if (showPorts && !e.parent) {
-        const lab = (txt, f) => { if (!txt) return; const t = el("text", { x: x1 + (x2 - x1) * f, y: y1 + (y2 - y1) * f - 3, "text-anchor": "middle" }, g); t.textContent = txt; };
-        lab(e.source_port, 0.22); lab(e.target_port, 0.78);
-      }
+      const labels = [];
+      if (showPorts && !e.parent) [[e.source_port, 0.22], [e.target_port, 0.78]].forEach(([txt, f]) => { if (!txt) return; const t = el("text", { "text-anchor": "middle" }, g); t.textContent = txt; labels.push([t, f]); });
       g.addEventListener("mousemove", (ev) => showTip(ev, edgeText(e)));
       g.addEventListener("mouseleave", hideTip);
       g.addEventListener("click", (ev) => { ev.stopPropagation(); showEdge(e); });
+      edgeEls[e.id] = { g, hit, line, labels, e };
     });
     data.nodes.forEach((n) => {
-      const [x, y] = pos[n.id];
-      const g = el("g", { class: "map-node", transform: `translate(${x},${y})`, "data-id": n.id }, gNodes);
+      const g = el("g", { class: "map-node", "data-id": n.id }, gNodes);
+      el("circle", { r: 24, class: "sel-ring" }, g);
       const c = statusColor(n);
       el("circle", { r: 17, fill: css("--surface"), stroke: c, "stroke-width": 3, class: "ring", "stroke-dasharray": n.managed ? (n.status === "unreachable" ? "5 3" : "") : "3 3" }, g);
       el("path", { d: ICONS[n.kind] || ICONS.device, fill: "none", stroke: n.managed ? css("--text-2") : css("--muted"), "stroke-width": 1.6, "stroke-linecap": "round", "stroke-linejoin": "round" }, g);
       if (n.status === "down") el("circle", { r: 5, cx: 13, cy: -13, fill: css("--critical") }, g);
-      const t = el("text", { y: 31, "text-anchor": "middle" }, g); t.textContent = n.name.length > 26 ? n.name.slice(0, 25) + "…" : n.name;
-      if (n.ip && n.ip !== n.name) { const s = el("text", { y: 43, "text-anchor": "middle", class: "sub" }, g); s.textContent = n.ip; }
-      g.addEventListener("pointerdown", (ev) => startDrag(ev, n));
-      g.addEventListener("mousemove", (ev) => showTip(ev, `${n.name} · ${n.managed ? n.status : "not monitored"}${n.degraded ? " (degraded)" : ""}${n.reason ? "\n" + n.reason : ""}`));
+      const t = el("text", { y: 32, "text-anchor": "middle" }, g); t.textContent = short(n.name, 19);
+      if (n.ip && n.ip !== n.name) { const s = el("text", { y: 44, "text-anchor": "middle", class: "sub" }, g); s.textContent = short(n.ip, 22); }
+      g.addEventListener("mousemove", (ev) => { if (!drag) showTip(ev, `${n.name} · ${n.managed ? n.status : "not monitored"}${n.degraded ? " (degraded)" : ""}${n.reason ? "\n" + n.reason : ""}${n.site === "" && n.suggested_site ? "\nSNMP location: " + n.suggested_site : ""}`); });
       g.addEventListener("mouseleave", hideTip);
+      nodeEls[n.id] = g;
     });
-    SP.$("#map-empty").classList.toggle("hidden", data.edges.length > 0 || !data.nodes.length);
-    applyZoom();
+    const hint = $("#map-hint");
+    hint.classList.toggle("hidden", !!data.edges.length || !data.nodes.length || SP.store.get("map.hint-closed", false));
     highlight();
   }
+  function snapshot() {
+    const nodes = {}, rects = {};
+    sitesPresent().forEach((s) => (rects[s] = siteRect(s)));
+    data.nodes.forEach((n) => (nodes[n.id] = nodeXY(n.id)));
+    return { nodes, rects };
+  }
+  function placeWith(S) {
+    for (const s in siteEls) {
+      const r = S.rects[s], e = siteEls[s]; if (!r) continue;
+      const set = (node, a) => { for (const k in a) node.setAttribute(k, a[k]); };
+      set(e.body, { x: r.x, y: r.y, width: r.w, height: r.h });
+      set(e.headBg, { x: r.x, y: r.y, width: r.w });
+      set(e.line, { x1: r.x + 1, x2: r.x + r.w - 1, y1: r.y + HEAD, y2: r.y + HEAD });
+      e.line.style.display = collapsed.has(s) ? "none" : "";
+      set(e.tog, { x: r.x + 14, y: r.y + 25 });
+      set(e.title, { x: r.x + 32, y: r.y + 25 });
+      set(e.hint, collapsed.has(s) ? { x: r.x + 32, y: r.y + 58 } : { x: r.x + r.w - 14, y: r.y + 25, "text-anchor": "end" });
+      if (collapsed.has(s)) e.hint.removeAttribute("text-anchor");
+    }
+    for (const id in nodeEls) {
+      const n = byId[id], p = S.nodes[id];
+      nodeEls[id].style.display = collapsed.has(n.site) ? "none" : "";
+      nodeEls[id].setAttribute("transform", `translate(${p[0]},${p[1]})`);
+    }
+    for (const id in edgeEls) {
+      const { g, hit, line, labels, e } = edgeEls[id];
+      const a = byId[e.source], b = byId[e.target];
+      const hidden = a.site === b.site && collapsed.has(a.site);
+      g.style.display = hidden ? "none" : "";
+      if (hidden) continue;
+      const [x1, y1] = S.nodes[e.source], [x2, y2] = S.nodes[e.target];
+      let d = `M${x1},${y1} L${x2},${y2}`;
+      if (a.site !== b.site) { const mx = (x1 + x2) / 2; d = `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`; }
+      hit.setAttribute("d", d); line.setAttribute("d", d);
+      labels.forEach(([t, f]) => { t.setAttribute("x", x1 + (x2 - x1) * f); t.setAttribute("y", y1 + (y2 - y1) * f - 3); });
+    }
+  }
+  const place = () => placeWith(snapshot());
+  function animateFrom(before) {
+    if (anim) cancelAnimationFrame(anim);
+    const after = snapshot();
+    if (REDUCED || !before) { placeWith(after); return; }
+    const t0 = performance.now(), L = (a, b, k) => a + (b - a) * k;
+    const step = (t) => {
+      const k = Math.min(1, (t - t0) / 320), q = 1 - Math.pow(1 - k, 3), S = { nodes: {}, rects: {} };
+      for (const id in after.nodes) { const a = before.nodes[id] || after.nodes[id], b = after.nodes[id]; S.nodes[id] = [L(a[0], b[0], q), L(a[1], b[1], q)]; }
+      for (const s in after.rects) { const a = before.rects[s] || after.rects[s], b = after.rects[s]; S.rects[s] = { x: L(a.x, b.x, q), y: L(a.y, b.y, q), w: L(a.w, b.w, q), h: L(a.h, b.h, q) }; }
+      placeWith(S);
+      anim = k < 1 ? requestAnimationFrame(step) : null;
+    };
+    anim = requestAnimationFrame(step);
+  }
+  // Apply a change and animate everything to where it ends up.
+  function change(fn, opts = {}) {
+    const before = data ? snapshot() : null;
+    fn();
+    if (opts.rebuild) build();
+    animateFrom(before);
+    if (opts.save !== false) scheduleSave();
+  }
+
+  // ----------------------------------------------------------- tooltips / panels
   const edgeText = (e) => e.parent ? "Parent relationship" : `${nameOf(e.source)} ${e.source_port || ""} ↔ ${nameOf(e.target)} ${e.target_port || ""}\n${fmtSpeed(e.speed)} · ${e.util == null ? "no utilisation data" : e.util.toFixed(1) + "% utilised"}${e.down ? " · port down" : ""} · ${e.protocols.join("/")}`;
-  const nameOf = (id) => (data.nodes.find((n) => n.id === id) || {}).name || id;
-  function showTip(ev, text) { const r = wrap.getBoundingClientRect(); tip.textContent = text; tip.style.whiteSpace = "pre-line"; tip.style.left = (ev.clientX - r.left + 14) + "px"; tip.style.top = (ev.clientY - r.top + 14) + "px"; tip.classList.remove("hidden"); }
+  const nameOf = (id) => (byId[id] || {}).name || id;
+  function showTip(ev, text) { const r = wrap.getBoundingClientRect(); tip.textContent = text; tip.style.left = (ev.clientX - r.left + 14) + "px"; tip.style.top = (ev.clientY - r.top + 14) + "px"; tip.classList.remove("hidden"); }
   function hideTip() { tip.classList.add("hidden"); }
 
+  // A "Move to site" control: existing sites, Unassigned, or a new site name.
+  function chooser(text, exclude, onPick) {
+    const box = document.createElement("span"); box.className = "site-chooser";
+    const sel = document.createElement("select");
+    const opt = (v, t) => { const o = document.createElement("option"); o.value = v; o.textContent = t; sel.appendChild(o); };
+    opt("", text);
+    siteNames().filter((s) => s !== exclude).forEach((s) => opt("s:" + s, s));
+    if (exclude !== "") opt("u", "Unassigned (no site)");
+    opt("n", "New site…");
+    sel.onchange = () => {
+      const v = sel.value; sel.value = "";
+      if (v === "u") return onPick("");
+      if (v.startsWith("s:")) return onPick(v.slice(2));
+      if (v !== "n") return;
+      const input = document.createElement("input"); input.placeholder = "New site name"; input.maxLength = 100;
+      const ok = document.createElement("button"); ok.className = "btn sm primary"; ok.type = "button"; ok.textContent = "Move";
+      const cancel = document.createElement("button"); cancel.className = "btn sm ghost"; cancel.type = "button"; cancel.textContent = "×";
+      const done = () => { const name = input.value.trim(); if (!name) return input.focus();
+        if (/[\/,]/.test(name)) return SP.toast("A site name cannot contain '/' or ','", "error"); onPick(name); };
+      ok.onclick = done; input.onkeydown = (ev) => { if (ev.key === "Enter") done(); if (ev.key === "Escape") restore(); };
+      const restore = () => { box.innerHTML = ""; box.appendChild(sel); };
+      cancel.onclick = restore;
+      box.innerHTML = ""; box.append(input, ok, cancel); input.focus();
+    };
+    box.appendChild(sel);
+    return box;
+  }
+
   function showNode(n) {
-    selected = n.id;
+    panelFor = { type: "node", id: n.id };
     const links = data.edges.filter((e) => !e.parent && (e.source === n.id || e.target === n.id));
     panel.innerHTML = `<div class="row" style="justify-content:space-between"><h3>${SP.esc(n.name)}</h3><button class="btn ghost sm" id="panel-close">&times;</button></div>
       <span class="status ${n.managed ? (n.status === "paused" ? "paused" : n.status) : "unknown"}">${n.managed ? n.status : "not monitored"}</span>${n.degraded ? ' <span class="status warning">degraded</span>' : ""}
       ${n.reason ? `<p class="small muted">${SP.esc(n.reason)}</p>` : ""}
-      <dl><dt>Address</dt><dd>${SP.esc(n.ip || "-")}</dd><dt>Type</dt><dd>${n.kind}</dd><dt>Vendor</dt><dd>${SP.esc(n.vendor || "-")}</dd><dt>Site</dt><dd>${SP.esc(n.site)}</dd>${n.collector ? `<dt>Collector</dt><dd>${SP.esc(n.collector)}</dd>` : ""}</dl>
+      <dl><dt>Address</dt><dd>${SP.esc(n.ip || "-")}</dd><dt>Type</dt><dd>${n.kind}</dd><dt>Vendor</dt><dd>${SP.esc(n.vendor || "-")}</dd>
+      <dt>Site</dt><dd>${n.site === "" ? '<span class="status warning">unassigned</span>' : SP.esc(n.site)}</dd>${n.location && n.location !== n.site ? `<dt>Location</dt><dd>${SP.esc(n.location)}</dd>` : ""}${n.collector ? `<dt>Collector</dt><dd>${SP.esc(n.collector)}</dd>` : ""}</dl>
+      ${n.managed ? `<div class="stack" id="node-site"></div>` : ""}
       ${n.descr ? `<p class="small muted">${SP.esc(n.descr)}</p>` : ""}
       <strong class="small">Links (${links.length})</strong>
       <table class="table compact small">${links.map((e) => { const mine = e.source === n.id; return `<tr><td>${SP.esc((mine ? e.source_port : e.target_port) || "?")}</td><td>→ ${SP.esc(nameOf(mine ? e.target : e.source))} ${SP.esc((mine ? e.target_port : e.source_port) || "")}</td><td class="nowrap">${e.util == null ? "" : e.util.toFixed(0) + "%"}</td></tr>`; }).join("") || '<tr><td class="muted">none</td></tr>'}</table>
       ${n.device_id ? `<div class="row mt"><a class="btn sm primary" href="/devices/${n.device_id}">Open device</a><a class="btn sm" href="/devices/${n.device_id}?tab=interfaces">Interfaces</a></div>` : `<p class="small muted">Seen as an LLDP/CDP neighbour but not monitored. <a href="/devices/new">Add it as a device</a> or <a href="/scans?new=1">scan</a> for it.</p>`}`;
+    const box = $("#node-site");
+    if (box) {
+      const ids = selection.has(n.id) && selection.size > 1 ? [...selection] : [n.id];
+      if (n.site === "" && n.suggested_site) {
+        const b = document.createElement("button"); b.className = "btn sm primary"; b.type = "button";
+        b.textContent = `Use “${n.suggested_site}” from SNMP`; b.title = "The location this device reports over SNMP";
+        b.onclick = () => moveTo([n.id], n.suggested_site); box.appendChild(b);
+      }
+      box.appendChild(chooser(ids.length > 1 ? `Move ${ids.length} selected to site…` : "Move to site…", n.site, (s) => moveTo(ids, s)));
+    }
     panel.classList.remove("hidden");
-    SP.$("#panel-close").onclick = () => { panel.classList.add("hidden"); selected = null; highlight(); };
+    $("#panel-close").onclick = closePanel;
     highlight();
   }
+  function showSite(s) {
+    panelFor = { type: "site", id: s };
+    const ns = (members[s] || []).filter((n) => n.managed).sort(byKindName);
+    const down = ns.filter((n) => n.status === "down").length;
+    panel.innerHTML = `<div class="row" style="justify-content:space-between"><h3>${SP.esc(label(s))}</h3><button class="btn ghost sm" id="panel-close">&times;</button></div>
+      <p class="small muted" style="margin:0 0 8px">${ns.length} device${ns.length === 1 ? "" : "s"}${down ? ` · <span class="status down">${down} down</span>` : ""}${s === "" ? " · devices with no Location yet" : ""}</p>
+      ${s !== "" ? `<div class="row"><input id="site-name" value="${SP.esc(s)}" maxlength="100" aria-label="Site name" style="flex:1;min-width:0"><button class="btn sm" id="site-rename">Rename</button></div>` : ""}
+      <div class="row mt"><button class="btn sm" id="site-zoom">Zoom to site</button><button class="btn sm" id="site-collapse">${collapsed.has(s) ? "Expand" : "Collapse"}</button><button class="btn sm" id="site-arrange" title="Arrange this site's devices neatly">Tidy up</button></div>
+      <div class="row mt" style="justify-content:space-between"><strong class="small">Devices</strong><label class="check small"><input type="checkbox" id="site-all"> all</label></div>
+      <div class="dev-list">${ns.map((n) => `<label class="small"><input type="checkbox" value="${SP.esc(n.id)}"><span class="dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${statusColor(n)}"></span>${SP.esc(n.name)}<span class="muted" style="margin-left:auto">${SP.esc(n.ip || "")}</span></label>`).join("") || '<div class="small muted" style="padding:8px">No monitored devices</div>'}</div>
+      <div id="site-move"></div>`;
+    const checked = () => $$(".dev-list input:checked", panel).map((i) => i.value);
+    $("#site-move").appendChild(chooser("Move ticked devices to…", s, (target) => {
+      const ids = checked(); if (!ids.length) return SP.toast("Tick the devices to move first", "error"); moveTo(ids, target); }));
+    $("#site-all").onchange = (ev) => $$(".dev-list input", panel).forEach((i) => (i.checked = ev.target.checked));
+    $("#site-zoom").onclick = () => zoomToRect(siteRect(s));
+    $("#site-collapse").onclick = () => { toggleCollapse(s); showSite(s); };
+    $("#site-arrange").onclick = () => change(() => { layoutSite(s, true); resolveOverlaps(s); });
+    const rn = $("#site-rename");
+    if (rn) rn.onclick = async () => {
+      const name = $("#site-name").value.trim();
+      if (!name || name === s) return;
+      try { await SP.api("POST", "/api/map/sites/rename", { old: s, new: name }); } catch (e) { return SP.toast(e.message, "error"); }
+      if (boxes[s]) { boxes[name] = boxes[s]; delete boxes[s]; }
+      if (collapsed.delete(s)) { collapsed.add(name); SP.store.set("map.collapsed", [...collapsed]); }
+      SP.toast(`Site renamed to ${name}`);
+      await load(); showSite(name);
+    };
+    panel.classList.remove("hidden");
+    $("#panel-close").onclick = closePanel;
+  }
   function showEdge(e) {
+    panelFor = null;
     panel.innerHTML = `<div class="row" style="justify-content:space-between"><h3>Link</h3><button class="btn ghost sm" id="panel-close">&times;</button></div>
       <dl><dt>From</dt><dd>${SP.esc(nameOf(e.source))} ${SP.esc(e.source_port || "")}</dd><dt>To</dt><dd>${SP.esc(nameOf(e.target))} ${SP.esc(e.target_port || "")}</dd>
       <dt>Speed</dt><dd>${fmtSpeed(e.speed)}</dd><dt>Utilisation</dt><dd>${e.util == null ? "-" : e.util.toFixed(1) + "%"}</dd><dt>In / out</dt><dd>${fmtBps(e.in_bps)} / ${fmtBps(e.out_bps)}</dd>
       <dt>Learned by</dt><dd>${e.protocols.join(", ")}</dd>${e.down ? "<dt>Port</dt><dd class='status down'>down</dd>" : ""}</dl>
       ${e.manual ? `<button class="btn sm danger" id="del-link">Delete manual link</button>` : ""}`;
     panel.classList.remove("hidden");
-    SP.$("#panel-close").onclick = () => panel.classList.add("hidden");
-    const del = SP.$("#del-link");
-    if (del) del.onclick = async () => { await SP.api("DELETE", `/api/map/links/${e.link_id}`); panel.classList.add("hidden"); load(); };
+    $("#panel-close").onclick = closePanel;
+    const del = $("#del-link");
+    if (del) del.onclick = async () => { await SP.api("DELETE", `/api/map/links/${e.link_id}`); closePanel(); load(); };
   }
+  function closePanel() { panel.classList.add("hidden"); panelFor = null; highlight(); }
+  function refreshPanel() {
+    if (!panelFor || panel.classList.contains("hidden")) return;
+    if (panelFor.type === "node") byId[panelFor.id] ? showNode(byId[panelFor.id]) : closePanel();
+    else if (panelFor.type === "site") members[panelFor.id] ? showSite(panelFor.id) : closePanel();
+  }
+
   function highlight() {
-    const q = SP.$("#map-search").value.trim().toLowerCase();
-    const focus = new Set();
-    if (selected) { focus.add(selected); data.edges.forEach((e) => { if (e.source === selected) focus.add(e.target); if (e.target === selected) focus.add(e.source); }); }
-    SP.$$(".map-node", gNodes).forEach((g) => {
-      const n = data.nodes.find((x) => x.id === g.dataset.id);
-      const hit = q && (n.name.toLowerCase().includes(q) || (n.ip || "").includes(q));
+    const q = $("#map-search").value.trim().toLowerCase();
+    const focusId = panelFor && panelFor.type === "node" ? panelFor.id : null, focus = new Set();
+    if (focusId) { focus.add(focusId); data.edges.forEach((e) => { if (e.source === focusId) focus.add(e.target); if (e.target === focusId) focus.add(e.source); }); }
+    const hitSites = new Set();
+    for (const id in nodeEls) {
+      const n = byId[id], g = nodeEls[id];
+      const hit = q && (n.name.toLowerCase().includes(q) || (n.ip || "").toLowerCase().includes(q));
+      if (hit) hitSites.add(n.site);
       g.classList.toggle("hit", !!hit);
-      g.classList.toggle("dim", (q && !hit) || (selected && !focus.has(n.id)));
-    });
-    SP.$$(".map-edge", gEdges).forEach((g) => { const e = data.edges.find((x) => x.id === g.dataset.id); g.classList.toggle("dim", !!selected && e.source !== selected && e.target !== selected); });
+      g.classList.toggle("sel", selection.has(id));
+      g.classList.toggle("dim", !!((q && !hit) || (focusId && !focus.has(id))));
+    }
+    for (const s in siteEls) siteEls[s].g.classList.toggle("hit", !!q && hitSites.has(s) && collapsed.has(s));
+    for (const id in edgeEls) {
+      const e = edgeEls[id].e, mine = focusId && (e.source === focusId || e.target === focusId);
+      edgeEls[id].g.classList.toggle("dim", !!focusId && !mine);
+      const focus = !!mine || selection.has(e.source) || selection.has(e.target), g = edgeEls[id].g;
+      g.classList.toggle("focus", focus);
+      if (g.classList.contains("x")) { const layer = focus ? gEdges : gXEdges; if (g.parentNode !== layer) layer.appendChild(g); }
+    }
   }
+
+  // ------------------------------------------------------------ moving devices
+  async function moveTo(ids, target) {
+    const nodes = ids.map((id) => byId[id]).filter((n) => n && n.managed && n.site !== target);
+    if (!nodes.length) return SP.toast(ids.every((id) => byId[id] && !byId[id].managed) ? "Only monitored devices can be moved; neighbours follow the device they are linked to" : `Already in ${label(target)}`);
+    const before = nodes.map((n) => ({ id: n.device_id, location: n.location }));
+    try { await SP.api("POST", "/api/map/move", { device_ids: nodes.map((n) => n.device_id), site: target }); }
+    catch (e) { return SP.toast(e.message, "error"); }
+    nodes.forEach((n) => { selection.delete(n.id); drawerChecked.delete(n.id); });
+    await load({ save: true });
+    if (members[target]) reveal(target);
+    const what = nodes.length === 1 ? nodes[0].name : `${nodes.length} devices`;
+    SP.toast(target ? `Moved ${what} to ${target}` : `${what} now unassigned`, "", { label: "Undo", onClick: () => undoMove(before) });
+  }
+  async function undoMove(before) {
+    const groups = {};
+    before.forEach((b) => (groups[b.location] = groups[b.location] || []).push(b.id));
+    try { for (const [loc, ids] of Object.entries(groups)) await SP.api("POST", "/api/devices/bulk", { ids, values: { location: loc } }); }
+    catch (e) { return SP.toast(e.message, "error"); }
+    await load({ save: true });
+    SP.toast("Move undone");
+  }
+  function toggleCollapse(s) {
+    change(() => { collapsed.has(s) ? collapsed.delete(s) : collapsed.add(s); SP.store.set("map.collapsed", [...collapsed]); resolveOverlaps(s); }, { rebuild: true });
+  }
+  function updateSelbar() {
+    const ids = [...selection].filter((id) => byId[id] && byId[id].managed);
+    selbar.classList.toggle("hidden", !ids.length);
+    if (!ids.length) return;
+    selbar.innerHTML = `<strong>${ids.length} selected</strong>`;
+    selbar.appendChild(chooser("Move to site…", null, (s) => moveTo(ids, s)));
+    const clear = document.createElement("button"); clear.className = "btn sm ghost"; clear.type = "button"; clear.textContent = "Clear";
+    clear.onclick = () => { selection.clear(); updateSelbar(); highlight(); };
+    selbar.appendChild(clear);
+  }
+
+  // ---------------------------------------------------------------- drawer
+  function renderDrawer() {
+    drawer.classList.toggle("hidden", !drawerOpen);
+    $("#map-drawer-btn").setAttribute("aria-pressed", drawerOpen);
+    $("#map-drawer-btn").classList.toggle("primary", drawerOpen);
+    if (!drawerOpen || !data) return;
+    const q = $("#drawer-q").value.trim().toLowerCase();
+    let html = "";
+    for (const s of sitesPresent()) {
+      const ns = members[s].filter((n) => n.managed && (!q || n.name.toLowerCase().includes(q) || (n.ip || "").toLowerCase().includes(q))).sort(byKindName);
+      if (q && !ns.length) continue;
+      html += `<div class="d-site${s === "" ? " unassigned" : ""}" data-site="${SP.esc(s)}" title="Zoom to this site">${SP.esc(label(s))}<span class="n">${ns.length}</span></div>`;
+      html += ns.map((n) => `<div class="d-row" draggable="true" data-id="${SP.esc(n.id)}"><input type="checkbox" data-id="${SP.esc(n.id)}" ${drawerChecked.has(n.id) ? "checked" : ""} aria-label="Select ${SP.esc(n.name)}"><span class="dot" style="background:${statusColor(n)}"></span><span class="nm">${SP.esc(n.name)}</span><span class="ip">${SP.esc(n.ip || "")}</span></div>`).join("");
+    }
+    $("#drawer-list").innerHTML = html || '<div class="empty">No devices match.</div>';
+    const foot = $("#drawer-foot"), ids = [...drawerChecked].filter((id) => byId[id]);
+    foot.classList.toggle("hidden", !ids.length);
+    foot.innerHTML = "";
+    if (ids.length) {
+      const t = document.createElement("span"); t.className = "small"; t.innerHTML = `<strong>${ids.length}</strong> ticked`;
+      const clr = document.createElement("button"); clr.className = "btn sm ghost"; clr.textContent = "Clear"; clr.type = "button";
+      clr.onclick = () => { drawerChecked.clear(); renderDrawer(); };
+      const row = document.createElement("div"); row.className = "row"; row.style.justifyContent = "space-between"; row.append(t, clr);
+      foot.append(row, chooser("Move ticked to…", null, (s) => moveTo(ids, s)));
+    }
+  }
+  $("#drawer-list").addEventListener("click", (ev) => {
+    const cb = ev.target.closest("input[type=checkbox]");
+    if (cb) { cb.checked ? drawerChecked.add(cb.dataset.id) : drawerChecked.delete(cb.dataset.id); renderDrawer(); return; }
+    const row = ev.target.closest(".d-row"); if (row) return focusNode(row.dataset.id);
+    const head = ev.target.closest(".d-site"); if (head) zoomToRect(siteRect(head.dataset.site));
+  });
+  $("#drawer-list").addEventListener("dragstart", (ev) => {
+    const row = ev.target.closest(".d-row"); if (!row) return;
+    ev.dataTransfer.setData("text/x-snmpathy-node", row.dataset.id); ev.dataTransfer.effectAllowed = "move";
+  });
+  $("#drawer-q").addEventListener("input", renderDrawer);
+  $("#map-drawer-btn").onclick = () => { drawerOpen = !drawerOpen; SP.store.set("map.drawer", drawerOpen); renderDrawer(); };
+  svg.addEventListener("dragover", (ev) => {
+    if (!ev.dataTransfer.types.includes("text/x-snmpathy-node")) return;
+    ev.preventDefault(); setDrop(siteAt(toWorld(ev)));
+  });
+  svg.addEventListener("dragleave", () => setDrop(null));
+  svg.addEventListener("drop", (ev) => {
+    const id = ev.dataTransfer.getData("text/x-snmpathy-node"), target = siteAt(toWorld(ev));
+    ev.preventDefault(); setDrop(null);
+    if (!id || target === null) return;
+    moveTo(drawerChecked.has(id) ? [...drawerChecked] : [id], target);
+  });
 
   // ------------------------------------------------------------ interaction
   function applyZoom() { view.setAttribute("transform", `translate(${zoom.x},${zoom.y}) scale(${zoom.k})`); }
-  function fit() {
-    const pts = Object.entries(pos).filter(([id]) => data.nodes.some((n) => n.id === id)).map(([, p]) => p);
-    if (!pts.length) return;
-    const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
-    const x0 = Math.min(...xs) - 80, x1 = Math.max(...xs) + 80, y0 = Math.min(...ys) - 80, y1 = Math.max(...ys) + 80;
-    const W = wrap.clientWidth, H = wrap.clientHeight;
-    zoom.k = Math.min(2, W / (x1 - x0), H / (y1 - y0));
-    zoom.x = (W - (x1 - x0) * zoom.k) / 2 - x0 * zoom.k; zoom.y = (H - (y1 - y0) * zoom.k) / 2 - y0 * zoom.k;
+  function zoomToRect(r, maxK = 1.6) {
+    const W = wrap.clientWidth - inset(), H = wrap.clientHeight, pad = 40;
+    zoom.k = Math.max(0.12, Math.min(maxK, (W - pad * 2) / r.w, (H - pad * 2) / r.h));
+    zoom.x = inset() + (W - r.w * zoom.k) / 2 - r.x * zoom.k; zoom.y = (H - r.h * zoom.k) / 2 - r.y * zoom.k;
     applyZoom();
   }
+  // Bring a site into view if it is off-screen (keeps the zoom unless the site is too big for it).
+  function reveal(s) {
+    const r = siteRect(s), W = wrap.clientWidth, H = wrap.clientHeight, L = inset();
+    const sx = r.x * zoom.k + zoom.x, sy = r.y * zoom.k + zoom.y, sw = r.w * zoom.k, sh = r.h * zoom.k;
+    if (sx >= L && sy >= 0 && sx + sw <= W && sy + sh <= H) return;
+    const from = { ...zoom }, to = { ...zoom };
+    to.k = Math.min(zoom.k, (W - L - 60) / r.w, (H - 60) / r.h);
+    to.x = L + (W - L - r.w * to.k) / 2 - r.x * to.k; to.y = (H - r.h * to.k) / 2 - r.y * to.k;
+    if (REDUCED) { Object.assign(zoom, to); applyZoom(); return; }
+    const t0 = performance.now();
+    const step = (t) => { const k = Math.min(1, (t - t0) / 400), q = 1 - Math.pow(1 - k, 3);
+      for (const key of ["k", "x", "y"]) zoom[key] = from[key] + (to[key] - from[key]) * q;
+      applyZoom(); if (k < 1) requestAnimationFrame(step); };
+    requestAnimationFrame(step);
+  }
+  function fit() {
+    const rs = sitesPresent().map(siteRect);
+    if (!rs.length) return;
+    const x0 = Math.min(...rs.map((r) => r.x)), y0 = Math.min(...rs.map((r) => r.y));
+    zoomToRect({ x: x0, y: y0, w: Math.max(...rs.map((r) => r.x + r.w)) - x0, h: Math.max(...rs.map((r) => r.y + r.h)) - y0 }, 1.25);
+  }
+  function focusNode(id) {
+    const n = byId[id]; if (!n) return;
+    if (collapsed.has(n.site)) toggleCollapse(n.site);
+    const [x, y] = nodeXY(id), W = wrap.clientWidth - inset(), H = wrap.clientHeight;
+    zoom.k = Math.max(zoom.k, 1.1); zoom.x = inset() + W / 2 - x * zoom.k; zoom.y = H / 2 - y * zoom.k; applyZoom();
+    showNode(n);
+  }
   const toWorld = (ev) => { const r = svg.getBoundingClientRect(); return [(ev.clientX - r.left - zoom.x) / zoom.k, (ev.clientY - r.top - zoom.y) / zoom.k]; };
-  let drag = null;
-  function startDrag(ev, n) { ev.stopPropagation(); const [wx, wy] = toWorld(ev); drag = { n, dx: pos[n.id][0] - wx, dy: pos[n.id][1] - wy, moved: false }; svg.setPointerCapture(ev.pointerId); }
-  svg.addEventListener("pointerdown", (ev) => { if (drag) return; drag = { pan: true, x: ev.clientX - zoom.x, y: ev.clientY - zoom.y, moved: false }; svg.classList.add("panning"); svg.setPointerCapture(ev.pointerId); });
+  const inRect = (p, r) => p[0] >= r.x && p[0] <= r.x + r.w && p[1] >= r.y && p[1] <= r.y + r.h;
+  function siteAt(p, exclude) {
+    for (const s of sitesPresent()) if (s !== exclude && inRect(p, siteRect(s))) return s;
+    return null;
+  }
+  function setDrop(s) {
+    if (dropSite === s) return;
+    if (dropSite !== null && siteEls[dropSite]) siteEls[dropSite].g.classList.remove("drop");
+    dropSite = s;
+    if (s !== null && siteEls[s]) siteEls[s].g.classList.add("drop");
+  }
+
+  svg.addEventListener("pointerdown", (ev) => {
+    if (ev.button !== 0) return;
+    hideTip();
+    const p = toWorld(ev), nodeG = ev.target.closest(".map-node"), siteG = ev.target.closest(".map-site");
+    if (ev.target.closest(".tog")) { toggleCollapse(siteG.dataset.site); return; }
+    if (nodeG) {
+      const n = byId[nodeG.dataset.id];
+      if (ev.shiftKey) { selection.has(n.id) ? selection.delete(n.id) : selection.add(n.id); highlight(); updateSelbar(); return; }
+      const [nx, ny] = nodeXY(n.id);
+      drag = { type: "node", n, p0: p, off: [nx - p[0], ny - p[1]], start: local[n.id] && [...local[n.id]], rect: siteRect(n.site), moved: false };
+    } else if (siteG && ev.target.closest(".head")) {
+      const s = siteG.dataset.site;
+      drag = { type: "site", s, start: { ...boxes[s] }, p0: p, moved: false };
+    } else if (ev.shiftKey) {
+      drag = { type: "band", p0: p, rect: el("rect", { class: "map-band" }, gOver), moved: false };
+    } else {
+      drag = { type: "pan", x: ev.clientX - zoom.x, y: ev.clientY - zoom.y, moved: false };
+      svg.classList.add("panning");
+    }
+    svg.setPointerCapture(ev.pointerId);
+  });
   svg.addEventListener("pointermove", (ev) => {
     if (!drag) return;
+    if (!drag.moved && drag.type !== "pan" && drag.type !== "band") {
+      const p = toWorld(ev);  // a click is not a drag: ignore the first few pixels
+      if (Math.hypot(p[0] - drag.p0[0], p[1] - drag.p0[1]) * zoom.k < 4) return;
+    }
     drag.moved = true;
-    if (drag.pan) { zoom.x = ev.clientX - drag.x; zoom.y = ev.clientY - drag.y; applyZoom(); return; }
-    const [wx, wy] = toWorld(ev); pos[drag.n.id] = [wx + drag.dx, wy + drag.dy]; dirty = true; render();
+    if (drag.type === "pan") { zoom.x = ev.clientX - drag.x; zoom.y = ev.clientY - drag.y; applyZoom(); return; }
+    const p = toWorld(ev);
+    if (drag.type === "band") {
+      const x = Math.min(p[0], drag.p0[0]), y = Math.min(p[1], drag.p0[1]);
+      for (const [k, v] of Object.entries({ x, y, width: Math.abs(p[0] - drag.p0[0]), height: Math.abs(p[1] - drag.p0[1]) })) drag.rect.setAttribute(k, v);
+      return;
+    }
+    if (drag.type === "site") {
+      boxes[drag.s] = { x: drag.start.x + p[0] - drag.p0[0], y: drag.start.y + p[1] - drag.p0[1] };
+      place(); return;
+    }
+    // node: follows the pointer; hovering another site marks it as the drop target
+    const n = drag.n, b = boxes[n.site];
+    nodeEls[n.id].classList.add("dragging");
+    local[n.id] = [p[0] + drag.off[0] - b.x - PADX, p[1] + drag.off[1] - b.y - HEAD - PADT];
+    const target = siteAt(p, n.site);
+    setDrop(target);
+    place();
   });
-  svg.addEventListener("pointerup", () => {
-    if (drag && !drag.moved) { if (drag.n) showNode(drag.n); else { panel.classList.add("hidden"); selected = null; highlight(); } }
-    drag = null; svg.classList.remove("panning");
-    SP.$("#map-save").classList.toggle("primary", dirty);
+  svg.addEventListener("pointerup", (ev) => {
+    const d = drag; drag = null; svg.classList.remove("panning");
+    if (!d) return;
+    if (d.type === "pan") { if (!d.moved) { closePanel(); if (selection.size) { selection.clear(); updateSelbar(); highlight(); } } return; }
+    if (d.type === "band") {
+      d.rect.remove();
+      if (!d.moved) return;
+      const p = toWorld(ev), r = { x: Math.min(p[0], d.p0[0]), y: Math.min(p[1], d.p0[1]), w: Math.abs(p[0] - d.p0[0]), h: Math.abs(p[1] - d.p0[1]) };
+      data.nodes.forEach((n) => { if (n.managed && !collapsed.has(n.site) && inRect(nodeXY(n.id), r)) selection.add(n.id); });
+      highlight(); updateSelbar(); return;
+    }
+    if (d.type === "site") {
+      if (!d.moved) return showSite(d.s);
+      change(() => resolveOverlaps(d.s)); return;
+    }
+    // node
+    const n = d.n;
+    nodeEls[n.id] && nodeEls[n.id].classList.remove("dragging");
+    const target = dropSite; setDrop(null);
+    if (!d.moved) {
+      if (!ev.shiftKey && !selection.has(n.id) && selection.size) { selection.clear(); updateSelbar(); }
+      showNode(n); return;
+    }
+    const p = toWorld(ev);
+    if (target !== null) {
+      local[n.id] = d.start; place();
+      const ids = selection.has(n.id) && selection.size > 1 ? [...selection] : [n.id];
+      moveTo(ids, target); return;
+    }
+    if (!inRect(p, d.rect)) {  // dropped on empty canvas: back to where it was
+      change(() => { local[n.id] = d.start; }, { save: false });
+      SP.toast(`Drop ${n.name} onto a site to move it there`);
+      return;
+    }
+    change(() => { normalize(n.site); resolveOverlaps(n.site); });
   });
   svg.addEventListener("wheel", (ev) => { ev.preventDefault(); const r = svg.getBoundingClientRect(); const mx = ev.clientX - r.left, my = ev.clientY - r.top;
-    const k = Math.max(0.15, Math.min(4, zoom.k * (ev.deltaY < 0 ? 1.12 : 1 / 1.12))); zoom.x = mx - (mx - zoom.x) * k / zoom.k; zoom.y = my - (my - zoom.y) * k / zoom.k; zoom.k = k; applyZoom(); }, { passive: false });
+    const k = Math.max(0.12, Math.min(4, zoom.k * (ev.deltaY < 0 ? 1.12 : 1 / 1.12))); zoom.x = mx - (mx - zoom.x) * k / zoom.k; zoom.y = my - (my - zoom.y) * k / zoom.k; zoom.k = k; applyZoom(); }, { passive: false });
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Escape" || ev.target.closest("input, select, textarea")) return;
+    selection.clear(); updateSelbar(); closePanel();
+  });
 
-  async function save() {
-    await SP.api("PUT", "/api/map/positions", { view: data.view, positions: pos });
-    dirty = false; SP.$("#map-save").classList.remove("primary"); SP.toast("Layout saved");
+  // ---------------------------------------------------------------- saving
+  function scheduleSave() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(async () => {
+      const positions = {};
+      sitesPresent().forEach((s) => (positions["s:" + s] = [boxes[s].x, boxes[s].y]));
+      data.nodes.forEach((n) => { if (local[n.id]) positions[n.id] = local[n.id]; });
+      try { await SP.api("PUT", "/api/map/positions", { view: data.view, positions }); } catch (e) { SP.toast("Could not save the layout: " + e.message, "error"); }
+    }, 700);
   }
-  SP.$("#map-save").onclick = save;
-  SP.$("#map-fit").onclick = fit;
-  SP.$("#map-relayout").onclick = async () => { await SP.api("DELETE", `/api/map/positions?view=${encodeURIComponent(data.view)}`); pos = {}; layout(true); render(); fit(); };
-  SP.$("#map-ports").onchange = render;
-  SP.$("#map-unmanaged").onchange = () => load();
-  SP.$("#map-search").addEventListener("input", highlight);
-  function setSite(s) { site = s; SP.$("#map-site").value = s; const u = new URL(location); s ? u.searchParams.set("site", s) : u.searchParams.delete("site"); history.replaceState(null, "", u); pos = {}; load(true); }
-  SP.$("#map-site").onchange = (e) => setSite(e.target.value);
-  const tagSel = SP.$("#map-tag"); if (tagSel) tagSel.onchange = (e) => { tag = e.target.value; pos = {}; load(true); };
 
-  async function load(refit) {
-    const fresh = await SP.api("GET", `/api/map?site=${encodeURIComponent(site)}&tag=${encodeURIComponent(tag)}&unmanaged=${SP.$("#map-unmanaged").checked}`);
-    const first = !data || refit;
+  // ----------------------------------------------------------------- loading
+  async function load(opts = {}) {
+    const fresh = await SP.api("GET", `/api/map?site=${encodeURIComponent(site)}&tag=${encodeURIComponent(tag)}&unmanaged=${$("#map-unmanaged").checked}`);
+    const first = !data || opts.reset;
+    const before = data && !first ? snapshot() : null;
+    if (first) { local = {}; boxes = {}; }
+    const oldUnassigned = (members[""] || []).map((n) => n.id).sort().join(",");
     data = fresh;
-    for (const [id, p] of Object.entries(data.positions || {})) if (first || !pos[id]) pos[id] = p;
-    const sel = SP.$("#map-site");
-    if (sel.options.length <= 1 || first) { sel.innerHTML = '<option value="">All sites</option>' + data.sites.map((s) => `<option ${s.name === site ? "selected" : ""}>${SP.esc(s.name)}</option>`).join(""); }
-    layout(false); render();
+    byId = {}; members = {};
+    data.nodes.forEach((n) => { byId[n.id] = n; (members[n.site] = members[n.site] || []).push(n); });
+    // a device that changed site starts fresh in its new site box
+    data.nodes.forEach((n) => { if (nodeSite[n.id] !== undefined && nodeSite[n.id] !== n.site) delete local[n.id]; nodeSite[n.id] = n.site; });
+    for (const [key, p] of Object.entries(data.positions || {})) {
+      if (key.startsWith("s:")) { const s = key.slice(2); if (members[s] && (first || !boxes[s])) boxes[s] = { x: p[0], y: p[1] }; }
+      else if (byId[key] && (first || !local[key])) local[key] = p;
+    }
+    for (const s in boxes) if (!members[s]) delete boxes[s];
+    let changed = false;
+    // Unassigned is a holding area: keep it tidy (no gaps) whenever devices come or go.
+    const tidy = !first && members[""] && members[""].map((n) => n.id).sort().join(",") !== oldUnassigned;
+    sitesPresent().forEach((s) => { if (layoutSite(s, s === "" && tidy)) changed = true; normalize(s); });
+    if (placeSites(false)) changed = true;
+    resolveOverlaps(null);
+    [...selection].forEach((id) => { if (!byId[id]) selection.delete(id); });
+    fillSiteSelect();
+    build();
+    before ? animateFrom(before) : place();
     if (first) fit();
+    if (changed && opts.save) scheduleSave();
+    renderDrawer(); updateSelbar(); refreshPanel();
   }
+  function fillSiteSelect() {
+    const sel = $("#map-site"), cur = site;
+    sel.innerHTML = '<option value="">All sites</option>' + (data.unassigned ? `<option value="~unassigned">Unassigned (${data.unassigned})</option>` : "")
+      + data.sites.filter((s) => !s.unassigned).map((s) => `<option value="${SP.esc(s.name)}">${SP.esc(s.name)} (${s.devices})</option>`).join("");
+    sel.value = cur;
+  }
+  function setSite(s) { site = s; const u = new URL(location); s ? u.searchParams.set("site", s) : u.searchParams.delete("site"); history.replaceState(null, "", u); load({ reset: true }); }
+  $("#map-site").onchange = (e) => setSite(e.target.value);
+  const tagSel = $("#map-tag"); if (tagSel) tagSel.onchange = (e) => { tag = e.target.value; load({ reset: true }); };
+
+  $("#map-fit").onclick = fit;
+  $("#map-relayout").onclick = async () => {
+    await SP.api("DELETE", `/api/map/positions?view=${encodeURIComponent(data.view)}`);
+    change(() => { local = {}; boxes = {}; sitesPresent().forEach((s) => layoutSite(s, true)); placeSites(true); resolveOverlaps(null); }, { save: false });
+    setTimeout(fit, 340);
+  };
+  const setAll = (on) => change(() => {
+    sitesPresent().forEach((s) => (on ? collapsed.add(s) : collapsed.delete(s)));
+    SP.store.set("map.collapsed", [...collapsed]);
+    placeSites(true); resolveOverlaps(null);
+  }, { rebuild: true });
+  $("#map-collapse-all").onclick = () => { setAll(true); setTimeout(fit, 340); };
+  $("#map-expand-all").onclick = () => { setAll(false); setTimeout(fit, 340); };
+  $("#map-ports").onchange = () => { build(); place(); };
+  $("#map-unmanaged").onchange = () => load();
+  $("#map-search").addEventListener("input", highlight);
+  $("#map-hint-close").onclick = () => { SP.store.set("map.hint-closed", true); $("#map-hint").classList.add("hidden"); };
+
   SP.transforms.maplink = (b) => b;
   const parentsCall = async (apply) => {
-    const r = await SP.api("POST", "/api/map/parents", { root_device_id: +SP.$("#parents-root").value, apply, overwrite: SP.$("#parents-overwrite").checked });
-    SP.$("#parents-preview").innerHTML = r.parents.length ? `<table class="table compact">${r.parents.map((p) => `<tr><td>${SP.esc(p.device)}</td><td>← ${SP.esc(p.parent)}</td></tr>`).join("")}</table>` : "No devices are linked to that device yet.";
+    const r = await SP.api("POST", "/api/map/parents", { root_device_id: +$("#parents-root").value, apply, overwrite: $("#parents-overwrite").checked });
+    $("#parents-preview").innerHTML = r.parents.length ? `<table class="table compact">${r.parents.map((p) => `<tr><td>${SP.esc(p.device)}</td><td>← ${SP.esc(p.parent)}</td></tr>`).join("")}</table>` : "No devices are linked to that device yet.";
     if (apply) { SP.toast(`Parents set on ${r.applied} devices`); setTimeout(() => location.reload(), 700); }
   };
-  SP.$("#parents-preview-btn").onclick = () => parentsCall(false).catch((e) => SP.toast(e.message, "error"));
-  SP.$("#parents-apply").onclick = () => parentsCall(true).catch((e) => SP.toast(e.message, "error"));
-  window.addEventListener("resize", () => data && fit());
-  document.addEventListener("sp:theme", () => data && render());
-  load(true).catch((e) => SP.toast(e.message, "error"));
-  setInterval(() => { if (!drag && !document.hidden) load(false).catch(() => {}); }, 30000);
+  $("#parents-preview-btn").onclick = () => parentsCall(false).catch((e) => SP.toast(e.message, "error"));
+  $("#parents-apply").onclick = () => parentsCall(true).catch((e) => SP.toast(e.message, "error"));
+  document.addEventListener("sp:theme", () => { if (data) { build(); place(); } });
+  renderDrawer();
+  load().catch((e) => SP.toast(e.message, "error"));
+  setInterval(() => { if (!drag && !document.hidden) load().catch(() => {}); }, 30000);
 });
 </script>
 {% endblock %}

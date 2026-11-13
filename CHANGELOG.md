@@ -4,6 +4,19 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 `snmpathy version`. Executables built with `scripts/build_executable` also show the git
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
+## 0.6.3
+- **Network map redesign.** Sites are boxes that never overlap; devices inside a site are
+  arranged as a tree by their links, with unlinked devices in a grid by type and name.
+  Devices with no site are in a separate, dashed **Unassigned** box instead of floating
+  over other sites. Sites can be collapsed, dragged, renamed and tidied; changes animate
+  and the layout saves itself.
+- **Move devices to a site from the map**: drag them onto a site, multi-select with
+  Shift, use the device or site panel, or the new **Sites & devices** list; every move can
+  be undone.
+- A device's site now comes from its Location first, then its collector's site. The
+  location reported over SNMP is only a suggestion (it used to place devices in sites).
+  Saved map layouts from earlier versions are reset once.
+
 ## 0.6.2
 - **Brand tags**: devices are tagged with their brand (Cisco, Ubiquiti, Rajant, Tachyon,
   Synology, ...) when discovery or a network scan detects it; existing devices are tagged at

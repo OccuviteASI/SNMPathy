@@ -138,9 +138,10 @@ covering test.
 | ID | Pri | Requirement | Where |
 |---|---|---|---|
 | FR-MAP-1 | M | Discover layer-2 neighbours from LLDP-MIB and CISCO-CDP-MIB during discovery (also through collectors) and match them to known devices and interfaces. | `snmp/neighbors.py`, `tests/test_neighbors.py` |
-| FR-MAP-2 | M | Draw devices and links grouped by site (collector site or location prefix), with status, degraded/unreachable markers, link utilisation colour, link speed width, port labels and unmanaged neighbours. | `topology.py::build_graph`, `web/templates/map.html`, `tests/test_topology.py` |
+| FR-MAP-2 | M | Draw devices and links in non-overlapping site boxes (Location prefix, else collector site, else Unassigned; SNMP sysLocation only suggested), arranged as a tree by links with a type/name grid for unlinked devices, with status, degraded/unreachable markers, link utilisation colour, link speed width, port labels and unmanaged neighbours. | `topology.py::build_graph`, `web/templates/map.html`, `tests/test_topology.py` |
 | FR-MAP-3 | M | Drag and save layouts per view; site and tag views; search; details panels. | `topology.py`, `map.html` |
 | FR-MAP-4 | S | Manual links; derive parent devices from the topology starting at a core device. | `topology.py::add_link / suggest_parents` |
+| FR-MAP-5 | M | Move devices between sites from the map (drag and drop, multi-select, device/site panels, device list), rename sites, undo moves. | `topology.py::move_devices / rename_site`, `map.html`, `tests/test_topology.py` |
 
 #### Network Analyzer (flows)
 
