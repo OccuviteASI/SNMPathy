@@ -38,7 +38,7 @@
     <div class="card-head"><h2>Device tagging</h2></div>
     <div class="card-body stack">
       <label class="check" style="font-size:15px"><input type="checkbox" id="brand-toggle" {{ 'checked' if brand_tags.enabled }}> <strong>Tag devices with their brand when it is detected</strong></label>
-      <p class="small muted" style="margin:0">Discovery and network scans add a tag such as <span class="tag">Cisco</span>, <span class="tag">Ubiquiti</span> or <span class="tag">Rajant</span>. Use it to filter the device list or scope alert rules. If you remove a brand tag from a device it is not added back.</p>
+      <p class="small muted" style="margin:0">Discovery and network scans add a tag such as <span class="tag">Cisco</span>, <span class="tag">Ubiquiti</span> or <span class="tag">Rajant</span>. Devices without SNMP are recognised from the maker of their network card (MAC address) when they are on the same network as SNMPathy. Use the tag to filter the device list or scope alert rules. If you remove a brand tag from a device it is not added back.</p>
       <div class="row"><button class="btn sm" id="brand-apply">Tag existing devices now</button><span class="small muted" id="brand-count">{{ brand_tags.tagged }} device{{ '' if brand_tags.tagged == 1 else 's' }} tagged so far</span></div>
     </div>
   </div>

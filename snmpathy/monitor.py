@@ -31,6 +31,7 @@ log = logging.getLogger(__name__)
 
 REDISCOVER_INTERVAL = 6 * 3600
 ROLLUP_INTERVAL = 60
+BRAND_TAG_INTERVAL = 600  # seconds between ARP-table MAC refreshes / brand tagging
 RETENTION_INTERVAL = 3600
 
 SnmpFactory = Callable[[dict[str, Any], Settings], SnmpClient]
@@ -402,9 +403,15 @@ class Monitor:
     # ----------------------------------------------------------- housekeeping
     async def _housekeeping_loop(self) -> None:
         last_retention = 0.0
+        last_tagging = time.time()
         while True:
             try:
                 await asyncio.to_thread(rollup, self.db)
+                if time.time() - last_tagging > BRAND_TAG_INTERVAL:
+                    from .brands import tag_all
+
+                    last_tagging = time.time()
+                    await asyncio.to_thread(tag_all, self.db)
                 await run_due_reports(self.db, self.settings)
                 if time.time() - last_retention > RETENTION_INTERVAL:
                     removed = await asyncio.to_thread(apply_retention, self.db, self.settings)

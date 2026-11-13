@@ -188,17 +188,24 @@ fields you tick are changed.
 ### Scan the network and add devices automatically
 
 **Devices → Scan network → New scan**. Enter targets such as `10.0.0.0/24, 10.0.1.1-50,
-192.168.5.10` (plus optional exclusions), the SNMP communities and/or SNMPv3 user to try,
+192.168.5.10` (plus optional exclusions), the SNMP communities and SNMPv3 users to try
+(**+ Add community** / **+ Add SNMPv3 user**; tried in order, the one that answers is saved),
 and optionally TCP ports (e.g. `22, 443, 3389`) so hosts that block ping are still found.
 Each responding host is listed with its ping time, open ports, SNMP version, sysName,
-vendor and description; hosts you already monitor are marked.
+vendor, MAC address and description; hosts you already monitor are marked.
 
+* **`public` is always tried**: after the communities you list, every scan also tries the
+  `public` community, and hosts that answer it are added as devices straight away (even when
+  *Add automatically* is *No*). Untick *Always add hosts that answer the "public" community*
+  on a scan to only list them.
 * **Add automatically**: *Hosts that answer SNMP* or *Every host that answers*. New
   devices get the credentials that worked, the scan's tags, location and online rule,
   a ping check if they answered ping (or a TCP check if only a port answered).
 * **Pick by hand**: tick results and click **Add selected as devices**.
 * **Repeat**: hourly, every 6 hours, daily or weekly, so new devices appear on their own.
 * **Run from**: this server, or a remote collector to scan another site's network.
+* **Edit**: change a scan's targets, credentials, schedule or adding rules later with **Edit**
+  on the scan list or the scan's page (**Save & run now** re-runs it straight away).
 
 From the command line (prints results; `--add snmp|alive` also adds them to the database):
 
@@ -212,7 +219,17 @@ When discovery or a network scan detects who made a device, SNMPathy tags it wit
 `Cisco`, `Ubiquiti`, `Rajant`, `Tachyon`, `Juniper`, `Fortinet`, `Synology`, ... The brand
 comes from the SNMP sysObjectID (or a vendor MIB such as Ubiquiti's); devices that only
 report a generic Net-SNMP agent are recognised from their description (Synology, QNAP,
-pfSense, OPNsense, MikroTik, UniFi, Proxmox, ...). Plain Linux servers get no brand tag.
+pfSense, OPNsense, MikroTik, UniFi, Proxmox, ...).
+
+Devices that do not answer SNMP (most home and small-office gear: UniFi access points,
+TP-Link switches, printers, cameras, ...) are recognised from their **MAC address**: once a
+device answers a ping, the scanning machine's ARP table holds its MAC, and the first half of
+a MAC is registered to its maker with the IEEE (SNMPathy ships that list). This works for
+devices on the same network segment as SNMPathy (or the collector running the scan); devices
+behind a router are not visible this way. Randomised MACs (phones) and chip makers
+(Espressif, Realtek, Intel, ...) give no brand tag. The MAC and its maker are shown on the
+device page and in scan results, and existing devices pick up their MAC when SNMPathy starts
+and every 10 minutes. Plain Linux servers get no brand tag.
 
 Use the tags to filter **Devices** or to scope an alert rule (*Device tag*). Your own tags are
 never changed; if you delete a brand tag from a device it is not added back, and if a

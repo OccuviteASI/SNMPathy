@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "snmpathy"
-version = "0.7.2"
+version = "0.7.3"
 description = "Self-hosted network monitoring: SNMP polling, syslog ingest, and uptime/SLA reporting."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -33,7 +33,7 @@ snmpathy = "snmpathy.cli:main"
 include = ["snmpathy*"]
 
 [tool.setuptools.package-data]
-snmpathy = ["web/templates/*.html", "web/static/*"]
+snmpathy = ["web/templates/*.html", "web/static/*", "data/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
