@@ -224,12 +224,12 @@ class ArpCache:
         self.reader = reader
         self.min_age = min_age
         self.table: dict[str, str] = {}
-        self.read_at = 0.0
+        self.read_at: float | None = None  # never read yet (monotonic time can be small after boot)
         self.lock = threading.Lock()
 
     def get(self, ip: str) -> str:
         with self.lock:
-            if ip not in self.table and time.monotonic() - self.read_at >= self.min_age:
+            if ip not in self.table and (self.read_at is None or time.monotonic() - self.read_at >= self.min_age):
                 self.table = self.reader()
                 self.read_at = time.monotonic()
             return self.table.get(ip, "")

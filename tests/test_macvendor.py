@@ -62,7 +62,7 @@ def test_arp_cache_rereads_on_miss_only_after_min_age():
     def reader():
         reads.append(1)
         return {"10.0.0.1": "F0:9F:C2:00:00:01"}
-    cache = macvendor.ArpCache(reader=reader, min_age=60)
+    cache = macvendor.ArpCache(reader=reader, min_age=1e12)  # far longer than the machine's uptime
     assert cache.get("10.0.0.1") == "F0:9F:C2:00:00:01"
     assert cache.get("10.0.0.1") and cache.get("10.0.0.2") == "" and len(reads) == 1
 
