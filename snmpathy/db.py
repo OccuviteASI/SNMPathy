@@ -492,6 +492,12 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("hw_serial", "TEXT NOT NULL DEFAULT ''"),
         ("firmware", "TEXT NOT NULL DEFAULT ''"),
         ("brand_tag", "TEXT NOT NULL DEFAULT ''"),  # the brand tag SNMPathy added (snmpathy/brands.py)
+        ("mac", "TEXT NOT NULL DEFAULT ''"),  # from the ARP table (snmpathy/macvendor.py)
+        ("mac_vendor", "TEXT NOT NULL DEFAULT ''"),
+    ],
+    "scan_results": [
+        ("mac", "TEXT NOT NULL DEFAULT ''"),
+        ("mac_vendor", "TEXT NOT NULL DEFAULT ''"),
     ],
     "checks": [
         ("affects_device", "INTEGER NOT NULL DEFAULT 1"),

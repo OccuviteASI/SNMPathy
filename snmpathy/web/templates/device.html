@@ -23,7 +23,8 @@
       <dl class="kv">
         <dt>Hostname</dt><dd>{{ device.hostname }}</dd>
         <dt>sysName</dt><dd>{{ device.sys_name or '-' }}</dd>
-        <dt>Vendor</dt><dd>{{ device.vendor or '-' }}{% if device.hw_model %} · {{ device.hw_model }}{% endif %}</dd>
+        <dt>Vendor</dt><dd>{{ device.vendor or device.mac_vendor or '-' }}{% if device.hw_model %} · {{ device.hw_model }}{% endif %}</dd>
+        {% if device.mac %}<dt>MAC address</dt><dd><span class="mono">{{ device.mac }}</span>{% if device.vendor and device.mac_vendor and device.mac_vendor != device.vendor %} <span class="small muted">{{ device.mac_vendor }}</span>{% endif %}</dd>{% endif %}
         {% if device.hw_serial %}<dt>Serial</dt><dd class="mono">{{ device.hw_serial }}</dd>{% endif %}
         {% if device.firmware %}<dt>Firmware</dt><dd>{{ device.firmware }}</dd>{% endif %}
         <dt>Description</dt><dd class="small">{{ device.sys_descr or '-' }}</dd>

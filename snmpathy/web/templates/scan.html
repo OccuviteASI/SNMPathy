@@ -4,6 +4,7 @@
 {% block crumbs %}<div class="crumbs"><a href="/devices">Devices</a> / <a href="/scans">Network scans</a></div>{% endblock %}
 {% block actions %}
 <button class="btn" id="scan-cancel" data-action="api" data-url="/api/scans/{{ scan.id }}/cancel" data-then="none" data-success="Cancelling…">Cancel</button>
+<button class="btn" data-action="modal" data-target="#scan-modal">{{ icon('settings') }} Edit</button>
 <button class="btn" data-action="api" data-url="/api/scans/{{ scan.id }}/run" data-success="Scan started">{{ icon('refresh') }} Run again</button>
 <button class="btn danger" data-action="api" data-method="DELETE" data-url="/api/scans/{{ scan.id }}" data-confirm="Delete this scan and its results? Devices already added are kept." data-redirect="/scans">Delete</button>
 {% endblock %}
@@ -14,7 +15,7 @@
   <div class="card stat"><div class="card-body"><div class="muted small">Responding hosts</div><div class="big num" id="s-found"></div></div></div>
   <div class="card stat"><div class="card-body"><div class="muted small">Devices added</div><div class="big num" id="s-added"></div></div></div>
 </div>
-<p class="small muted">Targets <code>{{ scan.targets }}</code> · runs from <strong>{{ collector.name if collector else 'this server' }}</strong> · {{ ('repeats every ' ~ (scan.interval|duration)) if scan.interval else 'runs once' }} · communities tried: {{ (scan.options.communities or [])|length }}{% if scan.options.v3 %} + {{ scan.options.v3|length }} SNMPv3 user(s){% endif %}{% if scan.options.auto_add != 'none' %} · adds {{ 'SNMP hosts' if scan.options.auto_add == 'snmp' else 'every responding host' }} automatically{% endif %}</p>
+<p class="small muted">Targets <code>{{ scan.targets }}</code> · runs from <strong>{{ collector.name if collector else 'this server' }}</strong> · {{ ('repeats every ' ~ (scan.interval|duration)) if scan.interval else 'runs once' }} · {% set comms = (scan.options.communities or [])|reject('equalto', 'public')|list %}communities tried: {{ comms|length + 1 }}{% if scan.options.v3 %} + {{ scan.options.v3|length }} SNMPv3 user{{ '' if scan.options.v3|length == 1 else 's' }}{% endif %}{% if scan.options.auto_add != 'none' %} · adds {{ 'SNMP hosts' if scan.options.auto_add == 'snmp' else 'every responding host' }} automatically{% elif scan.options.add_public is not defined or scan.options.add_public %} · adds hosts that answer <span class="mono">public</span> automatically{% endif %}</p>
 <div class="row mb">
   <button class="btn primary" id="add-selected" disabled>Add selected as devices</button>
   <button class="btn" id="select-new">Select all new</button>
@@ -30,6 +31,7 @@
     </table>
   </div>
 </div>
+{% set edit_scan = scan %}{% include "_scan_form.html" %}
 {% endblock %}
 {% block scripts %}
 <script>
@@ -57,7 +59,7 @@ document.addEventListener("DOMContentLoaded", () => {
       <td class="num" data-sort="${r.ping_ms == null ? 99999 : r.ping_ms}">${r.ping_ms == null ? '<span class="muted">-</span>' : r.ping_ms.toFixed(1) + " ms"}</td>
       <td class="small">${(r.open_ports || []).join(", ") || '<span class="muted">-</span>'}</td>
       <td>${r.snmp ? `<span class="status up">v${SP.esc(r.snmp_version)}</span>` : '<span class="muted">-</span>'}</td>
-      <td><div>${SP.esc(r.vendor || "")}</div><div class="small muted" style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${SP.esc(r.sys_descr)}">${SP.esc(r.sys_descr || "")}</div></td>
+      <td><div>${SP.esc(r.vendor || r.mac_vendor || "")}${r.mac ? ` <span class="small muted mono" title="MAC address${r.mac_vendor ? " (" + SP.esc(r.mac_vendor) + ")" : ""}">${SP.esc(r.mac)}</span>` : ""}</div><div class="small muted" style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${SP.esc(r.sys_descr)}">${SP.esc(r.sys_descr || "")}</div></td>
       <td>${rowStatus(r)}</td></tr>`).join("") || `<tr><td colspan="8"><div class="empty">${d.running ? "Scanning… responding hosts appear here as they are found." : "No hosts responded."}</div></td></tr>`;
     sync();
     return d.running || d.state === "queued" || d.state === "running";

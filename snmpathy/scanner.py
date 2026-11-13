@@ -118,6 +118,9 @@ def _looks_like_ip(text: str) -> bool:
         return False
 
 
+PUBLIC = "public"
+
+
 @dataclass
 class ScanOptions:
     """How to probe each host, and what to do with the ones that answer."""
@@ -135,6 +138,8 @@ class ScanOptions:
     exclude: str = ""
     # What to add automatically: none, snmp (hosts that answered SNMP) or alive (any answer)
     auto_add: str = "none"
+    # Hosts that answer the "public" community (always tried) are added whatever auto_add says.
+    add_public: bool = True
     add_ping_check: bool = True
     tags: list[str] = field(default_factory=lambda: ["discovered"])
     location: str = ""
@@ -164,7 +169,9 @@ class ScanOptions:
         creds: list[dict[str, Any]] = []
         if not self.snmp:
             return creds
-        for community in self.communities:
+        # "public" is always tried (last, after the communities you listed).
+        communities = list(self.communities) + ([] if PUBLIC in self.communities else [PUBLIC])
+        for community in communities:
             creds.append({"snmp_version": "2c", "snmp_community": community, "snmp_port": self.snmp_port})
         for user in self.v3:
             if not user.get("user"):
@@ -206,6 +213,7 @@ async def scan_host(target: str, opts: ScanOptions, probe: ProbeFunc, client_fac
     result: dict[str, Any] = {
         "ip": target, "dns_name": "", "ping_ms": None, "open_ports": [], "snmp": 0, "snmp_cred": None,
         "snmp_version": "", "sys_name": "", "sys_descr": "", "sys_object_id": "", "vendor": "",
+        "mac": "", "mac_vendor": "",
     }
     is_ip = _looks_like_ip(target)
     if not is_ip:
@@ -255,6 +263,13 @@ async def scan_host(target: str, opts: ScanOptions, probe: ProbeFunc, client_fac
             break
     if not alive and not result["snmp"]:
         return None
+    if is_ip:  # it just answered us, so if it is on our own segment the ARP table knows its MAC
+        from . import macvendor
+
+        try:
+            result.update(macvendor.describe(await asyncio.to_thread(macvendor.mac_for, target)))
+        except Exception as exc:  # never let a vendor lookup fail the sweep
+            log.debug("MAC lookup for %s failed: %s", target, exc)
     if is_ip and opts.resolve_dns:
         result["dns_name"] = await _reverse_dns(target, max(1.0, opts.timeout))
     return result
@@ -299,7 +314,7 @@ def add_result(db: Database, scan: dict[str, Any], result: dict[str, Any]) -> in
         "notes": f"Found by network scan '{scan['name']}'",
         **cred,
     }
-    extra = {k: result.get(k) or "" for k in ("sys_name", "sys_descr", "sys_object_id", "vendor")}
+    extra = {k: result.get(k) or "" for k in ("sys_name", "sys_descr", "sys_object_id", "vendor", "mac", "mac_vendor")}
     pinged = result.get("ping_ms") is not None
     device = create_device(db, values, add_ping_check=bool(opts.add_ping_check and pinged), extra=extra)
     if not pinged and not result.get("snmp") and result.get("open_ports"):
@@ -479,8 +494,10 @@ class ScanManager:
             await asyncio.gather(*(one(h) for h in hosts))
             self.db.update("scans", scan_id, dict(progress))
             await self._match_existing(scan_id)
-            if opts.auto_add != "none":
-                added = self.add(scan_id, mode=opts.auto_add)
+            added = self.add(scan_id, mode=opts.auto_add) if opts.auto_add != "none" else []
+            if opts.add_public and opts.auto_add != "alive":
+                added += self.add(scan_id, mode="public")
+            if opts.auto_add != "none" or added:
                 self.db.update("scans", scan_id, {"added": len(added)})
         except asyncio.CancelledError:
             state = "cancelled"
@@ -504,11 +521,12 @@ class ScanManager:
     def _store(self, scan_id: int, r: dict[str, Any]) -> None:
         self.db.execute(
             "INSERT OR REPLACE INTO scan_results (scan_id, ip, dns_name, ping_ms, open_ports, snmp, snmp_cred, "
-            "snmp_version, sys_name, sys_descr, sys_object_id, vendor, status, seen_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?)",
+            "snmp_version, sys_name, sys_descr, sys_object_id, vendor, mac, mac_vendor, status, seen_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?)",
             (scan_id, r["ip"], r.get("dns_name") or "", r.get("ping_ms"), _dumps(r.get("open_ports") or []),
              int(bool(r.get("snmp"))), r.get("snmp_cred"), r.get("snmp_version") or "", r.get("sys_name") or "",
-             r.get("sys_descr") or "", r.get("sys_object_id") or "", r.get("vendor") or "", time.time()),
+             r.get("sys_descr") or "", r.get("sys_object_id") or "", r.get("vendor") or "",
+             r.get("mac") or "", r.get("mac_vendor") or "", time.time()),
         )
 
     async def _match_existing(self, scan_id: int) -> None:
@@ -546,6 +564,10 @@ class ScanManager:
             rows = [r for r in rows if r["ip"] in wanted]
         elif mode == "snmp":
             rows = [r for r in rows if r["snmp"]]
+        elif mode == "public":  # answered SNMP with the "public" community
+            creds = ScanOptions.from_dict(loads(scan["options"], {})).credentials()
+            rows = [r for r in rows if r["snmp"] and r["snmp_cred"] is not None and r["snmp_cred"] < len(creds)
+                    and creds[r["snmp_cred"]].get("snmp_community") == PUBLIC]
         added = []
         for r in rows:
             try:

@@ -143,3 +143,36 @@ def test_scan_api(tmp_path, db):
         assert "authpass1" in stored
         assert c.get("/scans").status_code == 200 and c.get(f"/scans/{scan_id}").status_code == 200
         assert c.delete(f"/api/scans/{scan_id}").status_code == 204
+
+
+def test_edit_scan(tmp_path, db):
+    net = Net()
+    app = create_app(Settings(database=str(tmp_path / "t.db")), db=db, start_monitor=False,
+                     probe=net.probe, snmp_factory=lambda dev, s: net.client(dev["hostname"], dev, 1))
+    with TestClient(app) as c:
+        scan = c.post("/api/scans", json={"name": "Home", "targets": "10.0.0.1-2", "start": False, "options": {
+            "communities": ["public"], "tcp_ports": [22], "v3": [{"user": "mon", "auth_key": "authpass1"}],
+            "resolve_dns": False}}).json()
+        # the scan page carries a pre-filled edit form (passphrases blank, marked as kept)
+        page = c.get(f"/scans/{scan['id']}").text
+        assert "Edit scan" in page and 'value="Home"' in page and ">10.0.0.1-2</textarea>" in page
+        assert 'value="22"' in page and "unchanged - leave blank to keep" in page and "authpass1" not in page
+        assert f'href="/scans/{scan["id"]}?edit=1"' in c.get("/scans").text
+        # save without running: settings change, nothing starts
+        r = c.patch(f"/api/scans/{scan['id']}", json={
+            "name": "Home LAN", "targets": "10.0.0.1-6", "interval": 86400, "start": False,
+            "options": {"communities": ["home", "public"], "exclude": "10.0.0.6", "tcp_ports": [22, 443],
+                        "v3": [{"user": "mon", "auth_key": ""}], "auto_add": "alive"}})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert (body["name"], body["total"], body["interval"], body["state"]) == ("Home LAN", 5, 86400, "idle")
+        assert body["options"]["communities"] == ["home", "public"] and body["options"]["auto_add"] == "alive"
+        assert "authpass1" in db.one("SELECT options FROM scans WHERE id = ?", (scan["id"],))["options"]
+        # save & run now
+        assert c.patch(f"/api/scans/{scan['id']}", json={"start": True}).json()["state"] in ("queued", "running", "done")
+        for _ in range(100):
+            if c.get(f"/api/scans/{scan['id']}").json()["state"] == "done":
+                break
+            time.sleep(0.05)
+        assert c.get(f"/api/scans/{scan['id']}").json()["found"] >= 1
+        assert c.patch(f"/api/scans/{scan['id']}", json={"targets": "10.0.0.0/8"}).status_code == 422

@@ -11,6 +11,7 @@ PKG = ROOT / "snmpathy"
 datas = [
     (str(PKG / "web" / "templates"), "snmpathy/web/templates"),
     (str(PKG / "web" / "static"), "snmpathy/web/static"),
+    (str(PKG / "data"), "snmpathy/data"),  # MAC vendor (OUI) table
 ]
 binaries = []
 hiddenimports = collect_submodules("snmpathy") + collect_submodules("uvicorn")

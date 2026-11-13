@@ -4,6 +4,30 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 `snmpathy version`. Executables built with `scripts/build_executable` also show the git
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
+## 0.7.3
+- **Brand tags without SNMP.** Network scans read the MAC address of every host that answers
+  (from the ARP table) and look up its maker, so home and small-office gear that has SNMP
+  off (Ubiquiti, TP-Link, Netgear, eero, printers, cameras, ...) is tagged too. Existing
+  devices on the local network pick up their MAC at startup, every 10 minutes and with
+  **Settings → Device tagging → Tag existing devices now**. The MAC and its maker show on the
+  device page and in scan results.
+- **Scans always try the `public` community** (after the ones you list) and add the hosts
+  that answer it as devices, even when *Add automatically* is *No* (a per-scan checkbox
+  turns this off).
+- **Several communities and SNMPv3 logins per scan.** The scan form lists each community in its
+  own box and each SNMPv3 user (with its own protocols, passphrases and context) in its own row:
+  **+ Add community** / **+ Add SNMPv3 user**, × to remove. They are tried in order and the one
+  that answers is saved on the device.
+- **Edit a network scan** after creating it (targets, credentials, schedule, adding rules):
+  **Edit** on the scan list and the scan page, with **Save & run now**.
+- **Updating a copy on another computer works.** A copy that came from another computer (for
+  example a synced OneDrive Desktop) opened a console saying *The system cannot find the path
+  specified*. The tray now finds the source folder, or downloads it once with Git into
+  `%LOCALAPPDATA%\SNMPathy\source`, and uses the Python it finds on this computer. If Python
+  or Git is missing, it says so instead of failing.
+- Form fields side by side line up: a hint such as *optional* sits on the label line instead
+  of pushing that field's box down (every page).
+
 ## 0.7.2
 - **Sort any table by clicking a column heading** (again to reverse), on every page and in
   dashboards. Understands units (Gbps / MiB / % / ms), "5m ago" times, dates, IP addresses

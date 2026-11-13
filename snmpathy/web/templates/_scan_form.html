@@ -1,0 +1,132 @@
+{# The network scan form: new scan (edit_scan undefined) or edit an existing one (edit_scan = the scan,
+   with options from scanner.public_options so SNMPv3 passphrases are blank and kept unless retyped). #}
+{% set s = edit_scan if edit_scan is defined and edit_scan else none %}
+{% set o = s.options if s else {} %}
+{% set v3_users = (o.v3 or []) if s else [] %}
+{% set communities = (o.communities or []) if s else [] %}
+{% macro v3_row(u) %}<div class="v3-row">
+  <div class="form-grid">
+    <label class="field">User<input data-v3="user" autocomplete="off" value="{{ u.user or '' }}"></label>
+    <label class="field">Auth protocol<select data-v3="auth_proto">{% for p in ['sha', 'sha256', 'sha384', 'sha512', 'sha224', 'md5', 'none'] %}<option {{ 'selected' if (u.auth_proto or 'sha') == p }}>{{ p }}</option>{% endfor %}</select></label>
+    <label class="field">Auth passphrase<input data-v3="auth_key" type="password" autocomplete="new-password" placeholder="{{ 'unchanged - leave blank to keep' if u.has_auth_key }}"></label>
+    <label class="field">Privacy protocol<select data-v3="priv_proto">{% for p in ['aes', 'aes192', 'aes256', 'des', '3des', 'none'] %}<option {{ 'selected' if (u.priv_proto or 'aes') == p }}>{{ p }}</option>{% endfor %}</select></label>
+    <label class="field">Privacy passphrase<input data-v3="priv_key" type="password" autocomplete="new-password" placeholder="{{ 'unchanged - leave blank to keep' if u.has_priv_key }}"></label>
+    <label class="field">Context <span class="hint">optional</span><input data-v3="context" autocomplete="off" value="{{ u.context or '' }}"></label>
+  </div>
+  <button type="button" class="btn ghost sm cred-remove" data-remove-row title="Remove this user" aria-label="Remove this user">&times;</button>
+</div>{% endmacro %}
+{% macro community_row(c) %}<div class="cred-row"><input data-community autocomplete="off" placeholder="community string" value="{{ c }}" aria-label="SNMP community"><button type="button" class="btn ghost sm" data-remove-row title="Remove" aria-label="Remove this community">&times;</button></div>{% endmacro %}
+<div class="modal-back hidden" id="scan-modal">
+  <div class="modal" style="max-width:860px">
+    <div class="card-head"><h2>{{ 'Edit scan' if s else 'New network scan' }}</h2><button class="btn ghost" data-action="close-modal">&times;</button></div>
+    <form {% if s %}data-api="/api/scans/{{ s.id }}" data-method="PATCH" data-redirect="/scans/{{ s.id }}" data-success="Scan saved"{% else %}data-api="/api/scans" data-redirect="/scans/{id}"{% endif %} data-transform="scan" id="scan-form">
+      <input type="hidden" id="scan-run-after" name="run_after" value="{{ '' if s else '1' }}">
+      <div class="modal-body">
+        <div class="form-grid">
+          <label class="field wide">Targets <span class="hint">CIDR, ranges, addresses or names - separated by commas or spaces</span>
+            <textarea name="targets" rows="2" required placeholder="10.0.0.0/24, 10.0.1.1-50, 192.168.10.5" id="scan-targets">{{ s.targets if s else '' }}</textarea>
+            <span class="small muted" id="scan-count"></span></label>
+          <label class="field">Name<input name="name" placeholder="HQ LAN" data-empty="omit" value="{{ s.name if s else '' }}"></label>
+          <label class="field">Exclude <span class="hint">optional</span><input name="options.exclude" placeholder="10.0.0.1, 10.0.0.250-254" value="{{ o.exclude or '' }}"></label>
+          <label class="field">Run from<select name="collector_id" data-type="nullable"><option value="">This server</option>{% for col in collectors %}<option value="{{ col.id }}" {{ 'selected' if s and s.collector_id == col.id }}>Collector: {{ col.name }}{{ ' (' ~ col.site ~ ')' if col.site }}</option>{% endfor %}</select></label>
+          <label class="field">Repeat<select name="interval" data-type="int">{% for v, l in [(0, 'Run once'), (3600, 'Every hour'), (21600, 'Every 6 hours'), (86400, 'Daily'), (604800, 'Weekly')] %}<option value="{{ v }}" {{ 'selected' if s and s.interval == v }}>{{ l }}</option>{% endfor %}{% if s and s.interval and s.interval not in [3600, 21600, 86400, 604800] %}<option value="{{ s.interval }}" selected>Every {{ s.interval|duration }}</option>{% endif %}</select></label>
+        </div>
+        <fieldset><legend>SNMP credentials to try</legend>
+          <p class="small muted" style="margin:0 0 10px">Every host is tried with each of these in order; the first one that answers is saved on the device. The <span class="mono">public</span> community is always tried last.</p>
+          <div class="cred-head"><strong class="small">Communities (v1 / v2c)</strong><button type="button" class="btn sm" data-add-row="community">+ Add community</button></div>
+          <div class="cred-list" id="scan-communities">{% for c in communities %}{% if c != 'public' or not loop.last %}{{ community_row(c) }}{% endif %}{% endfor %}{% if not communities or communities == ['public'] %}{{ community_row('') }}{% endif %}</div>
+          <div class="cred-head mt"><strong class="small">SNMPv3 users</strong><button type="button" class="btn sm" data-add-row="v3">+ Add SNMPv3 user</button></div>
+          <div id="scan-v3">{% for u in v3_users %}{{ v3_row(u) }}{% endfor %}</div>
+          <p class="small muted" id="scan-v3-empty" style="margin:4px 0 0">None - add one to try SNMPv3 logins.</p>
+          <template id="tpl-community">{{ community_row('') }}</template>
+          <template id="tpl-v3">{{ v3_row({}) }}</template>
+        </fieldset>
+        <fieldset><legend>Probes</legend>
+          <div class="form-grid">
+            <label class="field">SNMP port<input name="options.snmp_port" type="number" data-type="int" value="{{ o.snmp_port or 161 }}"></label>
+            <label class="field">TCP ports <span class="hint">optional</span><input name="options.tcp_ports" data-type="list" placeholder="22, 80, 443, 3389" value="{{ (o.tcp_ports or [])|join(', ') }}"></label>
+            <label class="field">Timeout (s)<input name="options.timeout" type="number" step="0.1" data-type="float" value="{{ o.timeout or 1.5 }}"></label>
+            <label class="field">Parallel probes<input name="options.concurrency" type="number" data-type="int" value="{{ o.concurrency or 64 }}" min="1" max="512"></label>
+            <label class="check"><input type="checkbox" name="options.ping" {{ 'checked' if not s or o.ping }}> Ping (ICMP)</label>
+            <label class="check"><input type="checkbox" name="options.snmp" {{ 'checked' if not s or o.snmp }}> SNMP</label>
+            <label class="check"><input type="checkbox" name="options.resolve_dns" {{ 'checked' if not s or o.resolve_dns }}> Reverse DNS names</label>
+            <label class="check"><input type="checkbox" name="options.snmp_only_if_alive" {{ 'checked' if s and o.snmp_only_if_alive }}> <span>Only try SNMP on hosts that answer ping/TCP <span class="muted small">(faster on sparse ranges)</span></span></label>
+          </div>
+        </fieldset>
+        <fieldset><legend>Adding devices</legend>
+          <div class="form-grid">
+            <label class="field">Add automatically<select name="options.auto_add">{% for v, l in [('none', "No - I'll pick from the results"), ('snmp', 'Hosts that answer SNMP'), ('alive', 'Every host that answers')] %}<option value="{{ v }}" {{ 'selected' if o.auto_add == v }}>{{ l }}</option>{% endfor %}</select></label>
+            <label class="field">Online rule for new devices<select name="options.avail_mode">{% for k, l in AVAIL_MODES.items() %}<option value="{{ k }}" {{ 'selected' if o.avail_mode == k }}>{{ l }}</option>{% endfor %}</select></label>
+            <label class="field">Tags<input name="options.tags" data-type="list" value="{{ (o.tags or [])|join(', ') if s else 'discovered' }}"></label>
+            <label class="field">Location<input name="options.location" value="{{ o.location or '' }}"></label>
+            <label class="field">Poll interval (s)<input name="options.poll_interval" type="number" data-type="int" value="{{ o.poll_interval or 300 }}" min="10"></label>
+            <label class="check"><input type="checkbox" name="options.add_public" {{ 'checked' if not s or o.add_public is not defined or o.add_public }}> Always add hosts that answer the "public" community</label>
+            <label class="check"><input type="checkbox" name="options.add_ping_check" {{ 'checked' if not s or o.add_ping_check }}> Add a ping check to hosts that answer ping</label>
+          </div>
+        </fieldset>
+        {% if s %}<p class="small muted" style="margin-bottom:0">Changes apply to the next run. Results and devices already added are kept.</p>{% endif %}
+      </div>
+      <div class="modal-foot"><button type="button" class="btn" data-action="close-modal">Cancel</button>
+        {% if s %}<button class="btn" type="submit" onclick="document.getElementById('scan-run-after').value = ''">Save</button><button class="btn primary" type="submit" onclick="document.getElementById('scan-run-after').value = '1'">Save &amp; run now</button>
+        {% else %}<button class="btn primary" type="submit">Start scan</button>{% endif %}</div>
+    </form>
+  </div>
+</div>
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  SP.transforms.scan = (b) => {
+    b.options = b.options || {};
+    const form = SP.$("#scan-form");
+    // Each box holds one community (a pasted "a, b, c" list is split up); blanks are skipped.
+    b.options.communities = [...new Set(SP.$$("#scan-communities [data-community]", form)
+      .flatMap((el) => el.value.split(",")).map((c) => c.trim()).filter(Boolean))];
+    b.options.v3 = SP.$$("#scan-v3 .v3-row", form)
+      .map((row) => Object.fromEntries(SP.$$("[data-v3]", row).map((el) => [el.dataset.v3, el.value.trim()])))
+      .filter((u) => u.user);
+    b.options.tcp_ports = (b.options.tcp_ports || []).map((p) => parseInt(p, 10)).filter((p) => p > 0 && p < 65536);
+    if (b.collector_id === "") b.collector_id = null;
+    b.start = b.run_after === "1";
+    delete b.run_after;
+    return b;
+  };
+  // Credential rows: add / remove.
+  const v3Box = SP.$("#scan-v3"), v3Empty = SP.$("#scan-v3-empty");
+  const syncV3 = () => v3Empty.classList.toggle("hidden", v3Box.children.length > 0);
+  syncV3();
+  SP.$("#scan-form").addEventListener("click", (ev) => {
+    const add = ev.target.closest("[data-add-row]");
+    if (add) {
+      const kind = add.dataset.addRow;
+      const node = SP.$(kind === "v3" ? "#tpl-v3" : "#tpl-community").content.firstElementChild.cloneNode(true);
+      (kind === "v3" ? v3Box : SP.$("#scan-communities")).appendChild(node);
+      SP.$("input", node).focus();
+      syncV3();
+      return;
+    }
+    const rm = ev.target.closest("[data-remove-row]");
+    if (rm) {
+      const row = rm.closest(".cred-row, .v3-row");
+      if (row.classList.contains("cred-row") && row.parentNode.children.length === 1) SP.$("input", row).value = "";
+      else row.remove();
+      syncV3();
+    }
+  });
+  const targets = SP.$("#scan-targets"), out = SP.$("#scan-count");
+  let timer;
+  const preview = () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      if (!targets.value.trim()) { out.textContent = ""; return; }
+      try {
+        const r = await SP.api("POST", "/api/scans/preview", { targets: targets.value, exclude: SP.$("[name='options.exclude']").value });
+        out.textContent = `${r.count.toLocaleString()} addresses (${r.first.join(", ")}${r.count > 5 ? " … " + r.last.join(", ") : ""})`;
+      } catch (e) { out.textContent = e.message; }
+    }, 350);
+  };
+  targets.addEventListener("input", preview);
+  SP.$("[name='options.exclude']").addEventListener("input", preview);
+  if (targets.value.trim()) preview();
+  const q = new URLSearchParams(location.search);
+  if (q.get("new") || q.get("edit")) SP.openModal(SP.$("#scan-modal"));
+});
+</script>

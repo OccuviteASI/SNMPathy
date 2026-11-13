@@ -456,7 +456,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
                         ping = f"{r['ping_ms']:.1f}ms" if r["ping_ms"] is not None else "-"
                         snmp = f"v{r['snmp_version']}" if r["snmp"] else "-"
                         print(f"{r['ip']:<16} {ping:>8}  snmp={snmp:<4} ports={ports:<12} "
-                              f"{r['sys_name'] or r['dns_name']}  {r['vendor']}")
+                              f"{r['sys_name'] or r['dns_name']}  {r['vendor'] or r.get('mac_vendor') or ''}")
         await asyncio.gather(*(one(h) for h in hosts))
         return found
 
