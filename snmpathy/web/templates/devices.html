@@ -34,7 +34,7 @@
         {% set c = counts.get(d.id) %}
         <tr>
           <td><input type="checkbox" class="bulk-pick" value="{{ d.id }}" aria-label="Select {{ d.name }}"></td>
-          <td data-sort="{{ {'down': 0, 'unreachable': 1, 'unknown': 2, 'up': 3}.get(d.status, 4) - (0.5 if d.degraded else 0) }}" title="{{ d.status_reason }}">{% if not d.enabled %}{{ status('paused', 'disabled') }}{% else %}{{ status(d.status) }}{% if d.degraded %}<div>{{ status('warning', 'degraded') }}</div>{% endif %}{% endif %}</td>
+          <td data-sort="{{ {'down': 8, 'unreachable': 7, 'unknown': 5, 'up': 1}.get(d.status, 0) + (5 if d.degraded and d.status == 'up' else 0) }}" title="{{ d.status_reason }}">{% if not d.enabled %}{{ status('paused', 'disabled') }}{% else %}{{ status(d.status) }}{% if d.degraded %}<div>{{ status('warning', 'degraded') }}</div>{% endif %}{% endif %}</td>
           <td><a href="/devices/{{ d.id }}"><strong>{{ d.name }}</strong></a><div class="small muted">{{ d.hostname }}{% for t in d.tags %} <span class="tag">{{ t }}</span>{% endfor %}</div></td>
           <td><div>{{ d.vendor or '-' }}</div><div class="small muted" style="max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ d.sys_descr }}">{{ d.sys_descr }}</div></td>
           <td>{{ d.location or d.sys_location or '-' }}</td>

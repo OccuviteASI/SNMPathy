@@ -200,8 +200,13 @@ table { border-collapse: collapse; width: 100%; }
 .table td.num, .table th.num { text-align: right; }
 .table-wrap { overflow-x: auto; }
 .table-wrap.scroll { max-height: 520px; overflow-y: auto; }
-th.sortable { cursor: pointer; user-select: none; }
-th.sortable:hover { color: var(--text); }
+th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+th.sortable:hover, th.sortable:focus-visible { color: var(--text); }
+th.sortable::after { content: "\2195"; display: inline-block; width: 1em; margin-left: 3px; opacity: 0; font-size: 10px; }
+th.sortable:hover::after { opacity: .45; }
+th.sortable[aria-sort="ascending"], th.sortable[aria-sort="descending"] { color: var(--accent); }
+th.sortable[aria-sort="ascending"]::after { content: "\25B2"; opacity: 1; }
+th.sortable[aria-sort="descending"]::after { content: "\25BC"; opacity: 1; }
 
 /* Status: always a shape + label, never colour alone */
 .status { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12.5px; white-space: nowrap; }

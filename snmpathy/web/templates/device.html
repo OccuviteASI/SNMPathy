@@ -160,7 +160,7 @@
           <td class="num">{{ i.if_index }}</td>
           <td><strong>{{ i.name }}</strong>{% if i.descr and i.descr != i.name %}<div class="small muted">{{ i.descr }}</div>{% endif %}</td>
           <td>{{ i.alias or '' }}</td>
-          <td data-sort="{{ i.oper_status or 9 }}">{% if i.admin_status == 2 %}{{ status('paused', 'admin down') }}{% else %}{{ status('up' if oper == 'up' else ('down' if oper in ('down', 'lowerLayerDown') else 'unknown'), oper) }}{% endif %}</td>
+          <td data-sort="{{ 2 if i.admin_status == 2 else {1: 1, 2: 8, 7: 8}.get(i.oper_status, 5) }}">{% if i.admin_status == 2 %}{{ status('paused', 'admin down') }}{% else %}{{ status('up' if oper == 'up' else ('down' if oper in ('down', 'lowerLayerDown') else 'unknown'), oper) }}{% endif %}</td>
           <td data-sort="{{ i.speed or 0 }}">{{ i.speed|speed }}</td>
           <td class="num" data-sort="{{ i.in_bps or 0 }}">{{ i.in_bps|bps }}</td>
           <td class="num" data-sort="{{ i.out_bps or 0 }}">{{ i.out_bps|bps }}</td>
