@@ -183,9 +183,25 @@ select option:checked { background-color: var(--accent-soft); color: var(--text)
 input:focus, select:focus, textarea:focus, .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
 textarea { width: 100%; min-height: 80px; }
 input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
-label.field { display: flex; flex-direction: column; gap: 5px; font-weight: 500; font-size: 13px; color: var(--text-2); }
+/* A field is a small grid: the label text and a hint written before the control share the first
+   line ("Exclude  optional"), the control gets its own full-width line, and a hint written after
+   the control is help text on the line below it. */
+label.field { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 6px; row-gap: 5px;
+  align-content: start; align-items: baseline; font-weight: 500; font-size: 13px; color: var(--text-2); }
+label.field > :not(.hint) { grid-column: 1 / -1; }
+label.field > :not(.hint) ~ .hint { grid-column: 1 / -1; }
 label.field .hint { font-weight: 400; color: var(--muted); font-size: 12px; }
+/* In a form grid, fields on the same row share their label, control and help lines (subgrid), so
+   the controls line up even when a neighbour's label wraps onto two lines. */
+@supports (grid-template-rows: subgrid) {
+  .form-grid > * { grid-row: span 3; align-self: start; }
+  .form-grid > label.field { grid-template-rows: subgrid; align-self: stretch; align-items: end; }
+  .form-grid > label.field > :not(.hint) { align-self: stretch; }   /* text boxes and dropdowns: same top, same height */
+  .form-grid > label.field > :not(.hint) ~ .hint { align-self: start; }
+}
 label.check { display: inline-flex; gap: 8px; align-items: center; font-weight: 500; font-size: 13px; }
+/* A checkbox among fields lines up with their input boxes, not with their labels. */
+.form-grid > label.check { align-self: start; margin-top: 24px; min-height: 34px; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px 16px; }
 .form-grid .wide { grid-column: 1 / -1; }
 fieldset { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px 16px; margin: 0 0 16px; }
