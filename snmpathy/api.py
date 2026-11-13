@@ -991,6 +991,7 @@ class ScanPatch(BaseModel):
     options: Optional[dict[str, Any]] = None
     interval: Optional[int] = Field(None, ge=0, le=30 * 86400)
     collector_id: Optional[int] = None
+    start: bool = False  # run it straight after saving
 
 
 class ScanAddIn(BaseModel):
@@ -1068,15 +1069,21 @@ def get_scan(scan_id: int, request: Request, db: Database = Depends(get_db)):
 
 
 @router.patch("/scans/{scan_id}", tags=["scans"])
-def patch_scan(scan_id: int, body: ScanPatch, request: Request, db: Database = Depends(get_db)):
+async def patch_scan(scan_id: int, body: ScanPatch, request: Request, db: Database = Depends(get_db)):
+    """Change a scan's settings (they apply to the next run); ``start`` runs it straight away."""
     from .scanner import TargetError
 
+    manager = _scans(request)
+    values = body.model_dump(exclude_unset=True)
+    start = values.pop("start", False)
     try:
-        scan = _scans(request).update(scan_id, body.model_dump(exclude_unset=True))
+        scan = manager.update(scan_id, values)
     except KeyError as exc:
         raise _not_found("scan") from exc
     except (TargetError, ValueError) as exc:
         raise HTTPException(422, str(exc)) from exc
+    if start:
+        scan = manager.start(scan_id)
     return _public_scan(db, scan)
 
 

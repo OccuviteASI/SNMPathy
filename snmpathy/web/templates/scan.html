@@ -4,6 +4,7 @@
 {% block crumbs %}<div class="crumbs"><a href="/devices">Devices</a> / <a href="/scans">Network scans</a></div>{% endblock %}
 {% block actions %}
 <button class="btn" id="scan-cancel" data-action="api" data-url="/api/scans/{{ scan.id }}/cancel" data-then="none" data-success="Cancelling…">Cancel</button>
+<button class="btn" data-action="modal" data-target="#scan-modal">{{ icon('settings') }} Edit</button>
 <button class="btn" data-action="api" data-url="/api/scans/{{ scan.id }}/run" data-success="Scan started">{{ icon('refresh') }} Run again</button>
 <button class="btn danger" data-action="api" data-method="DELETE" data-url="/api/scans/{{ scan.id }}" data-confirm="Delete this scan and its results? Devices already added are kept." data-redirect="/scans">Delete</button>
 {% endblock %}
@@ -30,6 +31,7 @@
     </table>
   </div>
 </div>
+{% set edit_scan = scan %}{% include "_scan_form.html" %}
 {% endblock %}
 {% block scripts %}
 <script>
