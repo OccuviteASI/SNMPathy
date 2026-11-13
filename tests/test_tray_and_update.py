@@ -251,3 +251,61 @@ def test_error_lines_are_recognised(gui):
     assert gui.error_line("PermissionError: [Errno 13] Permission denied: 'SNMPathy.exe'")
     assert not gui.error_line("[build] BUILD FAILED while running: pip install")
     assert not gui.error_line("123 INFO: Building EXE")
+
+
+class _FakeRoot:
+    """Just enough of a Tk root to drive UpdateWindow.finish() without a display."""
+    def __init__(self):
+        self.timers, self.destroyed, self.title_text, self._state = {}, False, "", "normal"
+
+    def after(self, ms, fn):
+        key = len(self.timers) + 1
+        self.timers[key] = fn
+        return key
+
+    def after_cancel(self, key):
+        self.timers.pop(key, None)
+
+    def destroy(self):
+        self.destroyed = True
+
+    def state(self):
+        return self._state
+
+    def title(self, text):
+        self.title_text = text
+
+    def tick(self):  # run the pending timer, like one second passing
+        key = max(self.timers)
+        self.timers.pop(key)()
+
+
+def _window(gui, outcome):
+    w = gui.UpdateWindow.__new__(gui.UpdateWindow)
+    w.root, w.close_timer, w.details_shown, w.outcome = _FakeRoot(), None, False, outcome
+    w.running, w.last_error, w.lines = True, "", []
+    w.close_btn, w.title, w.status, w.bar = {}, {}, {}, {}
+    w.add_log = lambda line: w.lines.append(line)
+    w.toggle_details = lambda: (w.cancel_countdown(), setattr(w, "details_shown", not w.details_shown))
+    return w
+
+
+def test_update_window_closes_itself_after_success(gui):
+    w = _window(gui, "ok")
+    w.finish(0)
+    assert w.close_btn["text"] == f"Close ({gui.AUTO_CLOSE_SECONDS})" and not w.root.destroyed
+    for _ in range(gui.AUTO_CLOSE_SECONDS):
+        w.root.tick()
+    assert w.root.destroyed
+
+
+def test_update_window_stays_open_on_failure_or_when_reading(gui):
+    failed = _window(gui, None)
+    failed.finish(1)
+    assert failed.outcome == "failed" and not failed.root.timers and not failed.root.destroyed
+    reading = _window(gui, "current")
+    reading.finish(0)
+    reading.root.tick()
+    assert reading.close_btn["text"] == f"Close ({gui.AUTO_CLOSE_SECONDS - 1})"
+    reading.toggle_details()  # opened the log: the countdown stops
+    assert reading.close_btn["text"] == "Close" and not reading.root.timers and not reading.root.destroyed

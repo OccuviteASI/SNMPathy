@@ -1,6 +1,6 @@
 """SNMPathy - self-hosted network monitoring (SNMP, syslog, uptime)."""
 
-__version__ = "0.7.0"
+__version__ = "0.7.1"
 
 # Filled in by scripts/build_executable.py (git commit and build date) so a built
 # executable can be told apart from older builds of the same version.

@@ -551,7 +551,7 @@ The CLI flags `--db`, `--host`, `--port`, `--syslog-udp`, `--syslog-tcp`, `--tok
 Right-click the tray icon and choose **Update SNMPathy**. A small window shows the progress
 (checking, downloading, building, restarting) with the full log under **Show details**; no
 console window opens. **Run in background** hides the window and lets the update finish on its
-own. If the update fails, the window says why and SNMPathy keeps running the previous version.
+own. After a successful update the window closes itself after 5 seconds. If the update fails, the window says why and SNMPathy keeps running the previous version.
 
 You can also double-click **Update SNMPathy** (created next to `SNMPathy.exe` in your Claude
 folder by the build) or `scripts\update.cmd` in the source folder (`scripts/update.sh` on
