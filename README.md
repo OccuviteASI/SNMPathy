@@ -67,7 +67,13 @@ needs an inbound firewall rule: `New-NetFirewallRule -DisplayName SNMPathy-Syslo
 
 ### Standalone executable (no Python needed to run it)
 
-Build a single-file `SNMPathy.exe` (Windows) or `SNMPathy` (macOS / Linux) and store it in
+**Download it**: every change to `main` is built by CI and published on the
+[latest release](https://github.com/OccuviteASI/SNMPathy/releases/latest) page:
+`SNMPathy-windows.exe` (rename it to `SNMPathy.exe`), `SNMPathy-macos` and `SNMPathy-linux`.
+Put it in a folder of its own and double-click it. Nothing else needs to be installed, and the
+tray's **Update SNMPathy** keeps it up to date.
+
+**Or build it yourself**: build a single-file `SNMPathy.exe` (Windows) or `SNMPathy` (macOS / Linux) and store it in
 your **Claude folder**, next to KASTR, DiskWorks and LinkTest:
 
 ```text
@@ -571,20 +577,29 @@ The CLI flags `--db`, `--host`, `--port`, `--syslog-udp`, `--syslog-tcp`, `--tok
 
 ## Updating
 
-Right-click the tray icon and choose **Update SNMPathy**. A small window shows the progress
-(checking, downloading, building, restarting) with the full log under **Show details**; no
-console window opens. **Run in background** hides the window and lets the update finish on its
-own. After a successful update the window closes itself after 5 seconds. If the update fails, the window says why and SNMPathy keeps running the previous version.
+Right-click the tray icon and choose **Update SNMPathy**. It downloads the latest release from
+GitHub (built and published by CI for every change to `main`), so **nothing else needs to be
+installed**: no Python, no Git, no build. A small window shows the progress (checking,
+downloading, checking the new version starts, restarting) with the full log under **Show
+details**. **Run in background** hides the window and lets the update finish on its own; after a
+successful update the window closes itself after 5 seconds.
 
-**A copy on another computer** (a synced OneDrive Desktop, a USB stick, ...) has no source
-folder at the path the build recorded. The tray then looks for one next to the executable and
-in `%LOCALAPPDATA%\SNMPathy\source`, and if there is none it downloads the source there with
-Git the first time you choose **Update SNMPathy**. That computer needs Python 3 and Git; if
-either is missing, the tray says which one to install.
+* The download is checked against the release (size and SHA-256) and must start and report the
+  new version before anything is replaced.
+* The running SNMPathy is closed, the new executable takes its place and SNMPathy starts again
+  in the tray. The previous executable is kept as `SNMPathy.old.exe` until the next start; if
+  the swap fails it is put back. Your database and settings are not touched.
+* If anything fails, the window says why and SNMPathy keeps running the version it had.
+* The tray looks for a new release every 6 hours; when there is one it shows a notification and
+  the menu item reads **Update SNMPathy (0.7.5 available)**.
 
-You can also double-click **Update SNMPathy** (created next to `SNMPathy.exe` in your Claude
-folder by the build) or `scripts\update.cmd` in the source folder (`scripts/update.sh` on
-macOS / Linux), which show the same steps in a console window. Every way of updating:
+From a prompt: `SNMPathy.exe self-update` (`--check` only reports, `--force` reinstalls the
+latest release, `--no-restart` leaves it stopped).
+
+### Updating a source checkout
+
+Running from a checkout (`snmpathy tray` from Python), or to build the executable yourself,
+`scripts\update.cmd` (`scripts/update.sh` on macOS / Linux) pulls `main`, rebuilds and restarts:
 
 1. fetches the latest `main` and fast-forwards your source folder (it refuses, and changes
    nothing, if you have local edits),
@@ -592,15 +607,9 @@ macOS / Linux), which show the same steps in a console window. Every way of upda
 3. closes the running SNMPathy, rebuilds, copies the new executable into place, and
 4. starts it again in the tray.
 
-To have it happen automatically, run `scripts\update.cmd --schedule` once: a scheduled task
-(cron on macOS / Linux) checks every night at 03:17 and only rebuilds when something new was
-merged; it runs hidden and logs to `build/update.log`. `--unschedule` removes it. Git must
-be installed (Git for Windows on Windows).
-
-Only one update runs at a time: a tray click while the nightly update is running is refused
-with "another update is already running". The progress window uses the Python that built the
-executable (recorded in `updater.json` next to it); if you move the source folder or reinstall
-Python, run `scripts\build_executable.cmd` once to refresh it.
+`scripts\update.cmd --schedule` checks every night at 03:17 (a scheduled task, or cron on
+macOS / Linux) and only rebuilds when something new was merged; it logs to `build/update.log`.
+`--unschedule` removes it. This needs Python 3 and Git.
 
 ## Running in the system tray
 

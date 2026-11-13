@@ -38,7 +38,7 @@ a = Analysis(
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
-    excludes=["tkinter", "pytest", "pytest_asyncio"],
+    excludes=["pytest", "pytest_asyncio"],  # tkinter stays: the self-update progress window uses it
     noarchive=False,
 )
 pyz = PYZ(a.pure)

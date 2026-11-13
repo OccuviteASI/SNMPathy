@@ -4,6 +4,15 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 `snmpathy version`. Executables built with `scripts/build_executable` also show the git
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
+## 0.7.4
+- **Updating needs nothing installed.** CI now publishes the Windows, macOS and Linux executables
+  as a GitHub release for every change to `main`, and the tray's **Update SNMPathy** downloads
+  the latest one and swaps it in: no Python, Git or local build. The download is checked (size,
+  SHA-256, and that it starts) before the running SNMPathy is replaced, and the old executable
+  is put back if the swap fails. The tray checks for a new release every 6 hours and says when
+  one is available. `SNMPathy.exe self-update [--check]` does the same from a prompt.
+- New computers: download `SNMPathy-windows.exe` from the latest release instead of building it.
+
 ## 0.7.3
 - **Brand tags without SNMP.** Network scans read the MAC address of every host that answers
   (from the ARP table) and look up its maker, so home and small-office gear that has SNMP

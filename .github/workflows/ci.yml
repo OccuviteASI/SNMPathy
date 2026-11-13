@@ -67,10 +67,14 @@ jobs:
         run: python scripts/build_executable.py --no-copy
       - name: Check the executable runs
         shell: bash
+        env:
+          SNMPATHY_GITHUB_TOKEN: ${{ github.token }}
         run: |
           exe=dist/SNMPathy; [ -f dist/SNMPathy.exe ] && exe=dist/SNMPathy.exe
           "$exe" version
           "$exe" ping 127.0.0.1 -n 1
+          "$exe" self-update --check | tee check.txt  # HTTPS to GitHub works from the executable
+          if [ "${{ runner.os }}" = "Windows" ]; then grep -q "progress window: yes" check.txt; fi
       - name: Name the executable for the collector downloads folder
         shell: bash
         run: |
@@ -85,3 +89,31 @@ jobs:
           name: SNMPathy-${{ runner.os }}
           path: downloads/*
           if-no-files-found: error
+
+  # Every change to main publishes the executables as a GitHub release; the tray's
+  # "Update SNMPathy" downloads them (snmpathy/selfupdate.py). Re-pushing the same version
+  # replaces that version's release.
+  release:
+    name: publish release
+    needs: executables
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: downloads
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(python3 scripts/release_notes.py --version)
+          python3 scripts/release_notes.py "$GITHUB_SHA" > notes.md
+          ls -l downloads
+          gh release delete "v$version" --cleanup-tag --yes || true
+          gh release create "v$version" downloads/* --target "$GITHUB_SHA" --title "SNMPathy $version" \
+            --notes-file notes.md --latest
