@@ -39,14 +39,21 @@
     return data;
   };
 
-  SP.toast = function (msg, kind) {
+  // SP.toast(message, kind, {label, onClick}) - the optional action adds a button (e.g. "Undo").
+  SP.toast = function (msg, kind, action) {
     let box = $("#toasts");
     if (!box) { box = document.createElement("div"); box.id = "toasts"; document.body.appendChild(box); }
     const t = document.createElement("div");
     t.className = "toast" + (kind === "error" ? " error" : "");
     t.textContent = msg;
+    if (action) {
+      const btn = document.createElement("button");
+      btn.className = "toast-action"; btn.type = "button"; btn.textContent = action.label;
+      btn.onclick = () => { t.remove(); action.onClick(); };
+      t.appendChild(btn);
+    }
     box.appendChild(t);
-    setTimeout(() => t.remove(), kind === "error" ? 7000 : 3500);
+    setTimeout(() => t.remove(), kind === "error" ? 7000 : action ? 8000 : 3500);
   };
 
   // --------------------------------------------------------------- format

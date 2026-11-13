@@ -57,8 +57,10 @@ def test_parents_and_kinds(db, make_device):
     assert device_kind({"sys_descr": "Linux web01 6.8.0"}) == "server"
     assert device_kind({"sys_descr": ""}) == "device"
     assert site_of({"location": "Branch, rack 2"}, {}) == "Branch"
-    assert site_of({"location": ""}, {}) == "Main site"
-    assert site_of({"location": "x", "collector_id": 3}, {3: {"name": "c", "site": "Austin"}}) == "Austin"
+    assert site_of({"location": "", "sys_location": "Somewhere"}, {}) == ""  # SNMP location never assigns a site
+    assert site_of({"location": "x", "collector_id": 3}, {3: {"name": "c", "site": "Austin"}}) == "x"  # Location wins
+    assert site_of({"location": "", "collector_id": 3}, {3: {"name": "c", "site": "Austin"}}) == "Austin"
+    assert site_of({"location": "Pad-12 - East"}, {}) == "Pad-12 - East"  # dashes are part of the name
 
 
 def test_map_api(tmp_path, db, make_device):
@@ -66,7 +68,7 @@ def test_map_api(tmp_path, db, make_device):
     app = create_app(Settings(database=str(tmp_path / "t.db")), db=db, start_monitor=False)
     with TestClient(app) as c:
         g = c.get("/api/map").json()
-        assert g["view"] == "site=|tag="
+        assert g["view"] == "v2|site=|tag="
         assert c.put("/api/map/positions", json={"view": g["view"], "positions": {"d1": [10, 20]}}).json()["saved"] == 1
         assert c.get("/api/map").json()["positions"] == {"d1": [10.0, 20.0]}
         c.delete(f"/api/map/positions?view={g['view']}")
@@ -81,3 +83,44 @@ def test_map_api(tmp_path, db, make_device):
         assert r["applied"] == 2
         assert db.one("SELECT parent_id FROM devices WHERE id = ?", (acc["id"],))["parent_id"] == core["id"]
         assert c.get("/map").status_code == 200
+
+
+def test_unassigned_devices_and_suggestions(db, make_device):
+    core, acc, br = _net(db, make_device)
+    loose = make_device("t-47-ptp", "10.9.0.1", location="")
+    db.update("devices", loose["id"], {"sys_location": "Trailer 47 / mast", "parent_id": core["id"]})
+    g = build_graph(db)
+    assert g["unassigned"] == 1 and g["sites"][0] == {"name": "", "unassigned": True, "devices": 1, "down": 0,
+                                                       "unreachable": 0, "degraded": 0}
+    node = next(n for n in g["nodes"] if n["name"] == "t-47-ptp")
+    assert node["site"] == "" and node["suggested_site"] == "Trailer 47" and node["parent"] == f"d{core['id']}"
+    only = build_graph(db, site="~unassigned")
+    assert [n["name"] for n in only["nodes"]] == ["t-47-ptp"]
+
+
+def test_move_and_rename_sites(tmp_path, db, make_device):
+    core, acc, br = _net(db, make_device)
+    db.execute("INSERT INTO collectors (name, site, token_hash, created_at) VALUES ('c1', 'Austin', 'x', 0)")
+    cid = db.scalar("SELECT id FROM collectors WHERE name = 'c1'")
+    remote = make_device("remote", "10.5.0.1", location="", collector_id=cid)
+    app = create_app(Settings(database=str(tmp_path / "t.db")), db=db, start_monitor=False)
+    with TestClient(app) as c:
+        view = c.get("/api/map").json()["view"]
+        c.put("/api/map/positions", json={"view": view, "positions": {f"d{acc['id']}": [5, 5], "s:HQ": [0, 0]}})
+        r = c.post("/api/map/move", json={"device_ids": [acc["id"], remote["id"]], "site": "Trailer 49"}).json()
+        assert r["moved"] == 2 and {d["location"] for d in r["devices"]} == {"Trailer 49"}
+        g = c.get("/api/map").json()
+        sites = {n["name"]: n["site"] for n in g["nodes"]}
+        assert sites["access"] == sites["remote"] == "Trailer 49"  # Location beats the collector's site
+        assert f"d{acc['id']}" not in g["positions"] and "s:HQ" in g["positions"]  # re-laid out in its new site
+        assert c.post("/api/map/move", json={"device_ids": [acc["id"]], "site": ""}).json()["site"] == ""
+        assert c.get(f"/api/devices/{acc['id']}").json()["location"] == ""
+        assert c.post("/api/map/move", json={"device_ids": [acc["id"]], "site": "A/B"}).status_code == 422
+        assert c.post("/api/map/move", json={"device_ids": [99999], "site": "X"}).status_code == 404
+        # Rename keeps the detail part and moves the saved box position.
+        assert c.post("/api/map/sites/rename", json={"old": "HQ", "new": "Head office"}).json()["renamed"] == 1
+        assert c.get(f"/api/devices/{core['id']}").json()["location"] == "Head office / MDF"
+        assert "s:Head office" in c.get("/api/map").json()["positions"]
+        db.update("devices", remote["id"], {"location": ""})
+        assert c.post("/api/map/sites/rename", json={"old": "Austin", "new": "Austin TX"}).json()["renamed"] == 1
+        assert c.get(f"/api/devices/{remote['id']}").json()["location"] == "Austin TX"

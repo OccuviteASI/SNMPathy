@@ -15,7 +15,7 @@ and a lightweight ELK stack:
 | **Network discovery** | Scan CIDR blocks and ranges with ping, TCP ports and SNMP (several communities / SNMPv3 users), see what answers, and add devices automatically or with one click. Scans can repeat on a schedule and run from a remote site. |
 | **Online / offline rules** (Nagios style) | A device is judged on every method that watches it (SNMP polling, ping, TCP, HTTP, plugins): online if *any* responds (default), only if *all* respond, or if *N* respond. One failing method shows the device as *degraded*, not down. Parent devices make downstream devices *unreachable* instead of alerting for each. |
 | **Remote collectors** (Nagios distributed / PRTG remote probes / Auvik collectors) | Install a collector at each site with a one-line command (downloaded from your server). It connects out over HTTPS, polls and checks the site's devices locally, buffers results through WAN outages and runs network scans there. |
-| **Network map** (Auvik style) | Topology drawn from LLDP / CDP neighbours, grouped by site, with live device status and link utilisation, unmanaged neighbours, drag-and-save layouts and manual links. |
+| **Network map** (Auvik style) | Topology drawn from LLDP / CDP neighbours in tidy, non-overlapping site boxes, with live device status and link utilisation, unmanaged neighbours, manual links, and drag-and-drop moving of devices between sites. |
 | **Network Analyzer** (Nagios Network Analyzer style) | Built-in NetFlow v5/v9, IPFIX and sFlow collector: bandwidth by talker, application, protocol or exporter; top talkers, destinations, applications, conversations; per-host drill-down; bandwidth alerts and a traffic report, next to SNMP interface bandwidth. |
 | **Fusion** (Nagios Fusion style) | One tactical dashboard across several SNMPathy servers: totals, per-server health, merged problems and alerts, cross-server top metrics. |
 | **Alerting** (Zabbix style) | Threshold rules on any metric (with wildcards), device-unreachable, check-down and syslog pattern rules. Pending → firing → resolved lifecycle, "for" durations, acknowledgements, maintenance windows. Notifications via email, Slack / Mattermost, Microsoft Teams, Discord, PagerDuty and generic webhooks. |
@@ -292,13 +292,39 @@ and `--ca-file` cover self-signed and private-CA certificates.
 
 **Network map** draws devices and the links between them from LLDP and CDP neighbour
 tables (collected during SNMP discovery; enable LLDP/CDP on switches and routers).
-Devices are grouped by site: the collector's site, or the first part of the location
-(`HQ / MDF rack A1` belongs to `HQ`). Node rings show status (green up, amber degraded or
-unreachable, red down); links are coloured by utilisation from SNMP counters and drawn
-thicker for faster links. Neighbours that are not monitored appear dashed, ready to add.
-Drag nodes and **Save layout**, filter by site or tag, search, toggle port labels, click a
-node or link for details, **Add link** for connections LLDP cannot see (WAN circuits,
-unmanaged switches), and **Set parents…** to derive parent devices from the topology.
+
+**Sites.** Each site is a box, and boxes never overlap. A device's site is the first part
+of its **Location** (`Trailer 47 / mast` is in site *Trailer 47*); without a Location, its
+collector's site; otherwise it sits in the dashed **Unassigned** box. The location a device
+reports over SNMP is only offered as a suggestion ("Use 'Trailer 47' from SNMP").
+
+**Layout.** Inside a site, linked devices form a top-down tree (routers and firewalls, then
+what hangs off them), and unlinked devices sit in a grid below, grouped by type and name.
+**Auto layout** re-arranges everything; a site's **Tidy up** re-arranges just that site.
+Drag devices within a site or drag a site by its title; the layout saves itself. Links
+between sites run underneath the boxes and come to the front when you select a device.
+**Collapse** a site (▸) to a small tile with its device and alert counts.
+
+**Moving devices between sites, without opening them:**
+
+* drag a device onto another site box (Shift-click or Shift-drag to select several first,
+  then drag one of them or use **Move to site** in the bar that appears);
+* click a device and pick a site (or *New site…*) in its panel;
+* click a site's title to rename it, or tick its devices and move them;
+* open **Sites & devices** for a searchable list: drag a row onto a site, or tick rows
+  and move them.
+
+Every move can be undone from the notification. Moving sets the device's Location to the
+site name; renaming a site updates the Location of every device in it (keeping any detail,
+e.g. `HQ / rack 2` becomes `Head office / rack 2`). API: `POST /api/map/move` and
+`POST /api/map/sites/rename`.
+
+Node rings show status (green up, amber degraded or unreachable, red down); links are
+coloured by utilisation from SNMP counters and drawn thicker for faster links. Neighbours
+that are not monitored appear dashed, ready to add. Filter by site (or *Unassigned*) or tag,
+search, toggle port labels, click a link for details, **Add link** for connections LLDP
+cannot see (WAN circuits, unmanaged switches, wireless bridges), and **Set parents…** to
+derive parent devices from the topology.
 
 ### Network Analyzer (NetFlow / IPFIX / sFlow)
 
