@@ -576,6 +576,12 @@ Right-click the tray icon and choose **Update SNMPathy**. A small window shows t
 console window opens. **Run in background** hides the window and lets the update finish on its
 own. After a successful update the window closes itself after 5 seconds. If the update fails, the window says why and SNMPathy keeps running the previous version.
 
+**A copy on another computer** (a synced OneDrive Desktop, a USB stick, ...) has no source
+folder at the path the build recorded. The tray then looks for one next to the executable and
+in `%LOCALAPPDATA%\SNMPathy\source`, and if there is none it downloads the source there with
+Git the first time you choose **Update SNMPathy**. That computer needs Python 3 and Git; if
+either is missing, the tray says which one to install.
+
 You can also double-click **Update SNMPathy** (created next to `SNMPathy.exe` in your Claude
 folder by the build) or `scripts\update.cmd` in the source folder (`scripts/update.sh` on
 macOS / Linux), which show the same steps in a console window. Every way of updating:

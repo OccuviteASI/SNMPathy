@@ -20,8 +20,11 @@ SNMPathy falls back to the normal console server.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
+import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -136,30 +139,143 @@ def open_path(path: Path) -> None:
         subprocess.Popen(["xdg-open", str(path)])
 
 
-def update_launcher() -> Path | None:
-    folder = app_dir()
-    for name in ("Update SNMPathy.cmd", "update-snmpathy.sh"):
-        if (folder / name).exists():
-            return folder / name
+# ------------------------------------------------------------------ updating
+# Updating rebuilds SNMPathy from a git checkout of its source with Python. The build records
+# both in updater.json next to the executable, but a copy can end up on another computer
+# (a synced Desktop / OneDrive folder, a USB stick) where those paths do not exist. Then the
+# source is looked for elsewhere, or downloaded once with git into SOURCE_HOME.
+DEFAULT_REMOTE = "https://github.com/OccuviteASI/SNMPathy.git"
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def updater_info() -> dict[str, Any]:
+    try:
+        info = json.loads((app_dir() / "updater.json").read_text(encoding="utf-8"))
+        return info if isinstance(info, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def source_home() -> Path:
+    """Where a source checkout is downloaded to when this computer has none."""
+    if sys.platform.startswith("win"):
+        return Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "SNMPathy" / "source"
+    return Path.home() / ".local" / "share" / "snmpathy" / "source"
+
+
+def is_source(path: Path) -> bool:
+    return (path / "scripts" / "update_gui.py").is_file() and (path / "scripts" / "update.py").is_file()
+
+
+def find_source(info: dict[str, Any] | None = None) -> Path | None:
+    """The SNMPathy source checkout to update from, if this computer has one."""
+    info = updater_info() if info is None else info
+    candidates: list[Path] = []
+    for value in (os.environ.get("SNMPATHY_SOURCE"), info.get("source"),
+                  str(Path(info["gui"]).parent.parent) if info.get("gui") else None):
+        if value:
+            candidates.append(Path(value))
+    here = app_dir()
+    candidates += [here, *list(here.parents)[:3], source_home()]
+    for path in candidates:
+        try:
+            if is_source(path):
+                return path
+        except OSError:
+            continue
     return None
 
 
-def updater_command() -> list[str] | None:
-    """The progress-window updater recorded by the build (updater.json next to the executable)."""
-    import json
+def _real_program(path: str | None) -> bool:
+    # The Microsoft Store "python.exe" in WindowsApps only opens the Store.
+    return bool(path) and "windowsapps" not in path.lower() and Path(path).exists()
 
-    try:
-        info = json.loads((app_dir() / "updater.json").read_text(encoding="utf-8"))
-        python, gui = Path(info["python"]), Path(info["gui"])
-    except (OSError, ValueError, KeyError, TypeError):
+
+def find_python(info: dict[str, Any] | None = None) -> list[str] | None:
+    """A Python to run the updater with (windowless on Windows), as a command prefix."""
+    info = updater_info() if info is None else info
+    recorded = info.get("python")
+    if recorded and _real_program(recorded):
+        return [recorded]
+    if sys.platform.startswith("win"):
+        for name in ("pythonw", "python"):
+            found = shutil.which(name)
+            if _real_program(found):
+                windowless = Path(found).with_name("pythonw.exe")
+                return [str(windowless if windowless.exists() else found)]
+        found = shutil.which("pyw") or shutil.which("py")
+        if _real_program(found):
+            return [found, "-3"]
         return None
-    if not python.exists() or not gui.exists():
-        return None  # Python or the source folder was moved: rebuild once to refresh updater.json
-    return [str(python), str(gui), "--dest", str(app_dir())]
+    found = shutil.which("python3") or shutil.which("python")
+    return [found] if _real_program(found) else None
+
+
+def updater_command() -> list[str] | None:
+    """Command for the progress-window updater (scripts/update_gui.py), or None if it cannot run here."""
+    info = updater_info()
+    source, python = find_source(info), find_python(info)
+    if source is None or python is None:
+        return None
+    return [*python, str(source / "scripts" / "update_gui.py"), "--dest", str(app_dir())]
+
+
+def missing_for_update() -> list[str]:
+    """What this computer lacks to update SNMPathy ([] when it can, perhaps after downloading the source)."""
+    info = updater_info()
+    missing = []
+    if find_python(info) is None:
+        missing.append("Python 3 (python.org - tick \"Add python.exe to PATH\")")
+    if find_source(info) is None and not shutil.which("git"):
+        missing.append("Git (git-scm.com)")
+    return missing
+
+
+def update_launcher() -> Path | None:
+    """The old "Update SNMPathy.cmd" / update-snmpathy.sh, if the script it calls exists here."""
+    folder = app_dir()
+    for name in ("Update SNMPathy.cmd", "update-snmpathy.sh"):
+        path = folder / name
+        if not path.exists():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        target = re.search(r'(?:call|exec)\s+"([^"]+)"', text)
+        if target is None or Path(target.group(1)).exists():
+            return path
+    return None
 
 
 def update_available() -> bool:
-    return updater_command() is not None or update_launcher() is not None
+    """Show "Update SNMPathy" in the tray menu: always for the executable (it explains what is missing)."""
+    return is_frozen() or updater_command() is not None or update_launcher() is not None
+
+
+def clone_source(remote: str, dest: Path) -> tuple[bool, str]:
+    """Download the SNMPathy source with git (credentials come from Git's own helper)."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    try:
+        done = subprocess.run(["git", "clone", "--quiet", remote, str(dest)], capture_output=True, text=True,
+                              timeout=900, env=env, creationflags=NO_WINDOW, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, str(exc)
+    return done.returncode == 0, (done.stderr or done.stdout or "").strip()
+
+
+def show_message(text: str, title: str = "SNMPathy update") -> None:
+    """A plain message box (Windows); elsewhere the log."""
+    log.warning("%s: %s", title, text)
+    if sys.platform.startswith("win"):
+        try:
+            import ctypes
+
+            threading.Thread(target=ctypes.windll.user32.MessageBoxW,  # type: ignore[attr-defined]
+                             args=(0, text, title, 0x40 | 0x10000), daemon=True).start()
+        except Exception:
+            pass
 
 
 class TrayApp:
@@ -237,13 +353,17 @@ class TrayApp:
 
     def run_update(self, *_: Any) -> None:
         command = updater_command()
+        if command is None and find_source() is None and not missing_for_update():
+            # A copy built on another computer: download the source here once, then update.
+            threading.Thread(target=self._fetch_source_then_update, daemon=True).start()
+            return
         if command is not None:
             # A progress window in its own process: it outlives this one, which the update closes.
             flags = 0
             if sys.platform.startswith("win"):
                 flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
             try:
-                subprocess.Popen(command, cwd=Path(command[1]).parent.parent, stdin=subprocess.DEVNULL,
+                subprocess.Popen(command, cwd=Path(command[-3]).parent.parent, stdin=subprocess.DEVNULL,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags,
                                  start_new_session=not sys.platform.startswith("win"))
                 return
@@ -251,13 +371,35 @@ class TrayApp:
                 log.warning("could not open the update window (%s); using the update script", exc)
         launcher = update_launcher()
         if launcher is None:
-            self.notify("No updater found next to SNMPathy. Rebuild once with scripts/build_executable.")
+            missing = missing_for_update()
+            show_message(
+                "SNMPathy can't update itself on this computer yet. Updating rebuilds it from its source, "
+                "which needs:\n\n  - " + "\n  - ".join(missing or ["the SNMPathy source folder"])
+                + "\n\nInstall " + ("them" if len(missing) > 1 else "it")
+                + ", then choose Update SNMPathy again: the source is downloaded automatically.")
             return
         if sys.platform.startswith("win"):
             # Older builds without updater.json: the update script in a console window.
             subprocess.Popen(["cmd", "/c", "start", "SNMPathy update", str(launcher), "--from-tray"])
         else:
             subprocess.Popen([str(launcher)], start_new_session=True)
+
+    def _fetch_source_then_update(self) -> None:
+        dest = source_home()
+        remote = updater_info().get("remote") or DEFAULT_REMOTE
+        self.notify("Downloading the SNMPathy source for updates (first time on this computer)...")
+        if dest.exists() and not is_source(dest):
+            shutil.rmtree(dest, ignore_errors=True)  # a half-finished earlier download
+        ok, detail = clone_source(remote, dest)
+        if not ok or not is_source(dest):
+            show_message(f"Could not download the SNMPathy source from {remote}:\n\n{detail[-600:]}\n\n"
+                         "Check that this computer can reach GitHub and that you are signed in to Git "
+                         "with an account that can read the repository.")
+            return
+        if updater_command() is None:
+            show_message("The source was downloaded, but no Python was found to run the update.")
+            return
+        self.run_update()
 
     def open_folder(self, *_: Any) -> None:
         open_path(log_file(self.settings).parent)

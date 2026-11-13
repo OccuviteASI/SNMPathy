@@ -20,6 +20,11 @@ commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
   that answers is saved on the device.
 - **Edit a network scan** after creating it (targets, credentials, schedule, adding rules):
   **Edit** on the scan list and the scan page, with **Save & run now**.
+- **Updating a copy on another computer works.** A copy that came from another computer (for
+  example a synced OneDrive Desktop) opened a console saying *The system cannot find the path
+  specified*. The tray now finds the source folder, or downloads it once with Git into
+  `%LOCALAPPDATA%\SNMPathy\source`, and uses the Python it finds on this computer. If Python
+  or Git is missing, it says so instead of failing.
 - Form fields side by side line up: a hint such as *optional* sits on the label line instead
   of pushing that field's box down (every page).
 

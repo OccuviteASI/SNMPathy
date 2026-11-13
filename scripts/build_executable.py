@@ -22,6 +22,7 @@ OS you need an executable for (CI also publishes all three as artifacts).
 from __future__ import annotations
 
 import argparse
+import re
 import os
 import shutil
 import subprocess
@@ -242,6 +243,12 @@ def write_update_launcher(dest: Path) -> Path:
         path.write_text(
             "@echo off\r\n"
             "rem Pulls the latest SNMPathy, rebuilds this executable and restarts it.\r\n"
+            f'if not exist "{ROOT / "scripts" / "update.cmd"}" (\r\n'
+            f'  echo The SNMPathy source folder {ROOT} is not on this computer.\r\n'
+            "  echo Use Update SNMPathy in the tray menu instead: it downloads the source when needed.\r\n"
+            "  pause\r\n"
+            "  exit /b 1\r\n"
+            ")\r\n"
             f'call "{ROOT / "scripts" / "update.cmd"}" %*\r\n', encoding="utf-8")
     else:
         path = dest / "update-snmpathy.sh"
@@ -250,6 +257,17 @@ def write_update_launcher(dest: Path) -> Path:
         path.chmod(0o755)
     write_updater_info(dest)
     return path
+
+
+def git_remote() -> str:
+    """The source's git remote (where a copy on another computer downloads the source from)."""
+    try:
+        out = subprocess.run(["git", "-C", str(ROOT), "remote", "get-url", "origin"], capture_output=True,
+                             text=True, timeout=10).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    # never store credentials embedded in the URL
+    return re.sub(r"//[^/@]+@", "//", out)
 
 
 def write_updater_info(dest: Path) -> Path:
@@ -262,7 +280,8 @@ def write_updater_info(dest: Path) -> Path:
         python = python.with_name("pythonw.exe")  # no console window
     path = dest / "updater.json"
     path.write_text(json.dumps({"source": str(ROOT), "python": str(python),
-                                "gui": str(ROOT / "scripts" / "update_gui.py")}, indent=2) + "\n",
+                                "gui": str(ROOT / "scripts" / "update_gui.py"), "remote": git_remote()},
+                               indent=2) + "\n",
                     encoding="utf-8")
     return path
 

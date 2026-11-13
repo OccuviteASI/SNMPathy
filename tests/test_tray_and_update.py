@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -234,6 +235,7 @@ def test_tray_opens_the_progress_window(monkeypatch, tmp_path):
     gui_script = tmp_path / "src" / "scripts" / "update_gui.py"
     gui_script.parent.mkdir(parents=True)
     gui_script.write_text("")
+    (gui_script.parent / "update.py").write_text("")
     (tmp_path / "updater.json").write_text(__import__("json").dumps(
         {"python": sys.executable, "gui": str(gui_script), "source": str(tmp_path / "src")}))
     cmd = tray.updater_command()
@@ -243,6 +245,64 @@ def test_tray_opens_the_progress_window(monkeypatch, tmp_path):
     tray.TrayApp.__new__(tray.TrayApp).run_update()
     argv, kw = launched[0]
     assert argv == cmd and kw["stdout"] is subprocess.DEVNULL and kw["cwd"] == tmp_path / "src"
+
+
+def _fake_source(path):
+    (path / "scripts").mkdir(parents=True)
+    for name in ("update_gui.py", "update.py", "update.cmd"):
+        (path / "scripts" / name).write_text("")
+    return path
+
+
+def test_copy_from_another_computer_finds_or_downloads_the_source(monkeypatch, tmp_path):
+    """updater.json and the .cmd name paths from the computer that built this copy (a synced Desktop)."""
+    app = tmp_path / "Desktop" / "SNMPathy"
+    app.mkdir(parents=True)
+    other = "C:/Users/someone-else/Claude/SNMPathy-src"
+    (app / "updater.json").write_text(json.dumps({"python": other + "/python.exe", "gui": other + "/scripts/update_gui.py",
+                                                  "source": other, "remote": "https://example.invalid/SNMPathy.git"}))
+    (app / "Update SNMPathy.cmd").write_text(f'@echo off\r\ncall "{other}/scripts/update.cmd" %*\r\n')
+    home = tmp_path / "local" / "source"
+    monkeypatch.setattr(tray, "app_dir", lambda: app)
+    monkeypatch.setattr(tray, "source_home", lambda: home)
+    monkeypatch.setattr(tray.shutil, "which", lambda name: sys.executable if name.startswith("python") else
+                        ("/usr/bin/git" if name == "git" else None))
+    # Recorded paths do not exist here: no broken console script, Python found on PATH instead.
+    assert tray.update_launcher() is None and tray.updater_command() is None
+    python = tray.find_python()
+    assert Path(python[0]).parent == Path(sys.executable).parent and tray.missing_for_update() == []
+
+    clones, launched = [], []
+    monkeypatch.setattr(tray, "clone_source", lambda remote, dest: (clones.append((remote, dest)), _fake_source(dest))
+                        and (True, ""))
+    monkeypatch.setattr(tray.subprocess, "Popen", lambda argv, **kw: launched.append((argv, kw)))
+    app_obj = tray.TrayApp.__new__(tray.TrayApp)
+    app_obj.notify = lambda msg: None
+    app_obj._fetch_source_then_update()
+    assert clones == [("https://example.invalid/SNMPathy.git", home)]
+    argv, kw = launched[0]
+    assert argv == [*python, str(home / "scripts" / "update_gui.py"), "--dest", str(app)] and kw["cwd"] == home
+
+
+def test_update_explains_what_is_missing(monkeypatch, tmp_path):
+    monkeypatch.setattr(tray, "app_dir", lambda: tmp_path)
+    monkeypatch.setattr(tray, "source_home", lambda: tmp_path / "nowhere")
+    monkeypatch.setattr(tray.shutil, "which", lambda name: None)
+    monkeypatch.setattr(tray, "find_python", lambda info=None: None)
+    shown, launched = [], []
+    monkeypatch.setattr(tray, "show_message", lambda text, title="": shown.append(text))
+    monkeypatch.setattr(tray.subprocess, "Popen", lambda argv, **kw: launched.append(argv))
+    assert tray.missing_for_update() == ['Python 3 (python.org - tick "Add python.exe to PATH")', "Git (git-scm.com)"]
+    tray.TrayApp.__new__(tray.TrayApp).run_update()
+    assert not launched and "Python 3" in shown[0] and "Git" in shown[0]
+
+
+def test_found_source_next_to_the_executable(monkeypatch, tmp_path):
+    src = _fake_source(tmp_path / "SNMPathy-src")
+    (src / "dist").mkdir()
+    monkeypatch.setattr(tray, "app_dir", lambda: src / "dist")
+    monkeypatch.setattr(tray, "source_home", lambda: tmp_path / "nowhere")
+    assert tray.find_source() == src
 
 
 def test_error_lines_are_recognised(gui):
