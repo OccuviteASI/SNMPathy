@@ -4,6 +4,12 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 `snmpathy version`. Executables built with `scripts/build_executable` also show the git
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
+## 0.7.1
+- The update window closes itself 5 seconds after a successful update (the button counts
+  down; failures stay open, and opening the details stops the countdown).
+- Dropdown lists are readable in dark mode (the dashboard switcher showed light text on a
+  white list on Windows).
+
 ## 0.7.0
 - **Nagios-style dashboards.** New dashlets: status donuts (devices, checks, ports, alerts),
   status bars by site / collector / device type / tag, latest state changes with

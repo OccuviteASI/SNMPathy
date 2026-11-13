@@ -40,6 +40,7 @@ STAGES: list[tuple[str, int, str]] = [
     (r"BUILD OK", 93, "Installing the new version…"),
     (r"\[update\] starting ", 97, "Starting SNMPathy…"),
 ]
+AUTO_CLOSE_SECONDS = 5  # after a successful update the window closes itself (failures stay open)
 # While pip / PyInstaller print lines, creep forward inside the current stage.
 CREEP_LIMIT = {24: 46, 50: 86}
 
@@ -105,6 +106,7 @@ class UpdateWindow:
         self.lines: queue.Queue[str | None] = queue.Queue()
         self.percent, self.outcome, self.proc = 0, None, None
         self.last_error = ""
+        self.close_timer = None
         self.running = True
 
         _dpi_aware()
@@ -204,6 +206,23 @@ class UpdateWindow:
         self.close_btn["text"] = "Close"
         if self.root.state() == "withdrawn":  # closed while running: nothing left to show
             self.root.destroy()
+            return
+        if self.outcome != "failed" and not self.details_shown:
+            self.countdown(AUTO_CLOSE_SECONDS)
+
+    def countdown(self, seconds: int) -> None:
+        """Close by itself after a successful update; the button shows the seconds left."""
+        if seconds <= 0:
+            self.root.destroy()
+            return
+        self.close_btn["text"] = f"Close ({seconds})"
+        self.close_timer = self.root.after(1000, lambda: self.countdown(seconds - 1))
+
+    def cancel_countdown(self) -> None:
+        if self.close_timer is not None:
+            self.root.after_cancel(self.close_timer)
+            self.close_timer = None
+            self.close_btn["text"] = "Close"
 
     # -------------------------------------------------------------- ui
     def add_log(self, line: str) -> None:
@@ -213,6 +232,7 @@ class UpdateWindow:
         self.log.configure(state="disabled")
 
     def toggle_details(self) -> None:
+        self.cancel_countdown()  # reading the log: stay open
         if self.details_shown:
             self.log.pack_forget()
             self.root.resizable(True, False)

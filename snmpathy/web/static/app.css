@@ -176,6 +176,10 @@ input, select, textarea {
   font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong);
   border-radius: 7px; padding: 6px 10px; min-width: 0; line-height: 20px;
 }
+/* Open dropdown lists are drawn by the OS: give the options the theme's colours explicitly, or a
+   transparent select (like the dashboard switcher) shows light text on a white list in dark mode. */
+select option, select optgroup { background-color: var(--surface); color: var(--text); }
+select option:checked { background-color: var(--accent-soft); color: var(--text); }
 input:focus, select:focus, textarea:focus, .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
 textarea { width: 100%; min-height: 80px; }
 input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
