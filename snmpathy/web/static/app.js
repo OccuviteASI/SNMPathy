@@ -225,21 +225,123 @@
     if (e.target.classList && e.target.classList.contains("modal-back") && !e.target.dataset.static) SP.closeModal(e.target);
   });
 
-  // Sortable tables
-  document.addEventListener("click", (ev) => {
-    const th = ev.target.closest("th.sortable");
-    if (!th) return;
-    const table = th.closest("table");
-    const idx = Array.from(th.parentNode.children).indexOf(th);
-    const dir = th.dataset.dir === "asc" ? "desc" : "asc";
-    $$("th", table).forEach((t) => delete t.dataset.dir);
-    th.dataset.dir = dir;
+  // ------------------------------------------------------------ sortable tables
+  // Every table with a header row sorts by clicking a column (again to reverse). Values are
+  // read as numbers with units (42 Gbps, 512 MiB, 70 %, 15 ms), "5m ago" times, IP addresses,
+  // dates or status words; a cell's data-sort attribute overrides that. Empty values stay last.
+  // The choice is remembered per page and re-applied when a table refreshes itself.
+  const UNIT = { "": 1, k: 1e3, K: 1e3, M: 1e6, G: 1e9, T: 1e12, P: 1e15, Ki: 1024, Mi: 1048576, Gi: 1073741824, Ti: 1099511627776 };
+  // Worse = higher, so the first click on a status column (biggest first) lists the problems first.
+  const STATUS_RANK = { critical: 8, down: 8, crit: 8, emerg: 8, alert: 8, unreachable: 7, serious: 7, err: 7, error: 7,
+    warning: 6, degraded: 6, warn: 6, unknown: 5, pending: 5, paused: 4, disabled: 4, notice: 3, info: 2, ok: 1, up: 1, debug: 0 };
+  function sortKey(cell) {
+    if (!cell) return null;
+    if (cell.dataset.sort != null) { const n = Number(cell.dataset.sort); return cell.dataset.sort === "" ? null : isNaN(n) ? cell.dataset.sort.toLowerCase() : n; }
+    const time = cell.querySelector("time[data-ts]");
+    if (time) return parseFloat(time.dataset.ts);
+    const text = cell.textContent.replace(/\s+/g, " ").trim();
+    if (!text || text === "-" || text === "—" || text === "n/a") return null;
+    const word = text.toLowerCase().split(" ")[0];
+    if (cell.querySelector(".status, .pill, .badge") && STATUS_RANK[word] != null && text.length < 24) return STATUS_RANK[word];
+    if (/^\d{1,3}(\.\d{1,3}){3}(:\d+)?$/.test(text)) {  // IPv4 (and an optional :port)
+      const [ip, port] = text.split(":");
+      return ip.split(".").reduce((a, o) => a * 256 + Number(o), 0) + (port ? Number(port) / 1e6 : 0);
+    }
+    if (text === "just now") return Date.now() / 1000;
+    if (/^(\d+\s*[dhms]\s*)+ago$/.test(text)) {  // "1h 10m ago": a time, so newest sorts highest
+      let s = 0; text.replace(/(\d+)\s*([dhms])/g, (_, n, u) => (s += Number(n) * { d: 86400, h: 3600, m: 60, s: 1 }[u]));
+      return Date.now() / 1000 - s;
+    }
+    if (/^(\d+\s*[dhms]\s*)+$/.test(text)) { let s = 0; text.replace(/(\d+)\s*([dhms])/g, (_, n, u) => (s += Number(n) * { d: 86400, h: 3600, m: 60, s: 1 }[u])); return s; }
+    const m = /^([-+]?[\d,]*\.?\d+)\s*(Ki|Mi|Gi|Ti|[kKMGTP])?(bps|pps|B|b|Hz|s|ms|%|msgs|dBm|dB|°C|x)?\b/.exec(text);
+    if (m && (m[2] || m[3] || /^[-+]?[\d,]*\.?\d+(\s|%|$)/.test(text))) {
+      let n = parseFloat(m[1].replace(/,/g, "")) * (UNIT[m[2] || ""] || 1);
+      if (m[3] === "ms") n /= 1000;
+      return n;
+    }
+    if (/^\d{4}-\d{2}-\d{2}/.test(text) && !isNaN(Date.parse(text))) return Date.parse(text) / 1000;
+    return text.toLowerCase();
+  }
+  const sortableTh = (th) => th.textContent.trim() !== "" && !th.querySelector("input, button, select") && !th.hasAttribute("data-nosort");
+  function tableKey(table) {
+    if (table.id) return table.id;
+    const panel = table.closest(".panel, .card");
+    const title = panel && $(".card-head h2, .card-head h3", panel);
+    if (title) return "t:" + title.textContent.trim();
+    return "i:" + $$("table").indexOf(table);
+  }
+  const sortStoreKey = (table) => "sort:" + location.pathname + ":" + tableKey(table);
+  function sortTable(table, col, dir) {
     const body = table.tBodies[0];
+    if (!body || body.rows.length < 2) return;
     const rows = Array.from(body.rows);
-    const val = (r) => { const c = r.cells[idx]; const s = c ? (c.dataset.sort != null ? c.dataset.sort : c.textContent.trim()) : ""; const n = parseFloat(s); return isNaN(n) || !/^-?[\d.]/.test(s) ? s.toLowerCase() : n; };
-    rows.sort((a, b) => { const x = val(a), y = val(b); return (x > y ? 1 : x < y ? -1 : 0) * (dir === "asc" ? 1 : -1); });
-    rows.forEach((r) => body.appendChild(r));
+    if (rows.some((r) => Array.from(r.cells).some((c) => c.colSpan > 1))) return;  // grouped / empty-state rows
+    const keyed = rows.map((r, i) => ({ r, i, k: sortKey(r.cells[col]) }));
+    const sign = dir === "asc" ? 1 : -1;
+    keyed.sort((a, b) => {
+      if (a.k === null || b.k === null) return a.k === b.k ? a.i - b.i : a.k === null ? 1 : -1;  // blanks last
+      const an = typeof a.k === "number", bn = typeof b.k === "number";
+      const c = an && bn ? a.k - b.k : an !== bn ? (an ? -1 : 1) : String(a.k).localeCompare(String(b.k), undefined, { numeric: true, sensitivity: "base" });
+      return c * sign || a.i - b.i;
+    });
+    if (keyed.every((x, i) => x.r === rows[i])) return;  // already in order: no DOM change
+    keyed.forEach((x) => body.appendChild(x.r));
+  }
+  function markSorted(table, col, dir) {
+    const head = table.tHead && table.tHead.rows[table.tHead.rows.length - 1];
+    if (!head) return;
+    Array.from(head.cells).forEach((th, i) => th.setAttribute("aria-sort", i === col ? (dir === "asc" ? "ascending" : "descending") : "none"));
+  }
+  function prepareTables(root) {
+    $$("table", root || document).forEach((table) => {
+      if (table.hasAttribute("data-nosort") || !table.tHead || !table.tBodies.length) return;
+      const head = table.tHead.rows[table.tHead.rows.length - 1];
+      Array.from(head.cells).forEach((th) => {
+        if (!sortableTh(th) || th.classList.contains("sortable")) return;
+        th.classList.add("sortable");
+        th.tabIndex = 0;
+        th.title = th.title || "Sort by " + th.textContent.trim().toLowerCase();
+        if (!th.hasAttribute("aria-sort")) th.setAttribute("aria-sort", "none");
+      });
+      const saved = SP.store.get(sortStoreKey(table), null);
+      if (saved && head.cells[saved.col] && head.cells[saved.col].classList.contains("sortable")) {
+        sortTable(table, saved.col, saved.dir);
+        markSorted(table, saved.col, saved.dir);
+      }
+    });
+  }
+  function onSortClick(th) {
+    const table = th.closest("table");
+    const col = Array.from(th.parentNode.cells).indexOf(th);
+    const cur = th.getAttribute("aria-sort");
+    let dir;
+    if (cur === "ascending") dir = "desc";
+    else if (cur === "descending") dir = "asc";
+    else {  // first click: numbers biggest first, text A to Z
+      const first = Array.from(table.tBodies[0] ? table.tBodies[0].rows : []).map((r) => sortKey(r.cells[col])).find((k) => k !== null);
+      dir = typeof first === "number" ? "desc" : "asc";
+    }
+    sortTable(table, col, dir);
+    markSorted(table, col, dir);
+    SP.store.set(sortStoreKey(table), { col, dir });
+  }
+  document.addEventListener("click", (ev) => {
+    const th = ev.target.closest("thead th.sortable");
+    if (th && !ev.target.closest("a, input, button")) onSortClick(th);
   });
+  document.addEventListener("keydown", (ev) => {
+    const th = ev.target.closest && ev.target.closest("thead th.sortable");
+    if (th && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); onSortClick(th); }
+  });
+  // Tables rendered or refreshed later (dashboards, live lists) get the same treatment.
+  let sortQueued = false;
+  new MutationObserver(() => {
+    if (sortQueued) return;
+    sortQueued = true;
+    requestAnimationFrame(() => { sortQueued = false; prepareTables(); });
+  }).observe(document.documentElement, { childList: true, subtree: true });
+  document.addEventListener("DOMContentLoaded", () => prepareTables());
+  SP.sortKey = sortKey;
 
   // Client-side table filter: <input data-filter="#table-id">
   document.addEventListener("input", (ev) => {
@@ -743,7 +845,7 @@
     }
     if (type === "state_changes") {
       body.innerHTML = data.rows.length ? `<table class="table compact sc-table"><thead><tr><th>Last status</th><th>Name</th><th>Output</th><th class="num">When</th></tr></thead><tbody>` +
-        data.rows.map((r) => `<tr><td>${SP.pill(r.state, r.label)}</td><td class="nowrap">${r.href ? `<a href="${esc(r.href)}">${esc(r.name)}</a>` : esc(r.name)}</td><td class="sc-out" title="${esc(r.output)}">${esc(r.output)}</td><td class="num nowrap muted small">${esc(SP.ago(r.ts))}</td></tr>`).join("") + `</tbody></table>`
+        data.rows.map((r) => `<tr><td data-sort="${{ critical: 8, serious: 7, warning: 6, unknown: 5, ok: 1 }[r.state]}">${SP.pill(r.state, r.label)}</td><td class="nowrap">${r.href ? `<a href="${esc(r.href)}">${esc(r.name)}</a>` : esc(r.name)}</td><td class="sc-out" title="${esc(r.output)}">${esc(r.output)}</td><td class="num nowrap muted small" data-sort="${r.ts}">${esc(SP.ago(r.ts))}</td></tr>`).join("") + `</tbody></table>`
         : `<div class="empty">${SP.pill("ok", "OK")}<br><span class="small">No state changes yet</span></div>`;
       return true;
     }

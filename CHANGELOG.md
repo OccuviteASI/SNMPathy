@@ -4,6 +4,12 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 `snmpathy version`. Executables built with `scripts/build_executable` also show the git
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
+## 0.7.2
+- **Sort any table by clicking a column heading** (again to reverse), on every page and in
+  dashboards. Understands units (Gbps / MiB / % / ms), "5m ago" times, dates, IP addresses
+  and status (problems first); blanks stay last; the choice is remembered per page and
+  survives refreshes.
+
 ## 0.7.1
 - The update window closes itself 5 seconds after a successful update (the button counts
   down; failures stay open, and opening the details stops the countdown).

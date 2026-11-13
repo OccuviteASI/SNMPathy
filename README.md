@@ -124,6 +124,12 @@ Data is kept in the `snmpathy-data` volume. To try the demo in Docker:
 
 ## Using SNMPathy
 
+**Sorting tables.** Click any column heading to sort a table by it (click again to reverse);
+this works on every list, including dashboard tables. Numbers sort by value with their units
+(`42 Gbps` > `900 Mbps`), times by when they happened, IP addresses numerically, and status
+columns put problems first. Empty values stay at the bottom, and each page remembers your
+choice.
+
 ### Add devices
 
 Go to **Devices → Add device** and enter the hostname or IP and the SNMP credentials. Use
