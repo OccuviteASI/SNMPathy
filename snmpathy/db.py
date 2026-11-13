@@ -491,6 +491,7 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("hw_model", "TEXT NOT NULL DEFAULT ''"),
         ("hw_serial", "TEXT NOT NULL DEFAULT ''"),
         ("firmware", "TEXT NOT NULL DEFAULT ''"),
+        ("brand_tag", "TEXT NOT NULL DEFAULT ''"),  # the brand tag SNMPathy added (snmpathy/brands.py)
     ],
     "checks": [
         ("affects_device", "INTEGER NOT NULL DEFAULT 1"),

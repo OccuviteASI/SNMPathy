@@ -106,6 +106,10 @@ def create_device(db: Database, values: dict[str, Any], add_ping_check: bool = T
                 "collector_id": data.get("collector_id"), "created_at": now, "updated_at": now,
             })
         db.log_event("device.added", f"Device {data['name']} ({data['hostname']}) added", device_id=device_id)
+    if data.get("vendor") or data.get("sys_descr"):  # known from a network scan: tag the brand now
+        from .brands import apply_brand_tag
+
+        apply_brand_tag(db, device_id)
     return db.one("SELECT * FROM devices WHERE id = ?", (device_id,))
 
 

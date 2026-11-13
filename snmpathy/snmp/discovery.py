@@ -293,4 +293,7 @@ def apply_discovery(db: Database, device_id: int, result: DiscoveryResult, now: 
             f"UPDATE metrics SET enabled = 0 WHERE device_id = ? AND custom = 0 AND id NOT IN ({marks})",
             [device_id, *seen_metrics],
         )
+    from ..brands import apply_brand_tag
+
+    apply_brand_tag(db, device_id)
     return {"interfaces": len(result.interfaces), "metrics": len(specs)}

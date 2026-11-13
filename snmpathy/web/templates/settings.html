@@ -34,6 +34,14 @@
       {% endif %}
     </div>
   </div>
+  <div class="card" id="brand-tags">
+    <div class="card-head"><h2>Device tagging</h2></div>
+    <div class="card-body stack">
+      <label class="check" style="font-size:15px"><input type="checkbox" id="brand-toggle" {{ 'checked' if brand_tags.enabled }}> <strong>Tag devices with their brand when it is detected</strong></label>
+      <p class="small muted" style="margin:0">Discovery and network scans add a tag such as <span class="tag">Cisco</span>, <span class="tag">Ubiquiti</span> or <span class="tag">Rajant</span>. Use it to filter the device list or scope alert rules. If you remove a brand tag from a device it is not added back.</p>
+      <div class="row"><button class="btn sm" id="brand-apply">Tag existing devices now</button><span class="small muted" id="brand-count">{{ brand_tags.tagged }} device{{ '' if brand_tags.tagged == 1 else 's' }} tagged so far</span></div>
+    </div>
+  </div>
   <div class="card" id="firewall">
     <div class="card-head"><h2>Firewall</h2><span class="small muted">{{ firewall.backend }}{% if firewall.admin %} · running as admin{% endif %}</span></div>
     <div class="card-body stack">
@@ -158,6 +166,30 @@ document.addEventListener("DOMContentLoaded", () => {
       SP.toast(r.enabled ? "SNMPathy will start automatically when you log in" : "Autostart turned off");
     } catch (e) { box.checked = !box.checked; SP.toast(e.message, "error"); }
     finally { box.disabled = false; }
+  });
+});
+</script>
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const box = SP.$("#brand-toggle");
+  const recount = async () => {
+    const r = await SP.api("GET", "/api/system/brand-tags");
+    SP.$("#brand-count").textContent = `${r.tagged} device${r.tagged === 1 ? "" : "s"} tagged so far`;
+  };
+  const summary = (r) => r.tagged ? `Tagged ${r.tagged} device${r.tagged === 1 ? "" : "s"}: ` +
+    Object.entries(r.brands).map(([b, n]) => `${b} (${n})`).join(", ") : "No untagged devices with a known brand";
+  box.addEventListener("change", async () => {
+    box.disabled = true;
+    try {
+      const r = await SP.api("PUT", "/api/system/brand-tags", { enabled: box.checked });
+      SP.toast(r.enabled ? `Brand tagging on. ${summary(r)}` : "Brand tagging off; existing tags are kept");
+      await recount();
+    } catch (e) { box.checked = !box.checked; SP.toast(e.message, "error"); }
+    finally { box.disabled = false; }
+  });
+  SP.$("#brand-apply").addEventListener("click", async () => {
+    try { SP.toast(summary(await SP.api("POST", "/api/system/brand-tags/apply"))); await recount(); }
+    catch (e) { SP.toast(e.message, "error"); }
   });
 });
 </script>
