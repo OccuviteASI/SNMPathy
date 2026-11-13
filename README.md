@@ -200,6 +200,20 @@ From the command line (prints results; `--add snmp|alive` also adds them to the 
 snmpathy scan 10.0.0.0/24 -c public -c s3cret --tcp 22,443 --add snmp --tag lab
 ```
 
+### Brand tags
+
+When discovery or a network scan detects who made a device, SNMPathy tags it with the brand:
+`Cisco`, `Ubiquiti`, `Rajant`, `Tachyon`, `Juniper`, `Fortinet`, `Synology`, ... The brand
+comes from the SNMP sysObjectID (or a vendor MIB such as Ubiquiti's); devices that only
+report a generic Net-SNMP agent are recognised from their description (Synology, QNAP,
+pfSense, OPNsense, MikroTik, UniFi, Proxmox, ...). Plain Linux servers get no brand tag.
+
+Use the tags to filter **Devices** or to scope an alert rule (*Device tag*). Your own tags are
+never changed; if you delete a brand tag from a device it is not added back, and if a
+different device later answers at that address the old brand tag is swapped for the new one.
+Existing devices are tagged when SNMPathy starts. Turn it off, or tag existing devices on
+demand, under **Settings → Device tagging** (API: `GET/PUT /api/system/brand-tags`).
+
 ### Online / offline rules: one failing method is not an outage
 
 A device is watched by SNMP polling and by every check linked to it (ping, TCP, HTTP,

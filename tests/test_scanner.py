@@ -90,6 +90,7 @@ async def test_scan_manager_auto_add(db, make_device):
     dev = db.one("SELECT * FROM devices WHERE hostname = '10.0.0.1'")
     assert dev["name"] == "sw-1" and dev["snmp_community"] == "secret" and dev["vendor"] == "Cisco"
     assert dev["avail_mode"] == "all" and '"lab"' in dev["tags"]
+    assert __import__("json").loads(dev["tags"]) == ["lab", "Cisco"]  # brand tagged as soon as it is added
     assert db.scalar("SELECT COUNT(*) FROM checks WHERE device_id = ?", (dev["id"],)) == 1  # it answered ping
     silent = db.one("SELECT * FROM devices WHERE hostname = '10.0.0.5'")
     assert db.scalar("SELECT COUNT(*) FROM checks WHERE device_id = ?", (silent["id"],)) == 0

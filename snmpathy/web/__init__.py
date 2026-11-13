@@ -332,7 +332,7 @@ def settings(request: Request):
         base_url=str(request.base_url).rstrip("/"),
         python=sys.version.split()[0], platform=platform.platform(), icmp_mode=detect_icmp_mode(),
         fts=db.has_fts, monitor=monitor.status() if monitor else None,
-        autostart=_autostart_status(s), firewall=_firewall_status(s),
+        autostart=_autostart_status(s), firewall=_firewall_status(s), brand_tags=_brand_tags_status(db),
     )
 
 
@@ -344,6 +344,12 @@ def _firewall_status(settings: Any) -> dict[str, Any]:
     except Exception as exc:  # never break the settings page
         return {"backend": "unknown", "admin": False, "note": str(exc), "rules": [], "groups": GROUPS,
                 "default_groups": ["syslog"], "can_apply": False}
+
+
+def _brand_tags_status(db: Any) -> dict[str, Any]:
+    from ..brands import enabled
+
+    return {"enabled": enabled(db), "tagged": db.scalar("SELECT COUNT(*) FROM devices WHERE brand_tag != ''") or 0}
 
 
 def _autostart_status(settings: Any) -> dict[str, Any]:

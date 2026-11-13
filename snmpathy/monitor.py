@@ -113,6 +113,16 @@ class Monitor:
             await asyncio.to_thread(evaluate_all, self.db)
         except Exception:
             log.exception("initial availability evaluation failed")
+        # Brand tags for devices discovered before auto-tagging existed (no-op once tagged).
+        try:
+            from .brands import tag_all
+
+            tagged = await asyncio.to_thread(tag_all, self.db)
+            if tagged["tagged"]:
+                log.info("tagged %d device(s) with their brand: %s", tagged["tagged"],
+                         ", ".join(f"{b} ({n})" for b, n in sorted(tagged["brands"].items())))
+        except Exception:
+            log.exception("brand tagging failed")
         if s.enable_poller:
             self._spawn(self._poll_loop(), "snmp-poller")
             self._spawn(self._check_loop(), "check-runner")

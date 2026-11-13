@@ -4,6 +4,12 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 `snmpathy version`. Executables built with `scripts/build_executable` also show the git
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
+## 0.6.2
+- **Brand tags**: devices are tagged with their brand (Cisco, Ubiquiti, Rajant, Tachyon,
+  Synology, ...) when discovery or a network scan detects it; existing devices are tagged at
+  startup. A brand tag you remove is not added back. On/off and "Tag existing devices now"
+  under Settings > Device tagging.
+
 ## 0.6.1
 - **Update from the tray shows a progress window** instead of a command prompt: current step,
   progress bar, full log under "Show details", and the actual error when an update fails.

@@ -1159,6 +1159,38 @@ def put_autostart(body: AutostartIn, request: Request):
         raise HTTPException(422, f"could not change autostart: {exc}") from exc
 
 
+# ================================================================ brand tags
+class BrandTagsIn(BaseModel):
+    enabled: bool
+
+
+@router.get("/system/brand-tags", tags=["system"])
+def get_brand_tags(db: Database = Depends(get_db)):
+    """Whether devices are tagged with their brand when discovery detects it."""
+    from . import brands
+
+    return {"enabled": brands.enabled(db),
+            "tagged": db.scalar("SELECT COUNT(*) FROM devices WHERE brand_tag != ''") or 0}
+
+
+@router.put("/system/brand-tags", tags=["system"])
+def put_brand_tags(body: BrandTagsIn, db: Database = Depends(get_db)):
+    """Turn brand tagging on or off; turning it on tags existing devices straight away."""
+    from . import brands
+
+    brands.set_enabled(db, body.enabled)
+    result = brands.tag_all(db) if body.enabled else {"tagged": 0, "brands": {}}
+    return {"enabled": body.enabled, **result}
+
+
+@router.post("/system/brand-tags/apply", tags=["system"])
+def apply_brand_tags(db: Database = Depends(get_db)):
+    """Tag devices that have a known brand and were not tagged yet (works even when switched off)."""
+    from . import brands
+
+    return brands.tag_all(db, force=True)
+
+
 # =================================================================== firewall
 class FirewallIn(BaseModel):
     groups: list[str] = ["syslog"]
