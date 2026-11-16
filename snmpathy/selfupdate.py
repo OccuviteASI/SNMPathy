@@ -172,7 +172,9 @@ def download(release: Release, dest: Path, progress: Callable[[int, int], None] 
 def reported_version(exe: Path) -> str:
     """What ``<exe> version`` prints ('' if it does not start)."""
     try:
-        out = subprocess.run([str(exe), "version"], capture_output=True, text=True, timeout=180,
+        from .procutil import self_env
+
+        out = subprocess.run([str(exe), "version"], capture_output=True, text=True, timeout=180, env=self_env(),
                              stdin=subprocess.DEVNULL, creationflags=NO_WINDOW)
     except (OSError, subprocess.SubprocessError):
         return ""
@@ -227,6 +229,14 @@ def running_pids(exe: Path, exclude: set[int] | None = None) -> list[int]:
                 pid, _, path = line.partition("\t")
                 if pid.strip().isdigit() and path.strip().lower() == target:
                     pids.append(int(pid))
+        elif Path("/proc/self/exe").exists():  # Linux: the program file each process runs, however started
+            for entry in Path("/proc").iterdir():
+                if entry.name.isdigit():
+                    try:
+                        if os.path.realpath(entry / "exe").lower() == target:
+                            pids.append(int(entry.name))
+                    except OSError:
+                        continue
         else:
             out = subprocess.run(["pgrep", "-f", str(exe)], capture_output=True, text=True, timeout=30).stdout
             pids = [int(p) for p in out.split() if p.isdigit()]
@@ -259,7 +269,10 @@ def stop(exe: Path) -> bool:
 
 def start(exe: Path) -> None:
     """Start SNMPathy in the tray again, the way it was started at login if it was."""
-    quiet = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    from .procutil import self_env
+
+    # A fresh environment, never this updater's: see procutil.self_env.
+    quiet = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=self_env())
     if IS_WINDOWS:
         vbs = Path(os.environ.get("LOCALAPPDATA", "")) / "SNMPathy" / "autostart.vbs"
         if vbs.exists():

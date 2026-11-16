@@ -75,6 +75,28 @@ jobs:
           "$exe" ping 127.0.0.1 -n 1
           "$exe" self-update --check | tee check.txt  # HTTPS to GitHub works from the executable
           if [ "${{ runner.os }}" = "Windows" ]; then grep -q "progress window: yes" check.txt; fi
+      - name: Check a restarted copy keeps working after the first one exits
+        shell: bash
+        run: |
+          exe=dist/SNMPathy; [ -f dist/SNMPathy.exe ] && exe=dist/SNMPathy.exe
+          "$exe" _spawn-check spawn.txt
+          for i in $(seq 1 30); do [ -s spawn.txt ] && break; sleep 1; done
+          cat spawn.txt || echo "no result: the restarted copy crashed"
+          grep -qx "ok" spawn.txt
+      - name: Check the web UI starts from the executable
+        shell: bash
+        run: |
+          exe=dist/SNMPathy; [ -f dist/SNMPathy.exe ] && exe=dist/SNMPathy.exe
+          printf "http_port: 18765\ndatabase: ci-smoke.db\nenable_syslog: false\n" > ci-smoke.yaml
+          "$exe" serve --config ci-smoke.yaml --no-syslog > serve.log 2>&1 &
+          pid=$!
+          ok=""
+          for i in $(seq 1 60); do
+            if curl -fs http://127.0.0.1:18765/healthz; then ok=1; break; fi
+            sleep 2
+          done
+          kill $pid 2>/dev/null || true
+          [ -n "$ok" ] || { cat serve.log; exit 1; }
       - name: Name the executable for the collector downloads folder
         shell: bash
         run: |
