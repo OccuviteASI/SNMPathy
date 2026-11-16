@@ -498,6 +498,8 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
     "scan_results": [
         ("mac", "TEXT NOT NULL DEFAULT ''"),
         ("mac_vendor", "TEXT NOT NULL DEFAULT ''"),
+        ("hw_model", "TEXT NOT NULL DEFAULT ''"),  # from Ubiquiti discovery / UPnP (snmpathy/identify.py)
+        ("firmware", "TEXT NOT NULL DEFAULT ''"),
     ],
     "checks": [
         ("affects_device", "INTEGER NOT NULL DEFAULT 1"),

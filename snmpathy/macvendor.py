@@ -4,21 +4,30 @@ Home and small-office gear (Ubiquiti access points, TP-Link switches, printers, 
 often has SNMP switched off, so discovery cannot ask it who made it. Every device on the same
 network segment still reveals its MAC address once it has answered a ping: the scanning machine
 keeps it in its ARP (neighbour) table. The first half of a MAC (the OUI) is registered to the
-maker with the IEEE; ``data/oui.tsv.gz`` holds that registry (built from the public MA-L list).
+maker with the IEEE.
+
+Two maker lists are used, most specific first:
+
+* **Wireshark's** (``manuf``): the IEEE registries (MA-L, plus the MA-M / MA-S blocks that split
+  one prefix between several makers) kept current by the Wireshark project. It is GPL-licensed,
+  so SNMPathy does not ship it: ``refresh_wireshark()`` downloads it into the data folder
+  (``manuf-wireshark.tsv.gz``, next to the database) and refreshes it weekly.
+* the IEEE MA-L list bundled in ``data/oui.tsv.gz``, used until that download has happened.
 
 * ``mac_for(ip)`` reads the local ARP table (Linux /proc/net/arp or ``ip neigh``, Windows and
   macOS ``arp -a``). Devices behind a router never show up there, so nothing is guessed for them.
 * ``vendor_for(mac)`` returns the registered organisation ("Ubiquiti Inc"); randomised
   (locally administered) MACs, as phones use for privacy, have no maker and return ''.
-* ``brand_for_vendor(org)`` turns that into a brand tag ("Ubiquiti") for the makers people
-  recognise. Chip and module makers (Espressif, Realtek, Hon Hai, ...) are not brands of the
-  finished product, so they are shown but never used as a tag.
+* ``brand_for_vendor(org)`` turns that into a brand tag: the familiar name for well-known
+  brands ("Ubiquiti", "TP-Link"), otherwise the maker's name without "Co., Ltd", "Technology",
+  city names and the like ("Shenzhen Bilian Electronic Co.,Ltd" -> "Bilian").
 """
 
 from __future__ import annotations
 
 import gzip
 import logging
+import os
 import re
 import subprocess
 import sys
@@ -26,6 +35,7 @@ import threading
 import time
 from importlib import resources
 from pathlib import Path
+from typing import Any, Callable
 
 log = logging.getLogger(__name__)
 
@@ -106,11 +116,197 @@ OUI_BRANDS: list[tuple[str, str]] = [
     (r"grandstream", "Grandstream"),
     (r"polycom|^hp poly", "Poly"),
     (r"^mitel", "Mitel"),
+    (r"hon hai|foxconn", "Foxconn"),
+    (r"^tuya", "Tuya"),
+    (r"shelly|allterco", "Shelly"),
+    (r"itead|sonoff", "Sonoff"),
+    (r"^arlo", "Arlo"),
+    (r"ezviz", "Ezviz"),
+    (r"^bose\b", "Bose"),
+    (r"^denon|sound united", "Denon"),
+    (r"^intel\b", "Intel"),
+    (r"realtek", "Realtek"),
+    (r"espressif", "Espressif"),
+    (r"texas instruments", "Texas Instruments"),
+    (r"murata", "Murata"),
+    (r"azurewave", "AzureWave"),
+    (r"^nokia", "Nokia"),
+    (r"motorola", "Motorola"),
+    (r"oneplus", "OnePlus"),
+    (r"^oppo\b|guangdong oppo", "OPPO"),
+    (r"^vivo\b|vivo mobile", "vivo"),
+    (r"panasonic", "Panasonic"),
+    (r"^philips\b|koninklijke philips", "Philips"),
+    (r"^tcl\b", "TCL"),
+    (r"hisense", "Hisense"),
+    (r"sagemcom", "Sagemcom"),
+    (r"^avm\b", "AVM"),
+    (r"technicolor", "Technicolor"),
+    (r"actiontec", "Actiontec"),
+    (r"^calix", "Calix"),
+    (r"^sercomm", "Sercomm"),
+    (r"^askey", "Askey"),
+    (r"^wistron", "Wistron"),
+    (r"^liteon|lite-on", "Lite-On"),
+    (r"^gigabyte|giga-byte", "Gigabyte"),
+    (r"micro-star|^msi\b", "MSI"),
+    (r"^acer\b", "Acer"),
+    (r"silicon lab", "Silicon Labs"),
+    (r"^ieee registration authority|^private$", ""),
 ]
 _OUI_BRANDS = [(re.compile(p, re.I), b) for p, b in OUI_BRANDS]
 
 _table: dict[str, str] | None = None
 _table_lock = threading.Lock()
+
+# ---------------------------------------------------------------- Wireshark's list
+WIRESHARK_URLS = (
+    "https://www.wireshark.org/download/automated/data/manuf",
+    "https://raw.githubusercontent.com/wireshark/wireshark/master/epan/manuf-data.c",
+)
+WIRESHARK_FILE = "manuf-wireshark.tsv.gz"
+REFRESH_AGE = 7 * 86400  # seconds before the downloaded list is fetched again
+MIN_ENTRIES = 20000  # fewer means a broken download: keep what we have
+_data_dir: Path | None = None
+# nibbles (6 = /24, 7 = /28, 9 = /36) -> prefix (upper-case hex) -> long name; short names by long name
+_ws: dict[int, dict[str, str]] | None = None
+_short: dict[str, str] = {}
+
+
+def set_data_dir(path: Path | str | None) -> None:
+    """Where the downloaded Wireshark list lives (the database's folder)."""
+    global _data_dir, _ws
+    with _table_lock:
+        _data_dir = Path(path) if path else None
+        _ws = None
+
+
+def wireshark_path() -> Path | None:
+    return _data_dir / WIRESHARK_FILE if _data_dir else None
+
+
+def _bits_ok(bits: int) -> bool:
+    return 24 <= bits <= 44 and bits % 4 == 0
+
+
+def parse_manuf(text: str) -> list[tuple[int, str, str, str]]:
+    """Wireshark's ``manuf`` text: ``00:1B:C5:00:00:00/36<TAB>Short<TAB>Long name``.
+
+    Returns (nibbles, hex prefix, short, long) rows.
+    """
+    rows = []
+    for line in text.splitlines():
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        addr, _, bits_text = parts[0].strip().partition("/")
+        digits = re.sub(r"[^0-9A-Fa-f]", "", addr).upper()
+        bits = int(bits_text) if bits_text.isdigit() else 24
+        if not _bits_ok(bits) or len(digits) < bits // 4:
+            continue
+        short = parts[1].strip()
+        long_name = (parts[2].strip() if len(parts) > 2 else "") or short
+        rows.append((bits // 4, digits[:bits // 4], short, long_name))
+    return rows
+
+
+_C_ROW = re.compile(r'\{\s*\{\s*((?:0x[0-9A-Fa-f]{2}\s*,\s*){2,4}0x[0-9A-Fa-f]{2})\s*\}\s*,\s*'
+                    r'"((?:[^"\\]|\\.)*)"\s*,\s*"((?:[^"\\]|\\.)*)"\s*\}')
+
+
+def parse_manuf_c(text: str) -> list[tuple[int, str, str, str]]:
+    """Wireshark's generated ``epan/manuf-data.c`` (3, 4 and 5 byte rows = /24, /28, /36)."""
+    nibbles_for = {3: 6, 4: 7, 5: 9}
+    rows = []
+    for match in _C_ROW.finditer(text):
+        octets = [o.strip()[2:].upper() for o in match.group(1).split(",")]
+        n = nibbles_for.get(len(octets))
+        if n is None:
+            continue
+        short = match.group(2).replace('\\"', '"')
+        long_name = match.group(3).replace('\\"', '"') or short
+        rows.append((n, "".join(octets)[:n], short, long_name))
+    return rows
+
+
+def _write_rows(path: Path, rows: list[tuple[int, str, str, str]]) -> None:
+    part = path.with_name(path.name + ".part")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(part, "wt", encoding="utf-8", compresslevel=6) as fh:
+        for n, prefix, short, long_name in rows:
+            fh.write(f"{n}\t{prefix}\t{short.replace(chr(9), ' ')}\t{long_name.replace(chr(9), ' ')}\n")
+    os.replace(part, path)
+
+
+def _load_wireshark() -> dict[int, dict[str, str]]:
+    global _ws, _short
+    with _table_lock:
+        if _ws is None:
+            tables: dict[int, dict[str, str]] = {}
+            short: dict[str, str] = {}
+            path = _data_dir / WIRESHARK_FILE if _data_dir else None
+            if path and path.exists():
+                try:
+                    with gzip.open(path, "rt", encoding="utf-8") as fh:
+                        for line in fh:
+                            n, prefix, sname, lname = line.rstrip("\n").split("\t")
+                            tables.setdefault(int(n), {})[prefix] = lname
+                            short.setdefault(lname, sname)
+                except (OSError, ValueError, EOFError) as exc:
+                    log.warning("ignoring a damaged %s: %s", path, exc)
+                    tables, short = {}, {}
+            _ws, _short = tables, short
+        return _ws
+
+
+def fetch_wireshark(fetch: Callable[[str], str] | None = None) -> list[tuple[int, str, str, str]]:
+    """Download Wireshark's list (its web site, else the GitHub mirror of its source)."""
+    if fetch is None:
+        from .netfetch import open_url
+
+        def fetch(url: str) -> str:
+            with open_url(url, timeout=60) as resp:
+                return resp.read().decode("utf-8", errors="replace")
+    errors = []
+    for url in WIRESHARK_URLS:
+        try:
+            text = fetch(url)
+        except Exception as exc:
+            errors.append(f"{url}: {getattr(exc, 'reason', exc)}")
+            continue
+        rows = parse_manuf_c(text) if url.endswith(".c") else parse_manuf(text)
+        if len(rows) >= MIN_ENTRIES:
+            return rows
+        errors.append(f"{url}: only {len(rows)} entries")
+    raise OSError("could not download Wireshark's maker list (" + "; ".join(errors) + ")")
+
+
+def refresh_wireshark(force: bool = False, fetch: Callable[[str], str] | None = None) -> dict[str, Any]:
+    """Download Wireshark's list when there is none or it is a week old. Returns status()."""
+    path = wireshark_path()
+    if path is None:
+        raise OSError("no data folder for the maker list")
+    if not force and path.exists() and time.time() - path.stat().st_mtime < REFRESH_AGE:
+        return status()
+    rows = fetch_wireshark(fetch)
+    _write_rows(path, rows)
+    global _ws
+    with _table_lock:
+        _ws = None
+    log.info("maker list: %d entries from Wireshark", len(rows))
+    return status()
+
+
+def status() -> dict[str, Any]:
+    """Which maker list is in use, its size and when it was downloaded."""
+    tables = _load_wireshark()
+    path = wireshark_path()
+    if tables and path and path.exists():
+        return {"source": "Wireshark", "entries": sum(len(t) for t in tables.values()),
+                "updated": path.stat().st_mtime}
+    return {"source": "IEEE (bundled)", "entries": len(_load_table()), "updated": None}
 
 
 def _load_table() -> dict[str, str]:
@@ -159,18 +355,69 @@ def vendor_for(mac: str) -> str:
     mac = normalize_mac(mac)
     if not mac or is_random(mac) or int(mac[:2], 16) & 0x01:  # randomised or multicast
         return ""
-    return _load_table().get(mac.replace(":", "")[:6], "")
+    digits = mac.replace(":", "")
+    tables = _load_wireshark()
+    for n in (9, 7, 6):  # an MA-S / MA-M block names the actual maker, not the registry
+        name = tables.get(n, {}).get(digits[:n])
+        if name and not name.lower().startswith("ieee registration authority"):
+            return name
+    name = _load_table().get(digits[:6], "")
+    return "" if name.lower().startswith("ieee registration authority") else name
+
+
+LEGAL_WORDS = {
+    "inc", "incorporated", "co", "company", "ltd", "limited", "llc", "lp", "llp", "corp", "corporation",
+    "gmbh", "ag", "kg", "sa", "sas", "sarl", "srl", "spa", "bv", "nv", "oy", "ab", "as", "plc", "pty",
+    "pte", "kk", "sdn", "bhd", "jsc", "ooo", "zao", "cv", "de", "mbh", "ug", "aps", "asa", "se",
+}
+GENERIC_WORDS = {
+    "technology", "technologies", "tech", "electronics", "electronic", "electric", "electrical",
+    "communication", "communications", "comm", "network", "networks", "networking", "digital",
+    "industrial", "industries", "industry", "ind", "group", "international", "intl", "systems",
+    "system", "holdings", "holding", "solutions", "solution", "products", "manufacturing",
+    "manufacturer", "enterprise", "enterprises", "the", "of", "and", "science", "trading",
+    "development", "information", "precision", "equipment", "devices", "device", "global",
+    "worldwide", "america", "americas", "usa", "europe", "asia", "computer", "computers", "software",
+}
+PLACE_WORDS = {
+    "shenzhen", "guangdong", "guangzhou", "hangzhou", "beijing", "shanghai", "dongguan", "zhejiang",
+    "jiangsu", "xiamen", "fujian", "suzhou", "ningbo", "chengdu", "wuhan", "qingdao", "zhuhai",
+    "foshan", "huizhou", "nanjing", "tianjin", "chongqing", "hefei", "jiangxi", "shandong", "sichuan",
+    "hubei", "hunan", "anhui", "henan", "hebei", "liaoning", "taiwan", "taipei", "china", "chinese",
+    "hongkong", "kunshan", "wuxi", "changzhou", "zhongshan", "jiaxing", "yantai", "dalian", "fuzhou",
+}
+
+
+def clean_maker(org: str) -> str:
+    """'Shenzhen Bilian Electronic Co.,Ltd' -> 'Bilian', 'ESPRESSIF INC.' -> 'Espressif'."""
+    text = re.sub(r"\([^)]*\)", " ", org or "")
+    text = re.sub(r"\bhong kong\b", "hongkong", text, flags=re.I)
+    text = re.sub(r"\bhui zhou\b", "huizhou", text, flags=re.I)
+    words = [w for w in re.split(r"[\s,./;:&+]+", text) if w and w != "-"]
+    kept = []
+    for word in words:
+        bare = re.sub(r"[^0-9A-Za-z]", "", word).lower()
+        if not bare or bare in LEGAL_WORDS or bare in GENERIC_WORDS or bare in PLACE_WORDS:
+            continue
+        kept.append(word.strip("-'\""))
+    out = []
+    for word in kept[:2]:
+        if word.isupper() and len(word) > 4:
+            word = word.capitalize()  # SHENZHEN-style capitals, keeping acronyms (ZTE, TCL, AVM)
+        out.append(word)
+    name = " ".join(out)
+    return name[:24].rstrip() if len(name) > 1 else ""
 
 
 def brand_for_vendor(org: str) -> str:
-    """Brand tag for a registered organisation name ('' for chip makers and unknown names)."""
+    """Brand tag for a maker's registered name: the familiar name, else the cleaned-up one."""
     org = (org or "").strip()
     if not org:
         return ""
     for pattern, brand in _OUI_BRANDS:
         if pattern.search(org):
             return brand
-    return ""
+    return clean_maker(org) or _short.get(org, "")
 
 
 # --------------------------------------------------------------------------- ARP table

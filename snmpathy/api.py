@@ -1202,8 +1202,11 @@ def get_brand_tags(db: Database = Depends(get_db)):
     """Whether devices are tagged with their brand when discovery detects it."""
     from . import brands
 
+    from . import macvendor
+
     return {"enabled": brands.enabled(db),
-            "tagged": db.scalar("SELECT COUNT(*) FROM devices WHERE brand_tag != ''") or 0}
+            "tagged": db.scalar("SELECT COUNT(*) FROM devices WHERE brand_tag != ''") or 0,
+            "maker_list": macvendor.status()}
 
 
 @router.put("/system/brand-tags", tags=["system"])
@@ -1217,11 +1220,31 @@ def put_brand_tags(body: BrandTagsIn, db: Database = Depends(get_db)):
 
 
 @router.post("/system/brand-tags/apply", tags=["system"])
-def apply_brand_tags(db: Database = Depends(get_db)):
-    """Tag devices that have a known brand and were not tagged yet (works even when switched off)."""
+async def apply_brand_tags(db: Database = Depends(get_db)):
+    """Ask devices without SNMP for their model, then tag devices with a known brand that were not
+    tagged yet (works even when tagging is switched off)."""
+    import asyncio
+
     from . import brands
 
-    return brands.tag_all(db, force=True)
+    identified = await brands.identify_existing(db)
+    return {**await asyncio.to_thread(brands.tag_all, db, True), "identified": identified}
+
+
+@router.post("/system/maker-list/refresh", tags=["system"])
+async def refresh_maker_list(db: Database = Depends(get_db)):
+    """Download Wireshark's maker list now, look known MACs up again and tag what is new."""
+    import asyncio
+
+    from . import brands, macvendor
+
+    try:
+        status = await asyncio.to_thread(macvendor.refresh_wireshark, True)
+    except OSError as exc:
+        raise HTTPException(502, str(exc))
+    changed = await asyncio.to_thread(brands.reresolve_vendors, db)
+    tagged = await asyncio.to_thread(brands.tag_all, db, True)
+    return {"maker_list": status, "changed": changed, **tagged}
 
 
 # =================================================================== firewall

@@ -32,9 +32,12 @@ def test_brand_for_vendor():
     assert b("Cisco-Linksys, LLC") == "Linksys" and b("Cisco Systems, Inc") == "Cisco"
     assert b("Rajant Corporation") == "Rajant" and b("Tachyon, Inc") == "Tachyon"
     assert b("Aruba, a Hewlett Packard Enterprise Company") == "Aruba"
-    # Chip / module makers are not the brand of the finished product.
-    for org in ("Espressif Inc.", "Intel Corporate", "Realtek Semiconductor Corp.", "Harris Corporation", ""):
-        assert b(org) == ""
+    # Every known maker gets a tag: familiar names, else the name without the corporate words.
+    assert b("Espressif Inc.") == "Espressif" and b("Intel Corporate") == "Intel"
+    assert b("Shenzhen Bilian Electronic Co.,Ltd") == "Bilian" and b("Harris Corporation") == "Harris"
+    assert b("Hon Hai Precision Ind. Co.,Ltd.") == "Foxconn" and b("zte corporation") == "ZTE"
+    assert b("Hui Zhou Gaoshengda Technology Co.,LTD") == "Gaoshengda"
+    assert b("") == "" and b("Private") == "" and b("IEEE Registration Authority") == ""
 
 
 def test_parse_arp_formats():
@@ -71,7 +74,7 @@ def test_brand_for_falls_back_to_mac_vendor():
     assert brands.brand_for("", "", "", "Ubiquiti Inc") == "Ubiquiti"
     assert brands.brand_for("Net-SNMP", "Linux nas 5.10", "", "Synology Incorporated") == "Synology"
     assert brands.brand_for("Cisco", "", "", "Ubiquiti Inc") == "Cisco"  # SNMP's answer wins
-    assert brands.brand_for("", "", "", "Espressif Inc.") == ""
+    assert brands.brand_for("", "", "", "Espressif Inc.") == "Espressif"
 
 
 async def test_scan_tags_devices_without_snmp_by_mac(db, arp):

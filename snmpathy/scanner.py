@@ -140,6 +140,8 @@ class ScanOptions:
     auto_add: str = "none"
     # Hosts that answer the "public" community (always tried) are added whatever auto_add says.
     add_public: bool = True
+    # Ask hosts for their maker / model with Ubiquiti discovery and UPnP (snmpathy/identify.py).
+    identify: bool = True
     add_ping_check: bool = True
     tags: list[str] = field(default_factory=lambda: ["discovered"])
     location: str = ""
@@ -213,7 +215,7 @@ async def scan_host(target: str, opts: ScanOptions, probe: ProbeFunc, client_fac
     result: dict[str, Any] = {
         "ip": target, "dns_name": "", "ping_ms": None, "open_ports": [], "snmp": 0, "snmp_cred": None,
         "snmp_version": "", "sys_name": "", "sys_descr": "", "sys_object_id": "", "vendor": "",
-        "mac": "", "mac_vendor": "",
+        "mac": "", "mac_vendor": "", "hw_model": "", "firmware": "",
     }
     is_ip = _looks_like_ip(target)
     if not is_ip:
@@ -270,9 +272,32 @@ async def scan_host(target: str, opts: ScanOptions, probe: ProbeFunc, client_fac
             result.update(macvendor.describe(await asyncio.to_thread(macvendor.mac_for, target)))
         except Exception as exc:  # never let a vendor lookup fail the sweep
             log.debug("MAC lookup for %s failed: %s", target, exc)
+    if is_ip and opts.identify:
+        from .identify import identify
+
+        try:
+            merge_identity(result, await identify(target, min(opts.timeout, 1.5)))
+        except Exception as exc:
+            log.debug("identifying %s failed: %s", target, exc)
     if is_ip and opts.resolve_dns:
         result["dns_name"] = await _reverse_dns(target, max(1.0, opts.timeout))
     return result
+
+
+def merge_identity(result: dict[str, Any], found: Any) -> None:
+    """Add what Ubiquiti discovery / UPnP said; SNMP's answers always win."""
+    if not found:
+        return
+    if found.vendor and not result.get("vendor"):
+        from .macvendor import brand_for_vendor
+
+        result["vendor"] = brand_for_vendor(found.vendor) or found.vendor
+    if found.model and not result.get("hw_model"):
+        result["hw_model"] = found.model
+    if found.firmware and not result.get("firmware"):
+        result["firmware"] = found.firmware
+    if found.name and not result.get("sys_name"):
+        result["sys_name"] = found.name
 
 
 # --------------------------------------------------------------------------- server side
@@ -314,7 +339,8 @@ def add_result(db: Database, scan: dict[str, Any], result: dict[str, Any]) -> in
         "notes": f"Found by network scan '{scan['name']}'",
         **cred,
     }
-    extra = {k: result.get(k) or "" for k in ("sys_name", "sys_descr", "sys_object_id", "vendor", "mac", "mac_vendor")}
+    extra = {k: result.get(k) or "" for k in ("sys_name", "sys_descr", "sys_object_id", "vendor", "mac", "mac_vendor",
+                                              "hw_model", "firmware")}
     pinged = result.get("ping_ms") is not None
     device = create_device(db, values, add_ping_check=bool(opts.add_ping_check and pinged), extra=extra)
     if not pinged and not result.get("snmp") and result.get("open_ports"):
@@ -519,14 +545,19 @@ class ScanManager:
         return final
 
     def _store(self, scan_id: int, r: dict[str, Any]) -> None:
+        if r.get("mac"):  # a collector's list may be older than this server's (Wireshark's) one
+            from .macvendor import vendor_for
+
+            r = {**r, "mac_vendor": vendor_for(r["mac"]) or r.get("mac_vendor") or ""}
         self.db.execute(
             "INSERT OR REPLACE INTO scan_results (scan_id, ip, dns_name, ping_ms, open_ports, snmp, snmp_cred, "
-            "snmp_version, sys_name, sys_descr, sys_object_id, vendor, mac, mac_vendor, status, seen_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?)",
+            "snmp_version, sys_name, sys_descr, sys_object_id, vendor, mac, mac_vendor, hw_model, firmware, "
+            "status, seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?)",
             (scan_id, r["ip"], r.get("dns_name") or "", r.get("ping_ms"), _dumps(r.get("open_ports") or []),
              int(bool(r.get("snmp"))), r.get("snmp_cred"), r.get("snmp_version") or "", r.get("sys_name") or "",
              r.get("sys_descr") or "", r.get("sys_object_id") or "", r.get("vendor") or "",
-             r.get("mac") or "", r.get("mac_vendor") or "", time.time()),
+             r.get("mac") or "", r.get("mac_vendor") or "", (r.get("hw_model") or "")[:120],
+             (r.get("firmware") or "")[:120], time.time()),
         )
 
     async def _match_existing(self, scan_id: int) -> None:

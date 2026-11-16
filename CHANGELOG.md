@@ -4,6 +4,19 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 `snmpathy version`. Executables built with `scripts/build_executable` also show the git
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
+## 0.7.5
+- **More devices get a brand tag, and their model.**
+  - Scans ask each device who made it: **Ubiquiti discovery** (model such as `U6-Lite`, firmware,
+    name) and **UPnP** (manufacturer and model of routers, TVs, speakers, printers, NAS).
+    Existing devices without SNMP are asked once a day and by *Tag existing devices now*.
+  - MAC makers come from **Wireshark's maker list**, downloaded weekly into the data folder
+    (*Settings → Device tagging → Refresh maker list*). It is far more current than the bundled
+    list (e.g. 48 Ubiquiti prefixes instead of 30) and includes the MA-M / MA-S blocks.
+  - **Every known maker becomes a tag**, not only ~70 well-known brands: `Espressif`, `Tuya`,
+    `Bilian`, ... (randomised phone MACs still get none).
+- **No console window** when SNMPathy.exe is double-clicked on Windows 11: it restarts itself in
+  the background so the Windows Terminal tab closes (hiding the window did not work there).
+
 ## 0.7.4
 - **Updating needs nothing installed.** CI now publishes the Windows, macOS and Linux executables
   as a GitHub release for every change to `main`, and the tray's **Update SNMPathy** downloads

@@ -138,6 +138,58 @@ def refresh_macs(db: Database, arp: dict[str, str] | None = None) -> int:
     return changed
 
 
+def reresolve_vendors(db: Database) -> int:
+    """Look the makers of known MACs up again (after the maker list was refreshed)."""
+    from .macvendor import vendor_for
+
+    changed = 0
+    for row in db.query("SELECT id, mac, mac_vendor FROM devices WHERE mac != ''"):
+        vendor = vendor_for(row["mac"])
+        if vendor and vendor != row["mac_vendor"]:
+            db.update("devices", row["id"], {"mac_vendor": vendor})
+            changed += 1
+    return changed
+
+
+async def identify_existing(db: Database, limit: int = 500, concurrency: int = 32) -> int:
+    """Ask local devices without SNMP for their maker / model (Ubiquiti discovery, UPnP).
+
+    Only devices polled from this server, addressed by IPv4, with no model yet.
+    Returns how many were updated.
+    """
+    import asyncio
+    import ipaddress
+
+    from .identify import identify
+    from .scanner import merge_identity
+
+    rows = []
+    for row in db.query("SELECT id, hostname, vendor, hw_model, firmware, sys_name FROM devices "
+                        "WHERE collector_id IS NULL AND snmp_enabled = 0 AND hw_model = '' LIMIT ?", (limit,)):
+        try:
+            if ipaddress.ip_address(row["hostname"].strip()).version == 4:
+                rows.append(row)
+        except ValueError:
+            continue
+    sem = asyncio.Semaphore(concurrency)
+    updated = 0
+
+    async def one(row: dict[str, Any]) -> None:
+        nonlocal updated
+        async with sem:
+            found = await identify(row["hostname"].strip())
+        before = {k: row[k] for k in ("vendor", "hw_model", "firmware", "sys_name")}
+        after = dict(before)
+        merge_identity(after, found)
+        changes = {k: v for k, v in after.items() if v != before[k]}
+        if changes:
+            db.update("devices", row["id"], changes)
+            updated += 1
+
+    await asyncio.gather(*(one(r) for r in rows))
+    return updated
+
+
 def tag_all(db: Database, force: bool = False, arp: dict[str, str] | None = None) -> dict[str, Any]:
     """Tag every device whose brand is known and that SNMPathy has not tagged yet."""
     if not force and not enabled(db):

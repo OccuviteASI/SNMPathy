@@ -227,15 +227,29 @@ comes from the SNMP sysObjectID (or a vendor MIB such as Ubiquiti's); devices th
 report a generic Net-SNMP agent are recognised from their description (Synology, QNAP,
 pfSense, OPNsense, MikroTik, UniFi, Proxmox, ...).
 
-Devices that do not answer SNMP (most home and small-office gear: UniFi access points,
-TP-Link switches, printers, cameras, ...) are recognised from their **MAC address**: once a
-device answers a ping, the scanning machine's ARP table holds its MAC, and the first half of
-a MAC is registered to its maker with the IEEE (SNMPathy ships that list). This works for
-devices on the same network segment as SNMPathy (or the collector running the scan); devices
-behind a router are not visible this way. Randomised MACs (phones) and chip makers
-(Espressif, Realtek, Intel, ...) give no brand tag. The MAC and its maker are shown on the
-device page and in scan results, and existing devices pick up their MAC when SNMPathy starts
-and every 10 minutes. Plain Linux servers get no brand tag.
+Devices that do not answer SNMP (most home and small-office gear) are recognised two more ways:
+
+* **They are asked.** Scans send each answering host a **Ubiquiti discovery** packet (UDP
+  10001: UniFi / airMAX / EdgeRouter reply with their model, e.g. `U6-Lite`, firmware and name)
+  and a **UPnP** search (UDP 1900: routers, TVs, speakers, printers and NAS boxes reply with a
+  description naming their manufacturer and model, e.g. `NETGEAR` `Nighthawk R7000`). The model
+  and firmware show in scan results and on the device page. Untick *Ask devices for their
+  model* on a scan to skip this. Devices you already have are asked once a day (and by **Tag
+  existing devices now**).
+* **Their MAC address.** Once a device answers a ping, the scanning machine's ARP table holds
+  its MAC, and the first half of a MAC is registered to its maker. SNMPathy uses
+  **Wireshark's maker list** (the IEEE registries, kept current, including the smaller MA-M /
+  MA-S blocks), downloaded into the data folder next to the database and refreshed weekly
+  (**Settings → Device tagging → Refresh maker list** does it now; Wireshark's list is
+  GPL-licensed, so it is downloaded rather than shipped). Until then, an IEEE list bundled with
+  SNMPathy is used. This works for devices on the same network segment as SNMPathy (or the
+  collector running the scan); devices behind a router are not visible this way.
+
+Every known maker becomes a tag: the familiar name for well-known brands (`Ubiquiti`,
+`TP-Link`, `Sonos`), otherwise the maker's name without "Co., Ltd", "Technology" and city
+names (`Shenzhen Bilian Electronic Co.,Ltd` → `Bilian`, `Espressif Inc.` → `Espressif`).
+Randomised MACs (phones, laptops with private addresses) give no tag. Plain Linux servers get
+no brand tag.
 
 Use the tags to filter **Devices** or to scope an alert rule (*Device tag*). Your own tags are
 never changed; if you delete a brand tag from a device it is not added back, and if a

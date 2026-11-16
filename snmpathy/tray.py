@@ -116,6 +116,48 @@ def hide_own_console() -> None:
         pass
 
 
+DETACHED_ENV = "SNMPATHY_DETACHED"
+
+
+def own_console() -> bool:
+    """A console window Windows opened just for this (double-clicked) executable.
+
+    Not a terminal the user started it from: there the shell is attached to the console too.
+    A one-file executable is two processes (launcher + app), so up to two is "ours".
+    """
+    if not sys.platform.startswith("win"):
+        return False
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        if not kernel32.GetConsoleWindow():
+            return False  # started without a window (autostart, the updater): nothing to close
+        pids = (ctypes.c_uint * 16)()
+        return 0 < kernel32.GetConsoleProcessList(pids, 16) <= (2 if is_frozen() else 1)
+    except Exception:
+        return False
+
+
+def relaunch_detached() -> bool:
+    """Start this executable again without a console and return True (the caller then exits).
+
+    Hiding the console window does not work when Windows Terminal hosts it (Windows 11): the
+    tab stays open. Exiting closes it, so a copy carries on in the background instead.
+    """
+    if not is_frozen() or os.environ.get(DETACHED_ENV) or not own_console():
+        return False
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    try:
+        subprocess.Popen([sys.executable, *sys.argv[1:]], env={**os.environ, DETACHED_ENV: "1"},
+                         cwd=os.getcwd(), creationflags=flags, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError as exc:
+        log.warning("could not restart without a console (%s); hiding it instead", exc)
+        return False
+    return True
+
+
 def log_file(settings: Settings) -> Path:
     base = app_dir() if is_frozen() else Path(settings.database).resolve().parent
     return base / "snmpathy.log"
@@ -509,6 +551,8 @@ def run_tray(settings: Settings, open_browser: bool = True) -> int:
     """Run in the tray; returns 2 when no tray is possible (the caller then serves normally)."""
     if not available():
         return 2
+    if relaunch_detached():
+        return 0  # the console-less copy runs the tray; exiting closes this console window
     hide_own_console()
     setup_file_logging(log_file(settings))
     log.info("SNMPathy starting in the system tray")

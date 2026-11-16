@@ -50,6 +50,7 @@
             <label class="check"><input type="checkbox" name="options.ping" {{ 'checked' if not s or o.ping }}> Ping (ICMP)</label>
             <label class="check"><input type="checkbox" name="options.snmp" {{ 'checked' if not s or o.snmp }}> SNMP</label>
             <label class="check"><input type="checkbox" name="options.resolve_dns" {{ 'checked' if not s or o.resolve_dns }}> Reverse DNS names</label>
+            <label class="check"><input type="checkbox" name="options.identify" {{ 'checked' if not s or o.identify is not defined or o.identify }}> <span>Ask devices for their model <span class="muted small">(Ubiquiti discovery, UPnP)</span></span></label>
             <label class="check"><input type="checkbox" name="options.snmp_only_if_alive" {{ 'checked' if s and o.snmp_only_if_alive }}> <span>Only try SNMP on hosts that answer ping/TCP <span class="muted small">(faster on sparse ranges)</span></span></label>
           </div>
         </fieldset>
