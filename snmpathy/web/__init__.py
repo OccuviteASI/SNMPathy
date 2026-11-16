@@ -387,7 +387,9 @@ def _brand_tags_status(db: Any) -> dict[str, Any]:
     from ..macvendor import status
 
     return {"enabled": enabled(db), "tagged": db.scalar("SELECT COUNT(*) FROM devices WHERE brand_tag != ''") or 0,
-            "maker_list": status()}
+            "maker_list": status(),
+            "arp_routers": db.scalar("SELECT COUNT(DISTINCT router_id) FROM arp_cache") or 0,
+            "arp_entries": db.scalar("SELECT COUNT(*) FROM arp_cache") or 0}
 
 
 def _autostart_status(settings: Any) -> dict[str, Any]:

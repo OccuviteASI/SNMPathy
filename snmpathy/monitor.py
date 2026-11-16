@@ -33,6 +33,7 @@ log = logging.getLogger(__name__)
 REDISCOVER_INTERVAL = 6 * 3600
 ROLLUP_INTERVAL = 60
 BRAND_TAG_INTERVAL = 600  # seconds between ARP-table MAC refreshes / brand tagging
+MAX_ARP_ROUTERS = 25  # routers whose ARP tables are read each round
 IDENTIFY_INTERVAL = 86400  # maker list refresh (weekly at most) + model probes of devices without SNMP
 RETENTION_INTERVAL = 3600
 
@@ -76,6 +77,8 @@ class Monitor:
         self.hub.on_change = lambda: self._alert_wakeup.set()
         self.scans = scans or ScanManager(db, local_probe=probe,
                                           local_clients=scan_client_factory(settings, snmp_factory), hub=self.hub)
+        if self.scans.arp_hook is None:
+            self.scans.arp_hook = self.refresh_router_arp
         self.syslog: SyslogServer | None = None
         self.logs: Any = None
         self.flows: Any = None
@@ -86,6 +89,7 @@ class Monitor:
         self._next_poll: dict[int, float] = {}
         self._next_check: dict[int, float] = {}
         self._rediscover_after: dict[int, float] = {}
+        self._router_flag: dict[int, tuple[bool, float]] = {}  # device id -> (is a router, checked at)
         self._inflight: set[str] = set()
         self._jobs: set[asyncio.Task] = set()
         self._alert_wakeup = asyncio.Event()
@@ -193,6 +197,37 @@ class Monitor:
         client = self.snmp_factory(device, self.settings)
         self._clients[device["id"]] = (fp, client)
         return client
+
+    async def refresh_router_arp(self) -> int:
+        """Read the ARP tables of the routers SNMPathy polls (ipForwarding = 1) into arp_cache.
+
+        Devices on other subnets / VLANs never appear in this computer's own ARP table; their
+        router knows their MAC. Returns how many entries were stored.
+        """
+        from .brands import store_router_arp
+        from .snmp.arp import is_router, read_arp
+
+        rows = self.db.query("SELECT * FROM devices WHERE enabled = 1 AND snmp_enabled = 1 "
+                             "AND snmp_status = 'up' ORDER BY id LIMIT 200")
+        now = time.time()
+        stored = 0
+        routers = 0
+        for device in rows:
+            if routers >= MAX_ARP_ROUTERS:
+                break
+            known = self._router_flag.get(device["id"])
+            try:
+                if known is None or now - known[1] > 86400:
+                    known = (await asyncio.wait_for(is_router(self._client(device)), 20), now)
+                    self._router_flag[device["id"]] = known
+                if not known[0]:
+                    continue
+                routers += 1
+                table = await asyncio.wait_for(read_arp(self._client(device)), 60)
+                stored += await asyncio.to_thread(store_router_arp, self.db, device, table)
+            except Exception as exc:  # unreachable / slow / no IP-MIB: try again next round
+                log.debug("ARP table of %s not read: %s", device["name"], exc)
+        return stored
 
     def forget_device(self, device_id: int) -> None:
         cached = self._clients.pop(device_id, None)
@@ -423,6 +458,10 @@ class Monitor:
             await brands.identify_existing(self.db)
         except Exception:
             log.exception("identifying devices failed")
+        try:
+            await self.refresh_router_arp()
+        except Exception:
+            log.exception("reading router ARP tables failed")
         await asyncio.to_thread(brands.tag_all, self.db)
 
     async def _housekeeping_loop(self) -> None:
@@ -439,6 +478,7 @@ class Monitor:
                     from .brands import tag_all
 
                     last_tagging = time.time()
+                    await self.refresh_router_arp()
                     await asyncio.to_thread(tag_all, self.db)
                 await run_due_reports(self.db, self.settings)
                 if time.time() - last_retention > RETENTION_INTERVAL:

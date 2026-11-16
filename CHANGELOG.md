@@ -4,6 +4,13 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 `snmpathy version`. Executables built with `scripts/build_executable` also show the git
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
+## 0.7.7
+- **Devices on other subnets / VLANs get their MAC address, maker and brand tag.** SNMPathy
+  reads the ARP table of every router it polls over SNMP (UniFi gateway, pfSense, OPNsense,
+  MikroTik, EdgeRouter, Cisco, ...) every 10 minutes, after each network scan and with *Tag
+  existing devices now*. Before, MACs came only from this computer's own subnet. The device page
+  shows which router a MAC came from; Settings > Device tagging shows how many entries were read.
+
 ## 0.7.6
 - **Fixed: the website did not start after updating to 0.7.5** (tray status *No module named
   _sqlite3*). When SNMPathy restarted itself (to close its console window, or after an update)

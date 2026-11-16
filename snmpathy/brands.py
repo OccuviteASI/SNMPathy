@@ -19,6 +19,7 @@ Turned on by default; Settings > Device tagging switches it off (meta ``auto_tag
 from __future__ import annotations
 
 import json
+import time
 import re
 from typing import Any
 
@@ -114,25 +115,50 @@ def apply_brand_tag(db: Database, device_id: int, force: bool = False) -> str:
     return added
 
 
-def refresh_macs(db: Database, arp: dict[str, str] | None = None) -> int:
-    """Record the MAC address (and its maker) of devices this server can see in its ARP table.
+ARP_CACHE_AGE = 2 * 86400  # router ARP entries older than this are not used (and pruned)
 
-    Only devices polled from this server and addressed by IPv4 qualify: a remote collector's
-    devices are on another network, and the ARP table only lists the local segment.
-    Returns how many devices changed.
+
+def router_macs(db: Database, site: int) -> dict[str, tuple[str, str]]:
+    """{ip: (mac, router name)} from the routers' ARP tables at one site (0 = this server)."""
+    rows = db.query("SELECT a.ip, a.mac, d.name FROM arp_cache a LEFT JOIN devices d ON d.id = a.router_id "
+                    "WHERE a.site = ? AND a.seen_at > ?", (site, time.time() - ARP_CACHE_AGE))
+    return {r["ip"]: (r["mac"], r["name"] or "router") for r in rows}
+
+
+def store_router_arp(db: Database, router: dict[str, Any], table: dict[str, str]) -> int:
+    """Remember a router's ARP table (keyed by its site, so equal addresses at two sites never mix)."""
+    site = router.get("collector_id") or 0
+    now = time.time()
+    db.executemany("INSERT OR REPLACE INTO arp_cache (site, ip, mac, router_id, seen_at) VALUES (?, ?, ?, ?, ?)",
+                   [(site, ip, mac, router["id"], now) for ip, mac in table.items()])
+    db.execute("DELETE FROM arp_cache WHERE seen_at < ?", (now - ARP_CACHE_AGE,))
+    return len(table)
+
+
+def refresh_macs(db: Database, arp: dict[str, str] | None = None) -> int:
+    """Record the MAC address (and its maker) of devices, by IPv4 address.
+
+    From this computer's own ARP table (devices on its subnet, polled from this server), and
+    from the ARP tables of routers SNMPathy polls (devices on any subnet / VLAN behind them,
+    matched within the router's site). Returns how many devices changed.
     """
     from . import macvendor
 
-    table = macvendor.read_arp_table() if arp is None else arp
-    if not table:
-        return 0
+    local = macvendor.read_arp_table() if arp is None else arp
+    routers: dict[int, dict[str, tuple[str, str]]] = {}
     changed = 0
-    for row in db.query("SELECT id, hostname, mac, mac_vendor FROM devices WHERE collector_id IS NULL"):
-        mac = table.get((row["hostname"] or "").strip())
+    for row in db.query("SELECT id, hostname, collector_id, mac, mac_vendor, mac_source FROM devices"):
+        host = (row["hostname"] or "").strip()
+        site = row["collector_id"] or 0
+        mac, source = (local.get(host) or "", "") if site == 0 else ("", "")
+        if not mac:
+            if site not in routers:
+                routers[site] = router_macs(db, site)
+            mac, source = routers[site].get(host, ("", ""))
         if not mac:
             continue
-        info = macvendor.describe(mac)
-        if info["mac"] != row["mac"] or info["mac_vendor"] != row["mac_vendor"]:
+        info = {**macvendor.describe(mac), "mac_source": source}
+        if any(info[k] != row[k] for k in info):
             db.update("devices", row["id"], info)
             changed += 1
     return changed

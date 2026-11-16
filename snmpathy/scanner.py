@@ -341,6 +341,12 @@ def add_result(db: Database, scan: dict[str, Any], result: dict[str, Any]) -> in
     }
     extra = {k: result.get(k) or "" for k in ("sys_name", "sys_descr", "sys_object_id", "vendor", "mac", "mac_vendor",
                                               "hw_model", "firmware")}
+    if extra["mac"]:
+        from .brands import router_macs
+
+        routed = router_macs(db, scan.get("collector_id") or 0).get(result["ip"])
+        if routed and routed[0] == extra["mac"]:
+            extra["mac_source"] = routed[1]
     pinged = result.get("ping_ms") is not None
     device = create_device(db, values, add_ping_check=bool(opts.add_ping_check and pinged), extra=extra)
     if not pinged and not result.get("snmp") and result.get("open_ports"):
@@ -362,6 +368,9 @@ class ScanManager:
         self.local_probe = local_probe
         self.local_clients = local_clients
         self.hub = hub
+        # Called after a sweep (the monitor's refresh_router_arp): the sweep's pings have just
+        # filled the routers' ARP tables, which give MACs for hosts on other subnets.
+        self.arp_hook: Callable[[], Awaitable[Any]] | None = None
         self._tasks: dict[int, asyncio.Task] = {}
         # Scans that were running when the process stopped will never finish.
         db.execute("UPDATE scans SET state = 'interrupted', finished_at = ? WHERE state = 'running'", (time.time(),))
@@ -519,6 +528,7 @@ class ScanManager:
 
             await asyncio.gather(*(one(h) for h in hosts))
             self.db.update("scans", scan_id, dict(progress))
+            await self._macs_from_routers(scan_id, scan.get("collector_id") or 0)
             await self._match_existing(scan_id)
             added = self.add(scan_id, mode=opts.auto_add) if opts.auto_add != "none" else []
             if opts.add_public and opts.auto_add != "alive":
@@ -559,6 +569,25 @@ class ScanManager:
              r.get("mac") or "", r.get("mac_vendor") or "", (r.get("hw_model") or "")[:120],
              (r.get("firmware") or "")[:120], time.time()),
         )
+
+    async def _macs_from_routers(self, scan_id: int, site: int) -> None:
+        """Give results without a MAC (other subnets) the one their router has in its ARP table."""
+        missing = self.db.query("SELECT id, ip FROM scan_results WHERE scan_id = ? AND mac = ''", (scan_id,))
+        if not missing:
+            return
+        if self.arp_hook is not None:
+            try:
+                await self.arp_hook()
+            except Exception as exc:
+                log.debug("reading router ARP tables failed: %s", exc)
+        from .brands import router_macs
+        from .macvendor import describe
+
+        known = router_macs(self.db, site)
+        for row in missing:
+            entry = known.get(row["ip"])
+            if entry:
+                self.db.update("scan_results", row["id"], describe(entry[0]))
 
     async def _match_existing(self, scan_id: int) -> None:
         """Mark results that are already monitored (by address or name)."""

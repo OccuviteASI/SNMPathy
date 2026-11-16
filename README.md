@@ -242,8 +242,12 @@ Devices that do not answer SNMP (most home and small-office gear) are recognised
   MA-S blocks), downloaded into the data folder next to the database and refreshed weekly
   (**Settings → Device tagging → Refresh maker list** does it now; Wireshark's list is
   GPL-licensed, so it is downloaded rather than shipped). Until then, an IEEE list bundled with
-  SNMPathy is used. This works for devices on the same network segment as SNMPathy (or the
-  collector running the scan); devices behind a router are not visible this way.
+  SNMPathy is used. The computer's own ARP table only covers its own subnet; for devices on
+  **other subnets / VLANs**, SNMPathy reads the ARP table of the router between them over SNMP
+  (`ipNetToPhysicalTable` / `ipNetToMediaTable`, every 10 minutes and after each scan) from any
+  device it polls that forwards traffic (`ipForwarding` = 1): a UniFi gateway, pfSense,
+  OPNsense, MikroTik, EdgeRouter or Cisco router polled over SNMP is enough. The device page
+  shows which router a MAC came from.
 
 Every known maker becomes a tag: the familiar name for well-known brands (`Ubiquiti`,
 `TP-Link`, `Sonos`), otherwise the maker's name without "Co., Ltd", "Technology" and city
