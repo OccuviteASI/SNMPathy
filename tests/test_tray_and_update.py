@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -394,3 +395,43 @@ def test_double_clicked_exe_restarts_without_its_console(monkeypatch):
 def test_own_console_is_windows_only():
     if not sys.platform.startswith("win"):
         assert tray.own_console() is False
+
+
+def test_self_env_gives_a_restarted_executable_its_own_files(tmp_path):
+    from snmpathy.procutil import RESET, self_env
+
+    mei = str(tmp_path / "_MEI1234")
+    base = {"PATH": os.pathsep.join([mei, "/usr/bin"]), "_PYI_APPLICATION_HOME_DIR": mei,
+            "_PYI_ARCHIVE_FILE": "/opt/SNMPathy", "_PYI_PARENT_PROCESS_LEVEL": "1", "_MEIPASS2": mei,
+            "TCL_LIBRARY": os.path.join(mei, "_tcl_data"), "TK_LIBRARY": os.path.join(mei, "_tk_data"),
+            "LD_LIBRARY_PATH": mei, "LD_LIBRARY_PATH_ORIG": "/usr/local/lib", "HOME": "/home/me",
+            "LOCALAPPDATA": "C:/Users/me/AppData/Local"}
+    env = self_env({"SNMPATHY_DETACHED": "1"}, base=base, meipass=mei, frozen=True)
+    assert env[RESET] == "1" and env["SNMPATHY_DETACHED"] == "1"
+    assert not [k for k in env if k.startswith("_PYI_") or k == "_MEIPASS2"]
+    assert "TCL_LIBRARY" not in env and "TK_LIBRARY" not in env
+    assert env["PATH"] == "/usr/bin" and env["LD_LIBRARY_PATH"] == "/usr/local/lib"
+    assert "LD_LIBRARY_PATH_ORIG" not in env and env["HOME"] == "/home/me"
+    # Without a saved original, only this copy's folder is dropped from LD_LIBRARY_PATH.
+    env = self_env(base={"LD_LIBRARY_PATH": mei}, meipass=mei, frozen=True)
+    assert "LD_LIBRARY_PATH" not in env
+    # Running from Python: untouched.
+    assert self_env({"A": "1"}, base={"TCL_LIBRARY": "/x"}, frozen=False) == {"TCL_LIBRARY": "/x", "A": "1"}
+
+
+def test_self_launches_use_the_clean_environment(monkeypatch):
+    from snmpathy import procutil, selfupdate
+
+    monkeypatch.setattr(procutil, "self_env", lambda extra=None, **kw: {"CLEAN": "1", **(extra or {})})
+    launched = []
+    monkeypatch.setattr(tray.subprocess, "Popen", lambda argv, **kw: launched.append((argv, kw)))
+    monkeypatch.delenv(tray.DETACHED_ENV, raising=False)
+    monkeypatch.setattr(tray, "own_console", lambda: True)
+    monkeypatch.setattr(tray, "is_frozen", lambda: True)
+    assert tray.relaunch_detached()
+    assert launched[-1][1]["env"] == {"CLEAN": "1", tray.DETACHED_ENV: "1"}
+    tray.TrayApp.__new__(tray.TrayApp).run_update()
+    assert launched[-1][0][1:] == ["self-update", "--gui"] and launched[-1][1]["env"] == {"CLEAN": "1"}
+    monkeypatch.setattr(selfupdate.subprocess, "Popen", lambda argv, **kw: launched.append((argv, kw)))
+    selfupdate.start(Path("/opt/snmpathy/SNMPathy"))
+    assert launched[-1][1]["env"] == {"CLEAN": "1"}

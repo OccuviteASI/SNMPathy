@@ -4,6 +4,14 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 `snmpathy version`. Executables built with `scripts/build_executable` also show the git
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
+## 0.7.6
+- **Fixed: the website did not start after updating to 0.7.5** (tray status *No module named
+  _sqlite3*). When SNMPathy restarted itself (to close its console window, or after an update)
+  the new copy reused the old copy's temporary files, which disappear when the old copy exits.
+  Every restart now gets a clean start. CI now checks that a restarted copy keeps working and
+  that the executable's web UI starts.
+- The updater on Linux recognises a running SNMPathy however it was started.
+
 ## 0.7.5
 - **More devices get a brand tag, and their model.**
   - Scans ask each device who made it: **Ubiquiti discovery** (model such as `U6-Lite`, firmware,

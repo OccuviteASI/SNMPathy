@@ -365,6 +365,41 @@ def cmd_version(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_spawn_check(args: argparse.Namespace) -> int:
+    """(For CI) Start this executable again the way the tray does, and check the copy still works
+    after this one has exited: it must load the database, HTTPS and XML modules on its own."""
+    import os
+    import subprocess
+
+    from .procutil import self_env
+
+    out = Path(args.file).resolve()
+    if args.child:
+        time.sleep(4)  # the starting copy (and its launcher, which tidies up after it) is gone by now
+        try:
+            import sqlite3
+            import ssl  # noqa: F401
+            import xml.etree.ElementTree  # noqa: F401
+
+            sqlite3.connect(":memory:").execute("SELECT 1")
+            if sys.platform.startswith("win"):
+                import tkinter  # noqa: F401
+            result = "ok"
+        except Exception as exc:
+            result = f"FAILED: {type(exc).__name__}: {exc}"
+        out.write_text(result + "\n", encoding="utf-8")
+        return 0 if result == "ok" else 1
+    out.unlink(missing_ok=True)
+    argv = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, "-m", "snmpathy"]
+    env = dict(os.environ) if args.raw_env else self_env()
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    subprocess.Popen([*argv, "_spawn-check", "--child", str(out)], env=env, creationflags=flags,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=not sys.platform.startswith("win"))
+    print(f"started; the result will be written to {out}")
+    return 0
+
+
 def cmd_self_update(args: argparse.Namespace) -> int:
     """Download the latest SNMPathy release and replace this executable with it."""
     from . import selfupdate
@@ -671,6 +706,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--include", help="comma-separated groups: syslog (default), web, logs, flows")
     p.add_argument("--config")
     p.set_defaults(func=cmd_firewall)
+
+    p = sub.add_parser("_spawn-check")  # (CI) a restarted copy of the executable still works
+    p.add_argument("file")
+    p.add_argument("--child", action="store_true")
+    p.add_argument("--raw-env", action="store_true", help=argparse.SUPPRESS)
+    p.set_defaults(func=cmd_spawn_check)
 
     p = sub.add_parser("self-update", help="update this executable to the latest release from GitHub")
     p.add_argument("--gui", action="store_true", help="show a progress window (what the tray uses)")

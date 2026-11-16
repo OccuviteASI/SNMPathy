@@ -149,7 +149,11 @@ def relaunch_detached() -> bool:
         return False
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     try:
-        subprocess.Popen([sys.executable, *sys.argv[1:]], env={**os.environ, DETACHED_ENV: "1"},
+        from .procutil import self_env
+
+        # A fresh environment: inheriting this copy's would make the new one use (and lose) this
+        # copy's unpacked files when this copy exits ("No module named _sqlite3").
+        subprocess.Popen([sys.executable, *sys.argv[1:]], env=self_env({DETACHED_ENV: "1"}),
                          cwd=os.getcwd(), creationflags=flags, stdin=subprocess.DEVNULL,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError as exc:
@@ -438,8 +442,10 @@ class TrayApp:
         flags = 0
         if sys.platform.startswith("win"):
             flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
+        from .procutil import self_env
+
         try:
-            subprocess.Popen(command, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            subprocess.Popen(command, cwd=cwd, env=self_env(), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL, creationflags=flags,
                              start_new_session=not sys.platform.startswith("win"))
         except OSError as exc:
