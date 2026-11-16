@@ -59,7 +59,7 @@ document.addEventListener("DOMContentLoaded", () => {
       <td class="num" data-sort="${r.ping_ms == null ? 99999 : r.ping_ms}">${r.ping_ms == null ? '<span class="muted">-</span>' : r.ping_ms.toFixed(1) + " ms"}</td>
       <td class="small">${(r.open_ports || []).join(", ") || '<span class="muted">-</span>'}</td>
       <td>${r.snmp ? `<span class="status up">v${SP.esc(r.snmp_version)}</span>` : '<span class="muted">-</span>'}</td>
-      <td><div>${SP.esc(r.vendor || r.mac_vendor || "")}${r.mac ? ` <span class="small muted mono" title="MAC address${r.mac_vendor ? " (" + SP.esc(r.mac_vendor) + ")" : ""}">${SP.esc(r.mac)}</span>` : ""}</div><div class="small muted" style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${SP.esc(r.sys_descr)}">${SP.esc(r.sys_descr || "")}</div></td>
+      <td><div>${SP.esc(r.vendor || r.mac_vendor || "")}${r.hw_model ? ` <span class="muted">·</span> ${SP.esc(r.hw_model)}` : ""}${r.mac ? ` <span class="small muted mono" title="MAC address${r.mac_vendor ? " (" + SP.esc(r.mac_vendor) + ")" : ""}">${SP.esc(r.mac)}</span>` : ""}</div><div class="small muted" style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${SP.esc(r.sys_descr)}">${SP.esc(r.sys_descr || "")}</div></td>
       <td>${rowStatus(r)}</td></tr>`).join("") || `<tr><td colspan="8"><div class="empty">${d.running ? "Scanning… responding hosts appear here as they are found." : "No hosts responded."}</div></td></tr>`;
     sync();
     return d.running || d.state === "queued" || d.state === "running";

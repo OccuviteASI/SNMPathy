@@ -9,6 +9,7 @@ import json
 import logging
 import random
 import time
+from pathlib import Path
 from typing import Any, Callable
 
 from .alerting.engine import AlertEngine
@@ -32,6 +33,7 @@ log = logging.getLogger(__name__)
 REDISCOVER_INTERVAL = 6 * 3600
 ROLLUP_INTERVAL = 60
 BRAND_TAG_INTERVAL = 600  # seconds between ARP-table MAC refreshes / brand tagging
+IDENTIFY_INTERVAL = 86400  # maker list refresh (weekly at most) + model probes of devices without SNMP
 RETENTION_INTERVAL = 3600
 
 SnmpFactory = Callable[[dict[str, Any], Settings], SnmpClient]
@@ -114,6 +116,10 @@ class Monitor:
             await asyncio.to_thread(evaluate_all, self.db)
         except Exception:
             log.exception("initial availability evaluation failed")
+        # The downloaded maker list (Wireshark's) lives next to the database.
+        from . import macvendor
+
+        macvendor.set_data_dir(Path(s.database).resolve().parent)
         # Brand tags for devices discovered before auto-tagging existed (no-op once tagged).
         try:
             from .brands import tag_all
@@ -401,12 +407,34 @@ class Monitor:
                 pass
 
     # ----------------------------------------------------------- housekeeping
+    async def _identify(self, refresh_list: bool = True) -> None:
+        """Keep the maker list current, ask devices without SNMP for their model, then tag."""
+        from . import brands, macvendor
+
+        if refresh_list:
+            try:
+                before = macvendor.status()
+                after = await asyncio.to_thread(macvendor.refresh_wireshark)
+                if after != before:
+                    await asyncio.to_thread(brands.reresolve_vendors, self.db)
+            except Exception as exc:  # offline: the previous / bundled list stays in use
+                log.info("maker list not refreshed: %s", exc)
+        try:
+            await brands.identify_existing(self.db)
+        except Exception:
+            log.exception("identifying devices failed")
+        await asyncio.to_thread(brands.tag_all, self.db)
+
     async def _housekeeping_loop(self) -> None:
         last_retention = 0.0
         last_tagging = time.time()
+        last_identify = time.time() - IDENTIFY_INTERVAL + 120  # first run 2 minutes after start
         while True:
             try:
                 await asyncio.to_thread(rollup, self.db)
+                if time.time() - last_identify > IDENTIFY_INTERVAL:
+                    last_identify = last_tagging = time.time()
+                    await self._identify()
                 if time.time() - last_tagging > BRAND_TAG_INTERVAL:
                     from .brands import tag_all
 

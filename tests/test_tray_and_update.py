@@ -369,3 +369,28 @@ def test_update_window_stays_open_on_failure_or_when_reading(gui):
     assert reading.close_btn["text"] == f"Close ({gui.AUTO_CLOSE_SECONDS - 1})"
     reading.toggle_details()  # opened the log: the countdown stops
     assert reading.close_btn["text"] == "Close" and not reading.root.timers and not reading.root.destroyed
+
+
+def test_double_clicked_exe_restarts_without_its_console(monkeypatch):
+    launched = []
+    monkeypatch.setattr(tray.subprocess, "Popen", lambda argv, **kw: launched.append((argv, kw)))
+    monkeypatch.delenv(tray.DETACHED_ENV, raising=False)
+    monkeypatch.setattr(tray, "own_console", lambda: True)
+    monkeypatch.setattr(tray, "is_frozen", lambda: False)
+    assert not tray.relaunch_detached() and not launched  # running from Python: leave it
+    monkeypatch.setattr(tray, "is_frozen", lambda: True)
+    monkeypatch.setattr(tray.sys, "argv", ["SNMPathy.exe"])
+    assert tray.relaunch_detached()
+    argv, kw = launched[0]
+    assert argv == [sys.executable] and kw["env"][tray.DETACHED_ENV] == "1" and kw["stdout"] is subprocess.DEVNULL
+    # The relaunched copy, or one started from a terminal / without a window, stays put.
+    monkeypatch.setenv(tray.DETACHED_ENV, "1")
+    assert not tray.relaunch_detached()
+    monkeypatch.delenv(tray.DETACHED_ENV)
+    monkeypatch.setattr(tray, "own_console", lambda: False)
+    assert not tray.relaunch_detached() and len(launched) == 1
+
+
+def test_own_console_is_windows_only():
+    if not sys.platform.startswith("win"):
+        assert tray.own_console() is False

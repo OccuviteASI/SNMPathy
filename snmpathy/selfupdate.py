@@ -24,7 +24,6 @@ import logging
 import os
 import queue
 import re
-import ssl
 import subprocess
 import sys
 import threading
@@ -108,34 +107,17 @@ class Release:
 
 
 # --------------------------------------------------------------------------- network
-def _contexts() -> list[ssl.SSLContext]:
-    """The system's certificates first (company proxies add theirs there), then certifi's."""
-    out = [ssl.create_default_context()]
-    try:
-        import certifi
-
-        out.append(ssl.create_default_context(cafile=certifi.where()))
-    except Exception:
-        pass
-    return out
-
-
 def _open(url: str, accept: str, timeout: float):
-    headers = {"Accept": accept, "User-Agent": f"SNMPathy-updater/{__version__}"}
+    from .netfetch import CertificateError, open_url
+
+    headers = {"Accept": accept}
     token = os.environ.get("SNMPATHY_GITHUB_TOKEN")
     if token and url.startswith("https://api.github.com/"):
         headers["Authorization"] = f"Bearer {token}"
-    request = urllib.request.Request(url, headers=headers)
-    last: Exception | None = None
-    for context in _contexts():
-        try:
-            return urllib.request.urlopen(request, timeout=timeout, context=context)
-        except urllib.error.URLError as exc:
-            if isinstance(exc.reason, ssl.SSLCertVerificationError):
-                last = exc
-                continue
-            raise
-    raise UpdateError(f"could not verify GitHub's certificate: {last}")
+    try:
+        return open_url(url, timeout, headers, agent="SNMPathy-updater")
+    except CertificateError as exc:
+        raise UpdateError(str(exc))
 
 
 def latest_release(timeout: float = 20, platform: str | None = None) -> Release | None:

@@ -384,8 +384,10 @@ def _firewall_status(settings: Any) -> dict[str, Any]:
 
 def _brand_tags_status(db: Any) -> dict[str, Any]:
     from ..brands import enabled
+    from ..macvendor import status
 
-    return {"enabled": enabled(db), "tagged": db.scalar("SELECT COUNT(*) FROM devices WHERE brand_tag != ''") or 0}
+    return {"enabled": enabled(db), "tagged": db.scalar("SELECT COUNT(*) FROM devices WHERE brand_tag != ''") or 0,
+            "maker_list": status()}
 
 
 def _autostart_status(settings: Any) -> dict[str, Any]:

@@ -83,7 +83,8 @@ def test_settings_api_and_page(tmp_path):
     with TestClient(create_app(settings, db=db, start_monitor=False)) as client:
         dev = client.post("/api/devices", json={"name": "ap1", "hostname": "10.0.0.9", "snmp_enabled": False}).json()
         db.update("devices", dev["id"], {"vendor": "Rajant"})
-        assert client.get("/api/system/brand-tags").json() == {"enabled": True, "tagged": 0}
+        got = client.get("/api/system/brand-tags").json()
+        assert got["enabled"] is True and got["tagged"] == 0 and got["maker_list"]["source"] == "IEEE (bundled)"
         assert client.put("/api/system/brand-tags", json={"enabled": False}).json()["enabled"] is False
         assert "Tag devices with their brand" in client.get("/settings").text
         r = client.put("/api/system/brand-tags", json={"enabled": True}).json()  # turning on tags right away

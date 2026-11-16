@@ -66,6 +66,28 @@ def make_device(db):
     return _make
 
 
+@pytest.fixture(autouse=True)
+def _no_outside_lookups(monkeypatch, request):
+    """Tests never download Wireshark's list or probe real addresses for their model.
+
+    Tests that exercise those mark themselves with @pytest.mark.network_ok.
+    """
+    if request.node.get_closest_marker("network_ok"):
+        return
+    from snmpathy import identify, macvendor
+
+    def offline(fetch=None):
+        raise OSError("no downloads in tests")
+
+    async def nobody(host, timeout=1.5):
+        return identify.Identity()
+
+    monkeypatch.setattr(macvendor, "fetch_wireshark", offline)
+    monkeypatch.setattr(identify, "identify", nobody)
+    monkeypatch.setattr(macvendor, "_data_dir", None)
+    monkeypatch.setattr(macvendor, "_ws", None)
+
+
 @pytest.fixture
 def now():
     return time.time()
