@@ -386,6 +386,17 @@ CREATE TABLE IF NOT EXISTS collectors (
     created_at  REAL NOT NULL
 );
 
+-- IP -> MAC learned from routers' ARP tables over SNMP (snmpathy/snmp/arp.py), so devices on other
+-- subnets / VLANs get their MAC and maker. site = the router's collector id (0 = this server).
+CREATE TABLE IF NOT EXISTS arp_cache (
+    site       INTEGER NOT NULL,
+    ip         TEXT NOT NULL,
+    mac        TEXT NOT NULL,
+    router_id  INTEGER,
+    seen_at    REAL NOT NULL,
+    PRIMARY KEY (site, ip)
+);
+
 -- Layer-2 neighbours learned from LLDP / CDP (or added by hand).
 CREATE TABLE IF NOT EXISTS links (
     id               INTEGER PRIMARY KEY,
@@ -494,6 +505,7 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("brand_tag", "TEXT NOT NULL DEFAULT ''"),  # the brand tag SNMPathy added (snmpathy/brands.py)
         ("mac", "TEXT NOT NULL DEFAULT ''"),  # from the ARP table (snmpathy/macvendor.py)
         ("mac_vendor", "TEXT NOT NULL DEFAULT ''"),
+        ("mac_source", "TEXT NOT NULL DEFAULT ''"),  # '' = this computer's ARP table, else the router's name
     ],
     "scan_results": [
         ("mac", "TEXT NOT NULL DEFAULT ''"),

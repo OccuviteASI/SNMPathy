@@ -1220,7 +1220,7 @@ def put_brand_tags(body: BrandTagsIn, db: Database = Depends(get_db)):
 
 
 @router.post("/system/brand-tags/apply", tags=["system"])
-async def apply_brand_tags(db: Database = Depends(get_db)):
+async def apply_brand_tags(request: Request, db: Database = Depends(get_db)):
     """Ask devices without SNMP for their model, then tag devices with a known brand that were not
     tagged yet (works even when tagging is switched off)."""
     import asyncio
@@ -1228,7 +1228,14 @@ async def apply_brand_tags(db: Database = Depends(get_db)):
     from . import brands
 
     identified = await brands.identify_existing(db)
-    return {**await asyncio.to_thread(brands.tag_all, db, True), "identified": identified}
+    monitor = getattr(request.app.state, "monitor", None)
+    arp_entries = 0
+    if monitor is not None:
+        try:
+            arp_entries = await monitor.refresh_router_arp()
+        except Exception:  # routers unreachable: tag with what is known
+            pass
+    return {**await asyncio.to_thread(brands.tag_all, db, True), "identified": identified, "arp_entries": arp_entries}
 
 
 @router.post("/system/maker-list/refresh", tags=["system"])
