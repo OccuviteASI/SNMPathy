@@ -128,12 +128,21 @@ def describe_rule(device: dict[str, Any]) -> str:
     return AVAIL_MODES.get(mode, mode)
 
 
+def collector_failed_over(db: Database, collector_id: int | None) -> bool:
+    """The collector is not connected and this server monitors its devices meanwhile."""
+    if not collector_id:
+        return False
+    col = db.one("SELECT status, failover FROM collectors WHERE id = ?", (collector_id,))
+    return bool(col and col["failover"] and col["status"] != "online")
+
+
 def _blocker(db: Database, device: dict[str, Any]) -> str:
     """Why a failing device cannot be reached at all (Nagios' UNREACHABLE), or ''."""
     if device.get("collector_id"):
-        col = db.one("SELECT name, status FROM collectors WHERE id = ?", (device["collector_id"],))
+        col = db.one("SELECT name, status, failover FROM collectors WHERE id = ?", (device["collector_id"],))
         if col and col["status"] == "offline":
-            return f"collector {col['name']} is offline"
+            return (f"collector {col['name']} is offline and this server cannot reach it either" if col["failover"]
+                    else f"collector {col['name']} is offline")
     if device.get("parent_id"):
         parent = db.one("SELECT name, status FROM devices WHERE id = ?", (device["parent_id"],))
         if parent and parent["status"] in ("down", "unreachable"):
@@ -162,9 +171,11 @@ def evaluate_device(db: Database, device_id: int, now: float | None = None, _see
     verdict = combine(device_sources(db, device), device.get("avail_mode") or "any", device.get("avail_min") or 2)
     state, reason = verdict.state, verdict.reason
     blocker = _blocker(db, device)
-    if blocker and (state == "down" or (device.get("collector_id") and "collector" in blocker)):
-        # With the collector offline nothing is known about the device; with the
-        # parent down a failure is explained by the parent.
+    if blocker and (state == "down" or (device.get("collector_id") and "collector" in blocker
+                                        and not collector_failed_over(db, device["collector_id"]))):
+        # With the collector offline (and no failover) nothing is known about the device; with
+        # the parent down a failure is explained by the parent. With failover, this server's
+        # own polls and checks decide, and a failure while the collector is away is unreachable.
         state, reason = "unreachable", f"{blocker}; {reason}"[:500]
     old = device.get("status") or "unknown"
     changes: dict[str, Any] = {}

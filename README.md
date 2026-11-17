@@ -287,7 +287,8 @@ device uptime; uptime and health reports include **availability by device**. The
 **Parents (Nagios-style unreachable):** set a device's **Parent device** (its upstream
 switch or router, or let **Network map → Set parents…** fill them in from the topology).
 When the parent is down, its children are shown as **unreachable** rather than down and
-do not raise their own alerts. Devices behind an offline collector are unreachable too.
+do not raise their own alerts. Devices behind an offline collector that this server cannot
+reach either are unreachable too.
 
 ### Remote sites: collectors
 
@@ -330,9 +331,15 @@ prebuilt executable the installers fall back to the Python package the server al
 serves (`snmpathy-<version>.tar.gz`, needs Python 3.10+ at the site).
 
 Then set **Monitored from** on devices (or run a scan from the collector). Checks follow
-their device's collector unless you choose otherwise. A collector that stops reporting
-for 90 s (`collector_offline_after`) is marked offline and an event is logged; its devices
-become unreachable until it returns. Use HTTPS (a reverse proxy) when collectors cross
+their device's collector unless you choose otherwise: the collector relays everything for its
+devices (SNMP polls, pings and other checks, scans) and forwards the results here.
+
+**Failover:** a collector that stops reporting for 90 s (`collector_offline_after`) is marked
+offline and an event is logged; this server then polls and checks its devices (and runs its
+scans) directly, where it can reach them, until the collector is back and takes over again.
+Devices this server cannot reach either show as *unreachable* (not down). A collector that was
+never connected is covered the same way. Turn it off per collector (**Failover: on / off** on
+its page) to have its devices just shown as unreachable while it is away. Use HTTPS (a reverse proxy) when collectors cross
 the internet: the token and SNMP credentials travel over that connection. `--insecure`
 and `--ca-file` cover self-signed and private-CA certificates.
 

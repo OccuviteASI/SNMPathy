@@ -20,6 +20,11 @@ commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
   Unlocking lasts 12 hours (*Lock now* ends it); 5 wrong passcodes lock that address out for
   10 minutes; API clients can use the API token in a header.
 - The left menu no longer shows counts next to **Devices** and **Uptime checks**.
+- **Collector failover.** Devices, checks and scans assigned to a collector run on that collector
+  (it relays them and forwards the results). While it is offline (or before it ever connects)
+  this server polls, checks and scans them directly where it can reach them, and hands them
+  back when the collector reconnects; events record both. Devices it cannot reach either are
+  *unreachable*. A **Failover: on / off** button on each collector's page turns it off.
 - **Web port.** If the web UI's port (8080) is taken by another program when SNMPathy starts
   in the tray, it moves to the next free port, saves it in `snmpathy.yaml` and says so in a
   notification. Change it by hand in **Server admin → Web port** (*Save and restart*); the tray's

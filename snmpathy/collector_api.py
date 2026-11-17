@@ -104,6 +104,7 @@ class CollectorPatch(BaseModel):
     site: Optional[str] = None
     description: Optional[str] = None
     enabled: Optional[bool] = None
+    failover: Optional[bool] = None  # this server takes over while the collector is offline
 
 
 def _base_url(request: Request) -> str:
@@ -155,8 +156,9 @@ def patch_collector(collector_id: int, body: CollectorPatch, db: Database = Depe
     if not db.one("SELECT 1 FROM collectors WHERE id = ?", (collector_id,)):
         raise HTTPException(404, "collector not found")
     values = body.model_dump(exclude_unset=True)
-    if "enabled" in values:
-        values["enabled"] = int(values["enabled"])
+    for key in ("enabled", "failover"):
+        if key in values:
+            values[key] = int(values[key])
     if values.get("name") and db.one("SELECT 1 FROM collectors WHERE name = ? AND id != ?", (values["name"], collector_id)):
         raise HTTPException(422, "a collector with that name already exists")
     db.update("collectors", collector_id, values)

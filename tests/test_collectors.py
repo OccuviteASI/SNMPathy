@@ -79,7 +79,9 @@ async def test_config_and_ingest(db, make_device):
 
 
 async def test_offline_collector_makes_devices_unreachable(db, make_device):
+    """With failover off, nothing is known about the devices while their collector is away."""
     col, device = await _collector_device(db, make_device)
+    db.update("collectors", col["id"], {"failover": 0})
     hub = CollectorHub(db, offline_after=60)
     hub.touch(col, {"hostname": "probe1", "version": "1"}, now=time.time())
     check = create_check(db, {"device_id": device["id"], "type": "icmp", "target": "10.9.0.1", "retries": 0})
@@ -173,3 +175,56 @@ async def test_agent_executes_jobs():
     assert (await execute_job("ping", {}))["pong"] > 0
     with pytest.raises(ValueError):
         await execute_job("rm -rf", {})
+
+
+
+async def test_failover_server_takes_over_while_collector_is_offline(db, make_device):
+    from snmpathy.checks.probes import ProbeResult
+    from snmpathy.config import Settings
+    from snmpathy.monitor import Monitor
+    from snmpathy.snmp.client import FakeSnmpClient
+
+    col, device = await _collector_device(db, make_device)
+    check = create_check(db, {"device_id": device["id"], "type": "icmp", "target": "10.9.0.1", "retries": 0})
+    assert check["collector_id"] == col["id"]  # checks follow their device's collector
+    probed = []
+
+    async def local_probe(c, dev=None):
+        probed.append(c["target"])
+        return ProbeResult(True, 2.0, "local echo")
+    monitor = Monitor(db, Settings(database=":memory:"), probe=local_probe,
+                      snmp_factory=lambda d, s: FakeSnmpClient({}))
+    hub = monitor.hub
+    hub.touch(col, {"hostname": "probe1"}, now=time.time())
+    monitor._update_failover()
+    assert monitor._relayed(col["id"])  # connected: the collector does the work
+    # The collector stops reporting: this server stands in for it.
+    db.execute("UPDATE collectors SET last_seen = ?", (time.time() - 3600,))
+    hub.sweep()
+    assert "this server now polls and checks its devices directly" in db.one(
+        "SELECT message FROM events WHERE type = 'collector.offline'")["message"]
+    monitor._update_failover()
+    assert not monitor._relayed(col["id"])
+    assert db.one("SELECT 1 FROM events WHERE type = 'collector.failover' AND message LIKE 'Failover:%'")
+    result = await monitor._check_job(db.one("SELECT * FROM checks WHERE id = ?", (check["id"],)))
+    assert probed == ["10.9.0.1"] and result["state"] == "up"  # probed from here, not relayed
+    assert db.one("SELECT status FROM devices")["status"] == "up"  # not forced to unreachable
+    client = monitor._client(db.one("SELECT * FROM devices"))
+    assert isinstance(client, FakeSnmpClient)  # SNMP from here too
+    # Back online: the collector takes over again.
+    hub.touch(db.one("SELECT * FROM collectors"), {})
+    monitor._update_failover()
+    assert monitor._relayed(col["id"])
+    assert db.one("SELECT 1 FROM events WHERE type = 'collector.failover' AND message LIKE '%is back%'")
+
+
+def test_scan_from_offline_collector_runs_here(db):
+    from snmpathy.scanner import ScanManager
+
+    col, _ = collectors.create_collector(db, "Away")
+    manager = ScanManager(db, local_probe=lambda *a: None, local_clients=lambda *a: None, hub=CollectorHub(db))
+    scan = manager.create({"targets": "10.0.0.1", "collector_id": col["id"], "options": {}})
+    executor = manager._executor(manager.get(scan["id"]))
+    assert executor.__name__ == "local"  # never connected + failover on: this server scans
+    db.update("collectors", col["id"], {"failover": 0})
+    assert manager._executor(manager.get(scan["id"])).__name__ == "remote"
