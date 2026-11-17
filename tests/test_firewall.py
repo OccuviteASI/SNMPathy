@@ -106,5 +106,5 @@ def test_status_and_api(fake, monkeypatch, tmp_path, db):
         assert c.get("/api/system/firewall").json()["backend"] == "firewalld"
         assert c.post("/api/system/firewall", json={"groups": ["syslog"]}).json()["ok"] is True
         assert c.post("/api/system/firewall", json={"groups": ["nope"]}).status_code == 422
-        page = c.get("/settings").text
+        page = c.get("/admin").text
         assert "Add firewall rules" in page and "Syslog (UDP and TCP)" in page

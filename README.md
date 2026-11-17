@@ -635,14 +635,25 @@ macOS / Linux) and only rebuilds when something new was merged; it logs to `buil
 Double-clicking the executable (and autostart at login, and the restart after an update) runs
 SNMPathy in the **system tray** instead of a console window. The icon turns red when a device
 or check is down; its tooltip and menu show the current status. Right-click for **Open
-SNMPathy**, **Start at login**, **Update SNMPathy**, **Open data folder**, **View log**
-(`snmpathy.log` next to the executable) and **Quit SNMPathy**. `snmpathy tray` does the same
+SNMPathy**, **Server admin** (it expands: **Start at login**, **Firewall** to open SNMPathy's
+ports or remove its rules, **Update SNMPathy**, the web UI's **Server admin page**, **Open data
+folder** and **View log**, `snmpathy.log` next to the executable) and **Quit SNMPathy**. `snmpathy tray` does the same
 from a Python install (`pip install .[tray]`). On a Linux machine without a desktop, or when
 started from a terminal with `serve`, SNMPathy runs in the console as before.
 
+## Server admin
+
+Settings that manage the computer SNMPathy runs on, rather than what it monitors, are on the
+**Server admin** page (left menu, under Configure): system information, **Updates** (check,
+and for the executable *Update now*), **Startup**, **Firewall**, the **Database** (sizes,
+retention), **Configuration backup** (export / import) and the settings in effect. **Settings**
+keeps device tagging, Grafana and the API. The same server actions are in the tray icon under
+**Server admin**.
+
 ## Open the firewall for syslog
 
-**Settings → Firewall**: tick what to open (**Syslog** by default; also *Web UI and API*,
+**Server admin → Firewall** in the web UI (or the tray's **Server admin → Firewall**):
+tick what to open (**Syslog** by default; also *Web UI and API*,
 *GELF / JSON log inputs*, *NetFlow / IPFIX / sFlow*) and click **Add firewall rules**
 (**Remove** takes them out again). The table shows which ports are already open. From the
 command line: `snmpathy firewall status`, `snmpathy firewall add --include syslog,flows`,
@@ -657,7 +668,8 @@ command line: `snmpathy firewall status`, `snmpathy firewall add --include syslo
 
 ## Start automatically at login
 
-**Settings → Startup → Start SNMPathy automatically when I log in** (or
+**Server admin → Startup → Start SNMPathy automatically when I log in**, or the tray's
+**Server admin → Start at login** (or
 `snmpathy autostart on` / `off` / `status`). No admin rights are needed; it uses the
 normal per-user mechanism of each OS:
 

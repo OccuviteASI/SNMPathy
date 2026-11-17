@@ -1266,6 +1266,41 @@ async def refresh_maker_list(db: Database = Depends(get_db)):
     return {"maker_list": status, "changed": changed, **tagged}
 
 
+# =================================================================== updates
+@router.get("/system/update", tags=["system"])
+def get_update():
+    """This server's version and the latest published release."""
+    from . import __version__, selfupdate
+    from .config import is_frozen
+
+    out: dict[str, Any] = {"version": __version__, "frozen": is_frozen(), "latest": None, "available": False}
+    try:
+        release = selfupdate.latest_release()
+    except selfupdate.UpdateError as exc:
+        return {**out, "error": str(exc)}
+    if release is not None:
+        out.update(latest=release.version, available=release.is_newer())
+    return out
+
+
+@router.post("/system/update", tags=["system"])
+def post_update():
+    """Update this server's SNMPathy to the latest release (it restarts). Executable builds only."""
+    import subprocess
+    import sys
+
+    from .config import is_frozen
+    from .procutil import self_env
+
+    if not is_frozen():
+        raise HTTPException(409, "this server runs from a source checkout: update it with scripts/update")
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    subprocess.Popen([sys.executable, "self-update", "--gui"], env=self_env(), creationflags=flags,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=not sys.platform.startswith("win"))
+    return {"started": True}
+
+
 # =================================================================== firewall
 class FirewallIn(BaseModel):
     groups: list[str] = ["syslog"]

@@ -51,9 +51,7 @@ def render(request: Request, name: str, **context: Any) -> HTMLResponse:
     db = db_of(request)
     context.setdefault("nav", name.split(".")[0])
     context["problems"] = {
-        "devices": db.scalar("SELECT COUNT(*) FROM devices WHERE enabled = 1 AND status = 'down'"),
         "collectors": db.scalar("SELECT COUNT(*) FROM collectors WHERE enabled = 1 AND status = 'offline'"),
-        "checks": db.scalar("SELECT COUNT(*) FROM checks WHERE enabled = 1 AND state = 'down'"),
         # Only what still needs someone: firing alerts nobody has acknowledged.
         "alerts": db.scalar("SELECT COUNT(*) FROM alerts WHERE state = 'firing' AND acknowledged = 0"),
     }
@@ -392,23 +390,35 @@ def maintenance(request: Request):
 
 @router.get("/settings", response_class=HTMLResponse)
 def settings(request: Request):
+    """App settings (what is monitored and how); the server's own settings are on /admin."""
+    from ..grafana import grafana_dashboards
+
+    db = db_of(request)
+    return render(
+        request, "settings.html", settings=request.app.state.settings,
+        grafana_boards=[{"file": k, "title": v["title"]} for k, v in grafana_dashboards().items()],
+        base_url=str(request.base_url).rstrip("/"), brand_tags=_brand_tags_status(db),
+    )
+
+
+@router.get("/admin", response_class=HTMLResponse)
+def server_admin(request: Request):
+    """Managing the computer SNMPathy runs on: startup, firewall, updates, database, backup, config."""
     from .. import storage, version_string
     from ..checks.probes import detect_icmp_mode
+    from ..config import is_frozen
     import platform
+    import socket
     import sys
 
     db = db_of(request)
     s = request.app.state.settings
     monitor = request.app.state.monitor
-    from ..grafana import grafana_dashboards
-
     return render(
-        request, "settings.html", settings=s, version=version_string(), stats=storage.database_stats(db),
-        grafana_boards=[{"file": k, "title": v["title"]} for k, v in grafana_dashboards().items()],
-        base_url=str(request.base_url).rstrip("/"),
+        request, "admin.html", nav="admin", settings=s, version=version_string(), stats=storage.database_stats(db),
         python=sys.version.split()[0], platform=platform.platform(), icmp_mode=detect_icmp_mode(),
-        fts=db.has_fts, monitor=monitor.status() if monitor else None,
-        autostart=_autostart_status(s), firewall=_firewall_status(s), brand_tags=_brand_tags_status(db),
+        fts=db.has_fts, monitor=monitor.status() if monitor else None, hostname=socket.gethostname(),
+        frozen=is_frozen(), autostart=_autostart_status(s), firewall=_firewall_status(s),
     )
 
 

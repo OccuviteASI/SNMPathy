@@ -20,9 +20,9 @@
       <a href="/dashboards" class="{{ 'active' if nav in ('dashboards', 'dashboard_view') }}">{{ icon('dash') }} Dashboards</a>
       <a href="/fusion" class="{{ 'active' if nav == 'fusion' }}">{{ icon('fusion') }} Fusion</a>
       <div class="nav-label">Monitor</div>
-      <a href="/devices" class="{{ 'active' if nav in ('devices', 'device', 'device_form') }}">{{ icon('device') }} Devices{% if problems.devices %}<span class="count">{{ problems.devices }}</span>{% endif %}</a>
+      <a href="/devices" class="{{ 'active' if nav in ('devices', 'device', 'device_form') }}">{{ icon('device') }} Devices</a>
       <a href="/map" class="{{ 'active' if nav == 'map' }}">{{ icon('map') }} Network map</a>
-      <a href="/checks" class="{{ 'active' if nav in ('checks', 'check') }}">{{ icon('check') }} Uptime checks{% if problems.checks %}<span class="count">{{ problems.checks }}</span>{% endif %}</a>
+      <a href="/checks" class="{{ 'active' if nav in ('checks', 'check') }}">{{ icon('check') }} Uptime checks</a>
       <a href="/syslog" class="{{ 'active' if nav in ('syslog', 'logsources') }}">{{ icon('log') }} Logs</a>
       <a href="/traffic" class="{{ 'active' if nav == 'traffic' }}">{{ icon('flow') }} Network analyzer</a>
       <a href="/alerts" class="{{ 'active' if nav == 'alerts' }}">{{ icon('alert') }} Alerts{% if problems.alerts %}<span class="count">{{ problems.alerts }}</span>{% endif %}</a>
@@ -33,9 +33,10 @@
       <a href="/collectors" class="{{ 'active' if nav == 'collectors' }}">{{ icon('collector') }} Collectors{% if problems.collectors %}<span class="count">{{ problems.collectors }}</span>{% endif %}</a>
       <a href="/maintenance" class="{{ 'active' if nav == 'maintenance' }}">{{ icon('wrench') }} Maintenance</a>
       <a href="/settings" class="{{ 'active' if nav == 'settings' }}">{{ icon('settings') }} Settings</a>
+      <a href="/admin" class="{{ 'active' if nav == 'admin' }}">{{ icon('server') }} Server admin</a>
     </nav>
     <div class="sidebar-foot">
-      <a class="small muted" href="/settings" title="SNMPathy version" style="display:block;padding:0 4px 6px">v{{ version }}</a>
+      <a class="small muted" href="/admin" title="SNMPathy version (Server admin)" style="display:block;padding:0 4px 6px">v{{ version }}</a>
       <button class="btn ghost sm" data-action="theme" title="Switch light / dark / system theme">{{ icon('moon') }} Theme</button>
       {% if auth_enabled %}<a class="btn ghost sm" href="/logout">Log out</a>{% endif %}
     </div>

@@ -435,3 +435,59 @@ def test_self_launches_use_the_clean_environment(monkeypatch):
     monkeypatch.setattr(selfupdate.subprocess, "Popen", lambda argv, **kw: launched.append((argv, kw)))
     selfupdate.start(Path("/opt/snmpathy/SNMPathy"))
     assert launched[-1][1]["env"] == {"CLEAN": "1"}
+
+
+class _FakePystray:
+    """Enough of pystray to build the menu without a desktop."""
+
+    class MenuItem:
+        def __init__(self, text, action=None, **kw):
+            self.text, self.action, self.kw = text, action, kw
+            self.submenu = action if isinstance(action, _FakePystray.Menu) else None
+
+        def __str__(self):
+            return self.text if isinstance(self.text, str) else self.text(self)
+
+    class Menu:
+        SEPARATOR = None
+
+        def __init__(self, *items):
+            self.items = [i for i in items if i is not None]
+
+
+def test_tray_server_admin_submenu(monkeypatch):
+    import sys as _sys
+
+    monkeypatch.setitem(_sys.modules, "pystray", _FakePystray)
+    pystray = _FakePystray
+    app = tray.TrayApp.__new__(tray.TrayApp)
+    app.available, app.status, app.url = "", "All up", "http://localhost:8080/"
+    app.settings = None
+    top = [str(i) for i in app.menu().items]
+    assert "Server admin" in top and "Start at login" not in top and "View log" not in top
+    admin = next(i for i in app.menu().items if str(i) == "Server admin").submenu
+    names = [str(i) for i in admin.items]
+    for wanted in ("Start at login", "Firewall", "Server admin page", "Open data folder", "View log"):
+        assert wanted in names, wanted
+    fw = [str(i) for i in next(i for i in admin.items if str(i) == "Firewall").submenu.items]
+    assert "Open ports: Syslog (UDP and TCP)" in fw and "Open all SNMPathy ports" in fw
+    assert "Remove SNMPathy's firewall rules" in fw
+    assert pystray
+
+
+def test_tray_firewall_action_reports(monkeypatch):
+    from snmpathy import firewall
+
+    calls, notes, boxes = [], [], []
+    monkeypatch.setattr(firewall, "apply", lambda settings, groups, remove=False: calls.append((groups, remove)) or
+                        {"ok": True, "rules": ["SNMPathy Syslog UDP 514"], "output": "", "manual": ""})
+    monkeypatch.setattr(tray, "show_message", lambda text, title="": boxes.append(text))
+    app = tray.TrayApp.__new__(tray.TrayApp)
+    app.settings = None
+    app.notify = notes.append
+    app._firewall(["syslog"], False)
+    assert calls == [(["syslog"], False)] and notes == ["Firewall opened for Syslog (UDP and TCP)"]
+    monkeypatch.setattr(firewall, "apply", lambda settings, groups, remove=False:
+                        {"ok": False, "rules": ["x"], "output": "sudo needs a password", "manual": "ufw allow 514/udp"})
+    app._firewall(["syslog"], False)
+    assert "ufw allow 514/udp" in boxes[-1] and "sudo needs a password" in boxes[-1]

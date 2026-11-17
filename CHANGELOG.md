@@ -4,6 +4,16 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 `snmpathy version`. Executables built with `scripts/build_executable` also show the git
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
+## 0.7.11
+- **Server admin**: a new page (left menu, under Configure) for managing the computer SNMPathy
+  runs on: system information, **Updates** (check; *Update now* on the executable), **Startup**,
+  **Firewall**, **Database**, **Configuration backup** and the settings in effect. **Settings**
+  keeps device tagging, Grafana and the API.
+- The tray's menu has a **Server admin** item that expands: **Start at login**, **Firewall**
+  (open SNMPathy's ports per group or all of them, or remove its rules), **Update SNMPathy**,
+  the **Server admin page**, **Open data folder** and **View log**.
+- The left menu no longer shows counts next to **Devices** and **Uptime checks**.
+
 ## 0.7.10
 - CI no longer tests or builds for macOS (Windows, Linux and Docker only); releases carry the
   Windows and Linux executables.

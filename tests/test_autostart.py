@@ -122,7 +122,7 @@ def test_api_and_settings_page(home, monkeypatch, db):
     app = create_app(Settings(database=str(tmp / "t.db")), db=db, start_monitor=False)
     with TestClient(app) as c:
         assert c.get("/api/system/autostart").json()["enabled"] is False
-        assert "Start SNMPathy automatically" in c.get("/settings").text
+        assert "Start SNMPathy automatically" in c.get("/admin").text
         r = c.put("/api/system/autostart", json={"enabled": True})
         assert r.status_code == 200 and r.json()["enabled"] is True
         assert c.put("/api/system/autostart", json={"enabled": False}).json()["enabled"] is False

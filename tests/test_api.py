@@ -188,7 +188,7 @@ def test_every_page_renders(client):
     check = client.get("/api/checks").json()[0]
     pages = ["/", "/devices", "/devices/new", f"/devices/{dev['id']}", f"/devices/{dev['id']}/edit",
              "/checks", f"/checks/{check['id']}", "/syslog", "/alerts", "/reports", "/dashboards",
-             "/dashboards/network-overview", "/maintenance", "/settings", "/status", "/login"]
+             "/dashboards/network-overview", "/maintenance", "/settings", "/admin", "/status", "/login"]
     pages += [f"/devices/{dev['id']}?tab={t}" for t in ("interfaces", "metrics", "checks", "syslog", "events")]
     pages += [f"/alerts?tab={t}" for t in ("history", "rules", "channels", "notifications")]
     pages += [f"/reports/{r}?range={rng}" for r in ("uptime", "health", "bandwidth", "syslog", "alerts")
@@ -196,3 +196,31 @@ def test_every_page_renders(client):
     for page in pages:
         r = client.get(page)
         assert r.status_code == 200, (page, r.text[:500])
+
+
+def test_server_admin_page_and_update_api(tmp_path, monkeypatch):
+    import socket
+
+    from fastapi.testclient import TestClient
+
+    from snmpathy import selfupdate
+    from snmpathy.app import create_app
+    from snmpathy.config import Settings
+    from snmpathy.db import Database
+
+    settings = Settings(database=str(tmp_path / "a.db"), enable_syslog=False)
+    with TestClient(create_app(settings, db=Database(settings.database), start_monitor=False)) as client:
+        admin = client.get("/admin").text
+        for section in ("Server admin", socket.gethostname(), "Startup", "Firewall", "Updates", "Database",
+                        "Configuration backup", "Settings in effect"):
+            assert section in admin, section
+        page = client.get("/settings").text
+        assert "Device tagging" in page and "Grafana" in page and 'href="/admin"' in page
+        assert "Add firewall rules" not in page and "Start SNMPathy automatically" not in page
+        monkeypatch.setattr(selfupdate, "latest_release",
+                            lambda: selfupdate.Release("99.0.0", "v99.0.0", "abcdef1", "https://github.com/x", 1))
+        r = client.get("/api/system/update").json()
+        assert r["latest"] == "99.0.0" and r["available"] is True and r["frozen"] is False
+        monkeypatch.setattr(selfupdate, "latest_release", lambda: None)
+        assert client.get("/api/system/update").json()["latest"] is None
+        assert client.post("/api/system/update").status_code == 409  # running from source

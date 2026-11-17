@@ -6,12 +6,14 @@ server in a background thread and shows a tray icon with:
 * **Open SNMPathy** (also double-click / left-click on Windows)
 * a live status line (devices down / unreachable, checks down), and a red marker on the
   icon when something is down
-* **Start at login** - the same switch as Settings > Startup
+* **Server admin** (expands): **Start at login** (the same switch as Server admin > Startup in
+  the web UI), **Firewall** (open SNMPathy's ports, or remove its rules), **Update SNMPathy**,
+  the web UI's **Server admin page**, **Open data folder**, **View log**
 * **Update SNMPathy** - downloads the latest release from GitHub and restarts, showing a
   progress window (``snmpathy/selfupdate.py``; nothing else needs to be installed). Checked
   every few hours; the menu says when a new version is available. Running from source, it
   pulls and rebuilds instead (``scripts/update_gui.py``, recorded in ``updater.json``).
-* **Open data folder**, **View log** (the log goes to ``snmpathy.log`` in tray mode)
+* (the log goes to ``snmpathy.log`` in tray mode)
 * **Quit SNMPathy**
 
 Needs the optional ``pystray`` and ``Pillow`` packages (``pip install snmpathy[tray]``;
@@ -516,7 +518,62 @@ class TrayApp:
         if self.icon is not None:
             self.icon.stop()
 
+    # ------------------------------------------------------------ firewall
+    def firewall(self, groups: list[str], remove: bool = False) -> None:
+        """Open (or close) SNMPathy's ports in this computer's firewall, in the background."""
+        threading.Thread(target=self._firewall, args=(groups, remove), name="snmpathy-firewall", daemon=True).start()
+
+    def _firewall(self, groups: list[str], remove: bool) -> None:
+        from . import firewall
+
+        try:
+            result = firewall.apply(self.settings, groups, remove=remove)
+        except Exception as exc:
+            show_message(f"Could not change the firewall: {exc}", "SNMPathy firewall")
+            return
+        what = ", ".join(firewall.GROUPS[g] for g in groups)
+        if result.get("ok"):
+            self.notify(("Removed SNMPathy's firewall rules" if remove else f"Firewall opened for {what}")
+                        if result.get("rules") else result.get("output") or "Nothing to change")
+        elif result.get("manual"):
+            show_message(f"{result.get('output') or 'The rules were not changed automatically.'}\n\n"
+                         f"Run these commands as administrator:\n\n{result['manual']}", "SNMPathy firewall")
+        else:
+            show_message(result.get("output") or "The firewall was not changed.", "SNMPathy firewall")
+
+    def open_admin(self, *_: Any) -> None:
+        webbrowser.open(self.url.rstrip("/") + "/admin")
+
     # ------------------------------------------------------------ menu
+    def firewall_menu(self):
+        import pystray
+
+        from .firewall import GROUPS
+
+        item = pystray.MenuItem
+        opens = [item(f"Open ports: {label}", (lambda key: lambda *_: self.firewall([key]))(key))
+                 for key, label in GROUPS.items()]
+        return pystray.Menu(
+            *opens,
+            item("Open all SNMPathy ports", lambda *_: self.firewall(list(GROUPS))),
+            pystray.Menu.SEPARATOR,
+            item("Remove SNMPathy's firewall rules", lambda *_: self.firewall(list(GROUPS), remove=True)),
+        )
+
+    def admin_menu(self):
+        import pystray
+
+        item = pystray.MenuItem
+        return pystray.Menu(
+            item("Start at login", self.toggle_autostart, checked=self.autostart_enabled),
+            item("Firewall", self.firewall_menu()),
+            item(self.update_label, self.run_update, visible=lambda _i: update_available()),
+            pystray.Menu.SEPARATOR,
+            item("Server admin page", self.open_admin),
+            item("Open data folder", self.open_folder),
+            item("View log", self.view_log),
+        )
+
     def menu(self):
         import pystray
 
@@ -525,10 +582,7 @@ class TrayApp:
             item("Open SNMPathy", self.open_ui, default=True),
             item(lambda _i: self.status, None, enabled=False),
             pystray.Menu.SEPARATOR,
-            item("Start at login", self.toggle_autostart, checked=self.autostart_enabled),
-            item(self.update_label, self.run_update, visible=lambda _i: update_available()),
-            item("Open data folder", self.open_folder),
-            item("View log", self.view_log),
+            item("Server admin", self.admin_menu()),
             pystray.Menu.SEPARATOR,
             item("Quit SNMPathy", self.quit),
         )
