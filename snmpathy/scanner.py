@@ -521,7 +521,12 @@ class ScanManager:
         return started
 
     def _executor(self, scan: dict[str, Any]) -> Callable[[str, ScanOptions], Awaitable[dict[str, Any] | None]]:
-        if scan.get("collector_id"):
+        from .availability import collector_failed_over
+
+        if scan.get("collector_id") and collector_failed_over(self.db, scan["collector_id"]):
+            log.info("scan %s: collector %s is offline, running it from this server", scan.get("name"),
+                     scan["collector_id"])
+        elif scan.get("collector_id"):
             if self.hub is None:
                 raise RuntimeError("remote probes are not available")
             collector_id = scan["collector_id"]

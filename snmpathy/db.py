@@ -521,6 +521,9 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
     "alert_rules": [
         ("skip_online_devices", "INTEGER NOT NULL DEFAULT 1"),
     ],
+    "collectors": [
+        ("failover", "INTEGER NOT NULL DEFAULT 1"),  # this server monitors the collector's devices while it is offline
+    ],
     "scans": [
         ("added_last", "INTEGER NOT NULL DEFAULT 0"),  # devices added from the latest run (added = all runs)
     ],

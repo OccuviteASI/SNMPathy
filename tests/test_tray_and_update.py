@@ -435,3 +435,112 @@ def test_self_launches_use_the_clean_environment(monkeypatch):
     monkeypatch.setattr(selfupdate.subprocess, "Popen", lambda argv, **kw: launched.append((argv, kw)))
     selfupdate.start(Path("/opt/snmpathy/SNMPathy"))
     assert launched[-1][1]["env"] == {"CLEAN": "1"}
+
+
+class _FakePystray:
+    """Enough of pystray to build the menu without a desktop."""
+
+    class MenuItem:
+        def __init__(self, text, action=None, **kw):
+            self.text, self.action, self.kw = text, action, kw
+            self.submenu = action if isinstance(action, _FakePystray.Menu) else None
+
+        def __str__(self):
+            return self.text if isinstance(self.text, str) else self.text(self)
+
+    class Menu:
+        SEPARATOR = None
+
+        def __init__(self, *items):
+            self.items = [i for i in items if i is not None]
+
+
+def test_tray_server_admin_submenu(monkeypatch):
+    import sys as _sys
+
+    monkeypatch.setitem(_sys.modules, "pystray", _FakePystray)
+    pystray = _FakePystray
+    app = tray.TrayApp.__new__(tray.TrayApp)
+    app.available, app.status, app.url = "", "All up", "http://localhost:8080/"
+    from snmpathy.config import Settings
+
+    app.settings = Settings(http_port=8081)
+    top = [str(i) for i in app.menu().items]
+    assert "Server admin" in top and "Start at login" not in top and "View log" not in top
+    admin = next(i for i in app.menu().items if str(i) == "Server admin").submenu
+    names = [str(i) for i in admin.items]
+    for wanted in ("Server admin config…", "Start at login", "Firewall", "Open data folder", "View log"):
+        assert wanted in names, wanted
+    assert "Web port: 8081 (change in Server admin config)" in names
+    fw = [str(i) for i in next(i for i in admin.items if str(i) == "Firewall").submenu.items]
+    assert "Open ports: Syslog (UDP and TCP)" in fw and "Open all SNMPathy ports" in fw
+    assert "Remove SNMPathy's firewall rules" in fw
+    assert pystray
+
+
+def test_tray_firewall_action_reports(monkeypatch):
+    from snmpathy import firewall
+
+    calls, notes, boxes = [], [], []
+    monkeypatch.setattr(firewall, "apply", lambda settings, groups, remove=False: calls.append((groups, remove)) or
+                        {"ok": True, "rules": ["SNMPathy Syslog UDP 514"], "output": "", "manual": ""})
+    monkeypatch.setattr(tray, "show_message", lambda text, title="": boxes.append(text))
+    app = tray.TrayApp.__new__(tray.TrayApp)
+    app.settings = None
+    app.notify = notes.append
+    app._firewall(["syslog"], False)
+    assert calls == [(["syslog"], False)] and notes == ["Firewall opened for Syslog (UDP and TCP)"]
+    monkeypatch.setattr(firewall, "apply", lambda settings, groups, remove=False:
+                        {"ok": False, "rules": ["x"], "output": "sudo needs a password", "manual": "ufw allow 514/udp"})
+    app._firewall(["syslog"], False)
+    assert "ufw allow 514/udp" in boxes[-1] and "sudo needs a password" in boxes[-1]
+
+
+
+def test_busy_port_moves_to_the_next_free_one(tmp_path):
+    import socket
+
+    from snmpathy import webport
+    from snmpathy.config import Settings
+
+    holder = socket.socket()
+    holder.bind(("127.0.0.1", 0))
+    holder.listen()
+    busy = holder.getsockname()[1]
+    try:
+        cfg = tmp_path / "snmpathy.yaml"
+        cfg.write_text("# my settings\nhttp_port: %d\nsyslog_udp_port: 5514\n" % busy)
+        settings = Settings.load(str(cfg))
+        settings.http_host = "127.0.0.1"
+        assert not webport.port_free("127.0.0.1", busy)
+        notice = webport.ensure_free_port(settings)
+        assert settings.http_port != busy and f"Port {busy} is in use" in notice and "saved" in notice
+        text = cfg.read_text()
+        assert f"http_port: {settings.http_port}" in text and "# my settings" in text and "syslog_udp_port: 5514" in text
+        assert webport.ensure_free_port(settings) == ""  # the new one is free: nothing to say
+    finally:
+        holder.close()
+
+
+def test_web_port_api_and_restart(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from snmpathy.app import create_app
+    from snmpathy.config import Settings
+    from snmpathy.db import Database
+
+    cfg = tmp_path / "snmpathy.yaml"
+    cfg.write_text(f"database: {tmp_path / 'p.db'}\n")
+    settings = Settings.load(str(cfg))
+    app = create_app(settings, db=Database(settings.database), start_monitor=False)
+    with TestClient(app) as client:
+        r = client.put("/api/system/web-port", json={"port": 18555})
+        assert r.status_code == 200 and r.json()["can_restart"] is False and "http_port: 18555" in cfg.read_text()
+        assert client.post("/api/system/restart").status_code == 409  # not the tray app
+        restarted = []
+        app.state.restart = lambda: restarted.append(1)
+        assert client.post("/api/system/restart").json() == {"restarting": True} and restarted == [1]
+        assert client.put("/api/system/web-port", json={"port": 0}).status_code == 422
+        assert "Web port" in client.get("/admin").text
+    with TestClient(app, client=("203.0.113.9", 1)) as remote:  # Server admin needs the passcode
+        assert remote.put("/api/system/web-port", json={"port": 18556}).status_code == 403

@@ -74,7 +74,7 @@ def _no_outside_lookups(monkeypatch, request):
     """
     if request.node.get_closest_marker("network_ok"):
         return
-    from snmpathy import identify, macvendor
+    from snmpathy import collector_api, identify, macvendor
 
     def offline(fetch=None):
         raise OSError("no downloads in tests")
@@ -82,7 +82,11 @@ def _no_outside_lookups(monkeypatch, request):
     async def nobody(host, timeout=1.5):
         return identify.Identity()
 
+    def no_release(name, folder):
+        raise OSError("no downloads in tests")
+
     monkeypatch.setattr(macvendor, "fetch_wireshark", offline)
+    monkeypatch.setattr(collector_api, "fetch_release_asset", no_release)
     monkeypatch.setattr(identify, "identify", nobody)
     monkeypatch.setattr(macvendor, "_data_dir", None)
     monkeypatch.setattr(macvendor, "_ws", None)

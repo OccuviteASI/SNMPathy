@@ -7,6 +7,7 @@
 <button class="btn" data-action="api" data-url="/api/collectors/{{ col.id }}/ping" data-then="none" data-success="Round trip {rtt_ms} ms (collector {version})">Test connection</button>
 <a class="btn" href="/scans?new=1">Scan from this collector</a>
 <button class="btn" id="rotate">New token / install command</button>
+<button class="btn" data-action="api" data-method="PATCH" data-url="/api/collectors/{{ col.id }}" data-body='{"failover": {{ 'false' if col.failover else 'true' }}}' title="While this collector is offline, this server polls and checks its devices directly">{{ 'Failover: on' if col.failover else 'Failover: off' }}</button>
 <button class="btn" data-action="api" data-method="PATCH" data-url="/api/collectors/{{ col.id }}" data-body='{"enabled": {{ 'false' if col.enabled else 'true' }}}'>{{ 'Disable' if col.enabled else 'Enable' }}</button>
 <button class="btn danger" data-action="api" data-method="DELETE" data-url="/api/collectors/{{ col.id }}" data-confirm="Delete {{ col.name }}? Its devices and checks move back to this server." data-redirect="/collectors">Delete</button>
 {% endblock %}

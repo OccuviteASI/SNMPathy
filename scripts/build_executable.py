@@ -170,15 +170,19 @@ def write_build_stamp() -> str:
     return stamp
 
 
-def build(py: Path) -> Path:
+COLLECTOR_EXE = "SNMPathy-Collector.exe" if IS_WINDOWS else "SNMPathy-Collector"
+
+
+def build(py: Path, collector: bool = False) -> Path:
     log("step 3/4: running PyInstaller (this takes a minute or two)")
+    spec = "collector.spec" if collector else "snmpathy.spec"
     subprocess.run(
         [str(py), "-m", "PyInstaller", "--noconfirm", "--clean",
-         "--distpath", str(ROOT / "dist"), "--workpath", str(BUILD_DIR / "pyinstaller"),
-         str(ROOT / "packaging" / "snmpathy.spec")],
+         "--distpath", str(ROOT / "dist"), "--workpath", str(BUILD_DIR / ("pyinstaller-" + spec[:-5])),
+         str(ROOT / "packaging" / spec)],
         check=True, cwd=ROOT, env=build_env(),
     )
-    exe = ROOT / "dist" / EXE_NAME
+    exe = ROOT / "dist" / (COLLECTOR_EXE if collector else EXE_NAME)
     if not exe.exists():
         raise SystemExit(f"build finished but {exe} was not produced")
     return exe
@@ -291,7 +295,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dest", help="folder to store the executable in (default: <Claude folder>/SNMPathy)")
     parser.add_argument("--no-copy", action="store_true", help="only build into ./dist")
     parser.add_argument("--fresh", action="store_true", help="recreate the build environment")
+    parser.add_argument("--collector", action="store_true",
+                        help="build SNMPathy Collector (the small site app) into ./dist instead")
     args = parser.parse_args(argv)
+    if args.collector:
+        args.no_copy = True
 
     dest = None if args.no_copy else resolve_destination(args.dest)
     if not args.no_copy and dest is None:
@@ -308,7 +316,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     try:
         py = ensure_build_env(args.fresh)
-        exe = build(py)
+        exe = build(py, collector=args.collector)
         smoke_test(exe)
     except subprocess.CalledProcessError as exc:
         step = " ".join(str(part) for part in exc.cmd[1:5])

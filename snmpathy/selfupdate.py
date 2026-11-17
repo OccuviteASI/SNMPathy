@@ -52,13 +52,22 @@ class UpdateError(RuntimeError):
     pass
 
 
-def asset_name(platform: str | None = None) -> str:
-    platform = platform or sys.platform
+# The program being updated: "SNMPathy", or "SNMPathy-Collector" for the collector app (its
+# release files are SNMPathy-Collector-windows.exe / -linux; set by snmpathy.collector_app).
+PRODUCT = "SNMPathy"
+
+
+def asset_name(platform: str | None = None, product: str | None = None) -> str:
+    platform, product = platform or sys.platform, product or PRODUCT
     if platform.startswith("win"):
-        return "SNMPathy-windows.exe"
+        return f"{product}-windows.exe"
     if platform == "darwin":
-        return "SNMPathy-macos"
-    return "SNMPathy-linux"
+        return f"{product}-macos"
+    return f"{product}-linux"
+
+
+def _title() -> str:
+    return PRODUCT.replace("-", " ")
 
 
 def parse_version(text: str) -> tuple[int, ...]:
@@ -274,7 +283,9 @@ def start(exe: Path) -> None:
     # A fresh environment, never this updater's: see procutil.self_env.
     quiet = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=self_env())
     if IS_WINDOWS:
-        vbs = Path(os.environ.get("LOCALAPPDATA", "")) / "SNMPathy" / "autostart.vbs"
+        from .autostart import _vbs_path
+
+        vbs = _vbs_path()  # the full app's or the collector's (autostart profile)
         if vbs.exists():
             subprocess.Popen(["wscript.exe", "//B", "//nologo", str(vbs)], cwd=exe.parent, **quiet)
         else:
@@ -293,20 +304,20 @@ def run_update(exe: Path, say: Say, force: bool = False, restart: bool = True) -
     say(6, f"Latest release: {release.version} (build {release.commit[:7] or '?'}); "
            f"this is {__version__}{f' (build {own_commit()})' if own_commit() else ''}")
     if not force and not release.is_newer():
-        say(100, f"SNMPathy is up to date ({__version__}).")
+        say(100, f"{_title()} is up to date ({__version__}).")
         return "current"
 
     new = exe.with_name(exe.name + ".new")
     mb = release.size / 1048576 if release.size else 0
-    say(8, f"Downloading SNMPathy {release.version}{f' ({mb:.0f} MB)' if mb else ''}…")
+    say(8, f"Downloading {_title()} {release.version}{f' ({mb:.0f} MB)' if mb else ''}…")
     last = [0]
 
     def progress(done: int, total: int) -> None:
         pct = 8 + int(72 * done / total) if total else 40
         if pct != last[0]:
             last[0] = pct
-            say(pct, f"Downloading SNMPathy {release.version}… {done / 1048576:.0f} of {total / 1048576:.0f} MB"
-                if total else f"Downloading SNMPathy {release.version}… {done / 1048576:.0f} MB")
+            say(pct, f"Downloading {_title()} {release.version}… {done / 1048576:.0f} of {total / 1048576:.0f} MB"
+                if total else f"Downloading {_title()} {release.version}… {done / 1048576:.0f} MB")
     download(release, new, progress)
 
     say(82, "Checking the new version starts…")
@@ -327,7 +338,7 @@ def run_update(exe: Path, say: Say, force: bool = False, restart: bool = True) -
     if restart:
         say(97, "Starting SNMPathy…")
         start(exe)
-    say(100, f"Updated to SNMPathy {release.version}.")
+    say(100, f"Updated to {_title()} {release.version}.")
     return "ok"
 
 
@@ -351,7 +362,7 @@ class UpdateWindow:
         self.close_timer = None
         _dpi_aware()
         root = self.root = tk.Tk()
-        root.title("Updating SNMPathy")
+        root.title(f"Updating {_title()}")
         root.resizable(True, False)
         root.minsize(480, 0)
         root.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -359,7 +370,7 @@ class UpdateWindow:
         frame = ttk.Frame(root, padding=(18, 16, 18, 14))
         frame.pack(fill="both", expand=True)
         bold = ("Segoe UI", 12, "bold") if IS_WINDOWS else ("TkDefaultFont", 12, "bold")
-        self.title = ttk.Label(frame, text="Updating SNMPathy", font=bold)
+        self.title = ttk.Label(frame, text=f"Updating {_title()}", font=bold)
         self.title.pack(anchor="w")
         self.status = ttk.Label(frame, text="Starting…", wraplength=520, justify="left")
         self.status.pack(anchor="w", pady=(6, 10), fill="x")
@@ -410,14 +421,14 @@ class UpdateWindow:
     def finish(self, outcome: str, error: str) -> None:
         self.running, self.outcome = False, outcome
         if outcome == "failed":
-            self.title["text"] = "SNMPathy update failed"
+            self.title["text"] = f"{_title()} update failed"
             self.status["text"] = f"Update failed: {error}"
             self.add_log(f"UPDATE FAILED: {error}\nSNMPathy keeps running the version it had.")
             if not self.details_shown:
                 self.toggle_details()
         else:
             self.bar["value"] = 100
-            self.title["text"] = "SNMPathy is up to date" if outcome == "current" else "SNMPathy updated"
+            self.title["text"] = f"{_title()} is up to date" if outcome == "current" else f"{_title()} updated"
         self.root.title(self.title["text"])
         self.close_btn["text"] = "Close"
         if self.root.state() == "withdrawn":

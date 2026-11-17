@@ -4,6 +4,48 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 `snmpathy version`. Executables built with `scripts/build_executable` also show the git
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
+## 0.7.11
+- **Server admin**: a new page (left menu, under Configure) for managing the computer SNMPathy
+  runs on: system information, **Updates** (check; *Update now* on the executable), **Startup**,
+  **Firewall**, **Database**, **Configuration backup** and the settings in effect. **Settings**
+  keeps device tagging, Grafana and the API.
+- The tray's menu has a **Server admin** item that expands: **Start at login**, **Firewall**
+  (open SNMPathy's ports per group or all of them, or remove its rules), **Update SNMPathy**,
+  the **Server admin page**, **Open data folder** and **View log**.
+- **Server admin passcode.** Browsers on other computers need a passcode for Server admin
+  (and its actions: startup, firewall, updates, configuration export / import). The passcode
+  can only be set on the server itself: the tray's new **Server admin config** item opens the
+  page there, unlocked, with a *Web access* card to set, change or remove it (or run
+  `snmpathy admin-passcode set`). Without a passcode, Server admin works only on the server.
+  Unlocking lasts 12 hours (*Lock now* ends it); 5 wrong passcodes lock that address out for
+  10 minutes; API clients can use the API token in a header.
+- **Edit passcode** (separate from the Server admin passcode): set it in **Server admin → Edit
+  passcode** (or `snmpathy edit-passcode set`) and browsers on other computers become **view
+  only**: they can look at everything, but changing anything asks for the edit passcode
+  (*Unlock editing* in the top bar, 12 hours; the change then goes through). The server itself,
+  unlocked Server admin and the API token in a header can always edit.
+- The left menu no longer shows counts next to **Devices** and **Uptime checks**.
+- **Collector failover.** Devices, checks and scans assigned to a collector run on that collector
+  (it relays them and forwards the results). While it is offline (or before it ever connects)
+  this server polls, checks and scans them directly where it can reach them, and hands them
+  back when the collector reconnects; events record both. Devices it cannot reach either are
+  *unreachable*. A **Failover: on / off** button on each collector's page turns it off.
+- **Web port.** If the web UI's port (8080) is taken by another program when SNMPathy starts
+  in the tray, it moves to the next free port, saves it in `snmpathy.yaml` and says so in a
+  notification. Change it by hand in **Server admin → Web port** (*Save and restart*); the tray's
+  Server admin menu shows the port in use.
+- **SNMPathy Collector**, a separate small app for site computers (no web UI, database or
+  dashboards), is what the Collectors page now hands out. **Add collector** shows its download
+  buttons (Windows, Linux) and a **setup code**; run it on the site computer and paste the code.
+  The setup window asks whether the computer becomes a **Collector** (runs in the tray with a
+  status icon, *Start at login*, *Update SNMPathy Collector*, *Change setup…* and *View log*) or
+  a **Full SNMPathy server**: it downloads the full SNMPathy from your server, starts it on a free
+  port, optionally opens the firewall for it, and adds it to your server's **Fusion** dashboard
+  in place of the collector. The one-line install commands still work and now install
+  SNMPathy Collector as the service. Releases carry `SNMPathy-Collector-windows.exe` and
+  `SNMPathy-Collector-linux`; the server fetches them from the release the first time they are
+  downloaded and keeps them in its downloads folder.
+
 ## 0.7.10
 - CI no longer tests or builds for macOS (Windows, Linux and Docker only); releases carry the
   Windows and Linux executables.

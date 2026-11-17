@@ -287,7 +287,8 @@ device uptime; uptime and health reports include **availability by device**. The
 **Parents (Nagios-style unreachable):** set a device's **Parent device** (its upstream
 switch or router, or let **Network map → Set parents…** fill them in from the topology).
 When the parent is down, its children are shown as **unreachable** rather than down and
-do not raise their own alerts. Devices behind an offline collector are unreachable too.
+do not raise their own alerts. Devices behind an offline collector that this server cannot
+reach either are unreachable too.
 
 ### Remote sites: collectors
 
@@ -301,9 +302,23 @@ rules or VPN, then:
   original timestamps, so graphs and uptime have no gaps,
 * runs discovery, *check now* and network scans for the main server.
 
-**Install one:** **Collectors → Add collector** shows a token (once) and copy-paste install
-commands. Each downloads the collector **from your SNMPathy server** and sets it up as a
-service:
+**Install one with SNMPathy Collector** (Windows or Linux): **Collectors → Add collector**
+shows download buttons for **SNMPathy Collector**, the small site app (no web UI, database or
+dashboards), and a **setup code**. Run SNMPathy Collector on the site computer and paste the
+code. The setup asks what this computer should be:
+
+* **Collector**: it runs in the tray (status icon; *Start at login*, *Update SNMPathy Collector*,
+  *Change setup…*, *View log*, *Quit*) and does the collector's work for the server, or
+* **Full SNMPathy server**: it downloads the full SNMPathy from your server, starts it on a free
+  port (opening the firewall for it if you tick that) and adds it to your server's **Fusion**
+  dashboard in place of the collector.
+
+Your server fetches the SNMPathy Collector files from the GitHub release the first time
+someone downloads them and keeps them in its `downloads` folder.
+
+**Or install it as a service with one command** (no setup window): the same dialog shows the
+collector's token and copy-paste commands. Each downloads the collector **from your SNMPathy
+server** and sets it up as a service:
 
 ```powershell
 # Windows (elevated PowerShell): scheduled task at startup, restarts on failure
@@ -322,17 +337,24 @@ snmpathy collector --server https://nms.example.com --token col_...
 ```
 
 The **Downloads** list on the Collectors page serves the files directly from the main host
-at `/collector/download/…`. A server started from the standalone executable offers itself
-for its own OS; put the executables for other platforms (from `scripts/build_executable`
-or the CI artifacts, named e.g. `SNMPathy-windows.exe`, `SNMPathy-linux`)
+at `/collector/download/…`: SNMPathy Collector for Windows and Linux (from the release, or your
+own `scripts/build_executable --collector` builds named `SNMPathy-Collector-windows.exe` /
+`SNMPathy-Collector-linux`), and the full SNMPathy. A server started from the standalone
+executable offers itself for its own OS; put other executables (e.g. `SNMPathy-linux`)
 in the `downloads` folder next to the database (or set `downloads_dir`). Without a
 prebuilt executable the installers fall back to the Python package the server also
 serves (`snmpathy-<version>.tar.gz`, needs Python 3.10+ at the site).
 
 Then set **Monitored from** on devices (or run a scan from the collector). Checks follow
-their device's collector unless you choose otherwise. A collector that stops reporting
-for 90 s (`collector_offline_after`) is marked offline and an event is logged; its devices
-become unreachable until it returns. Use HTTPS (a reverse proxy) when collectors cross
+their device's collector unless you choose otherwise: the collector relays everything for its
+devices (SNMP polls, pings and other checks, scans) and forwards the results here.
+
+**Failover:** a collector that stops reporting for 90 s (`collector_offline_after`) is marked
+offline and an event is logged; this server then polls and checks its devices (and runs its
+scans) directly, where it can reach them, until the collector is back and takes over again.
+Devices this server cannot reach either show as *unreachable* (not down). A collector that was
+never connected is covered the same way. Turn it off per collector (**Failover: on / off** on
+its page) to have its devices just shown as unreachable while it is away. Use HTTPS (a reverse proxy) when collectors cross
 the internet: the token and SNMP credentials travel over that connection. `--insecure`
 and `--ca-file` cover self-signed and private-CA certificates.
 
@@ -635,14 +657,49 @@ macOS / Linux) and only rebuilds when something new was merged; it logs to `buil
 Double-clicking the executable (and autostart at login, and the restart after an update) runs
 SNMPathy in the **system tray** instead of a console window. The icon turns red when a device
 or check is down; its tooltip and menu show the current status. Right-click for **Open
-SNMPathy**, **Start at login**, **Update SNMPathy**, **Open data folder**, **View log**
-(`snmpathy.log` next to the executable) and **Quit SNMPathy**. `snmpathy tray` does the same
+SNMPathy**, **Server admin** (it expands: **Start at login**, **Firewall** to open SNMPathy's
+ports or remove its rules, **Update SNMPathy**, the web UI's **Server admin page**, **Open data
+folder** and **View log**, `snmpathy.log` next to the executable) and **Quit SNMPathy**. `snmpathy tray` does the same
 from a Python install (`pip install .[tray]`). On a Linux machine without a desktop, or when
 started from a terminal with `serve`, SNMPathy runs in the console as before.
 
+## Server admin
+
+Settings that manage the computer SNMPathy runs on, rather than what it monitors, are on the
+**Server admin** page (left menu, under Configure): system information, **Updates** (check,
+and for the executable *Update now*), **Startup**, **Firewall**, the **Database** (sizes,
+retention), **Configuration backup** (export / import) and the settings in effect. **Settings**
+keeps device tagging, Grafana and the API. The same server actions are in the tray icon under
+**Server admin**.
+
+Browsers on other computers need a **passcode** for Server admin, set on the server itself: in
+the tray choose **Server admin → Server admin config** (it opens the page in the server's
+browser, already unlocked) and use **Web access → Set passcode**, or run
+`snmpathy admin-passcode set` there. Until a passcode is set, Server admin only works on the
+server. A browser stays unlocked for 12 hours (**Lock now** ends it), five wrong passcodes lock
+that address out for 10 minutes, and changing or removing the passcode signs every browser out.
+Scripts can use the API token in an `Authorization: Bearer` or `X-API-Key` header instead.
+Requests that arrive through a reverse proxy are never treated as coming from the server.
+
+**Edit passcode** (view-only users): a second, separate passcode, set in **Server admin → Edit
+passcode** (or `snmpathy edit-passcode set`). While it is set, browsers on other computers are
+**view only**: they see every page, dashboard and report, but any change (adding or editing
+devices, checks, alerts, dashboards, scans, settings...) asks for the edit passcode first. The
+top bar shows **View only** with **Unlock editing**; unlocking lasts 12 hours (**Lock editing**
+ends it) and the change that asked for it then goes through. The server itself, browsers that
+unlocked Server admin and API clients with the API token in a header can always edit. It must
+differ from the Server admin passcode; wrong guesses count toward the same 5-in-10-minutes
+lockout.
+
+**Web port**: SNMPathy's web UI uses port 8080 (`http_port`). If another program already uses
+it when SNMPathy starts in the tray, SNMPathy takes the next free port (8081, 8082, …), saves it
+in `snmpathy.yaml` and shows a notification; the tray's **Server admin** menu shows the port in
+use. To choose one yourself: **Server admin → Web port → Save and restart**.
+
 ## Open the firewall for syslog
 
-**Settings → Firewall**: tick what to open (**Syslog** by default; also *Web UI and API*,
+**Server admin → Firewall** in the web UI (or the tray's **Server admin → Firewall**):
+tick what to open (**Syslog** by default; also *Web UI and API*,
 *GELF / JSON log inputs*, *NetFlow / IPFIX / sFlow*) and click **Add firewall rules**
 (**Remove** takes them out again). The table shows which ports are already open. From the
 command line: `snmpathy firewall status`, `snmpathy firewall add --include syslog,flows`,
@@ -657,7 +714,8 @@ command line: `snmpathy firewall status`, `snmpathy firewall add --include syslo
 
 ## Start automatically at login
 
-**Settings → Startup → Start SNMPathy automatically when I log in** (or
+**Server admin → Startup → Start SNMPathy automatically when I log in**, or the tray's
+**Server admin → Start at login** (or
 `snmpathy autostart on` / `off` / `status`). No admin rights are needed; it uses the
 normal per-user mechanism of each OS:
 

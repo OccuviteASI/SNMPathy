@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .api import router as api_router
+from . import adminauth
 from .collector_api import router as collector_router
 from .collectors import CollectorHub
 from .scanner import ScanManager
@@ -34,7 +35,8 @@ log = logging.getLogger(__name__)
 
 # Collector endpoints authenticate with the collector's own token; downloads and
 # install scripts must be reachable from a fresh site machine.
-PUBLIC_PATHS = ("/static/", "/status", "/api/status-page", "/login", "/healthz", "/api/collector/v1/", "/collector/")
+PUBLIC_PATHS = ("/static/", "/status", "/api/status-page", "/login", "/healthz", "/api/collector/v1/", "/collector/",
+                "/admin/open")
 COOKIE = "snmpathy_token"
 
 
@@ -92,6 +94,9 @@ def create_app(settings: Settings | None = None, db: Database | None = None, sta
             if path.startswith(("/api/", "/grafana")) or path in ("/docs", "/openapi.json", "/redoc"):
                 return JSONResponse({"detail": "authentication required"}, status_code=401)
             return RedirectResponse(f"/login?next={quote(str(request.url.path))}", status_code=303)
+        if adminauth.edit_denied(request):  # an edit passcode is set and this browser is view only
+            return JSONResponse({"detail": "View only: unlock editing with the edit passcode", "code": "edit_locked"},
+                                status_code=403)
         return await call_next(request)
 
     @app.post("/login", include_in_schema=False)

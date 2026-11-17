@@ -526,3 +526,7 @@ a.dl-row:hover { background: var(--surface-2); text-decoration: none; }
 .chip:hover { text-decoration: none; filter: brightness(1.08); }
 .ds-table td { vertical-align: middle; }
 .scope-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 3px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
+
+/* Edit passcode: view-only chip and unlock button in the top bar */
+.edit-state { gap: 8px; margin-right: 8px; }
+@media (max-width: 640px) { .edit-state .status { display: none; } }

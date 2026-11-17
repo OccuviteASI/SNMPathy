@@ -222,7 +222,8 @@ class CollectorHub:
             self.db.update("collectors", c["id"], {"status": "offline"})
             self.db.log_event("collector.offline",
                               f"Collector {c['name']} stopped reporting (last contact {int(now - (c['last_seen'] or now))}s ago); "
-                              "its devices are now unreachable", "error")
+                              + ("this server now polls and checks its devices directly until it is back"
+                                 if c.get("failover", 1) else "its devices are now unreachable"), "error")
             evaluate_collector_devices(self.db, c["id"], now)
             self._fail_pending(c["id"], f"collector {c['name']} is offline")
             gone.append(c["id"])

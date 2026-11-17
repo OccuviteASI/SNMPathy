@@ -97,6 +97,7 @@ class Monitor:
         self._next_check: dict[int, float] = {}
         self._rediscover_after: dict[int, float] = {}
         self._router_flag: dict[int, tuple[bool, float]] = {}  # device id -> (is a router, checked at)
+        self._failover: set[int] | None = None  # collectors this server stands in for (see _update_failover)
         self._inflight: set[str] = set()
         self._jobs: set[asyncio.Task] = set()
         self._alert_wakeup = asyncio.Event()
@@ -192,11 +193,31 @@ class Monitor:
         self._clients.clear()
 
     # ----------------------------------------------------------- SNMP
+    def _update_failover(self) -> set[int]:
+        """Collectors whose devices and checks this server runs itself (offline, failover on)."""
+        rows = self.db.query("SELECT id, name, status, failover FROM collectors")
+        now_ids = {r["id"] for r in rows if r["failover"] and r["status"] != "online"}
+        if self._failover is not None:
+            names = {r["id"]: r["name"] for r in rows}
+            for cid in now_ids - self._failover:
+                self.db.log_event("collector.failover", f"Failover: this server now monitors the devices of collector "
+                                  f"{names.get(cid, cid)} directly", "warning")
+            for cid in self._failover - now_ids:
+                if cid in names:
+                    self.db.log_event("collector.failover", f"Collector {names[cid]} is back: it monitors its "
+                                      "devices again", "info")
+        self._failover = now_ids
+        return now_ids
+
+    def _relayed(self, collector_id: int | None) -> bool:
+        """Work for this collector goes through it (it is connected, or failover is off)."""
+        return bool(collector_id) and collector_id not in (self._failover or set())
+
     def _client(self, device: dict[str, Any]) -> SnmpClient:
-        if device.get("collector_id"):
+        if self._relayed(device.get("collector_id")):
             return RemoteSnmpClient(self.hub, device["collector_id"], device["hostname"], device,
                                     timeout=self.settings.snmp_timeout, retries=self.settings.snmp_retries)
-        fp = _creds_fingerprint(device)
+        fp = _creds_fingerprint(device) + ("|local" if device.get("collector_id") else "")
         cached = self._clients.get(device["id"])
         if cached and cached[0] == fp:
             return cached[1]
@@ -320,10 +341,11 @@ class Monitor:
     async def _poll_loop(self) -> None:
         while True:
             now = time.time()
+            self._update_failover()
             devices = self.db.query("SELECT * FROM devices WHERE enabled = 1 AND snmp_enabled = 1")
             live = set()
             for device in devices:
-                if device["collector_id"]:
+                if self._relayed(device["collector_id"]):
                     # The collector polls on its own schedule; discovery (SNMP walks) is relayed from here.
                     stale = not device["last_discovered"] or now - device["last_discovered"] > REDISCOVER_INTERVAL
                     key = f"r{device['id']}"
@@ -361,7 +383,7 @@ class Monitor:
         try:
             async with self._sem:
                 probe = self.probe
-                if check.get("collector_id") and check["type"] != "passive":
+                if self._relayed(check.get("collector_id")) and check["type"] != "passive":
                     hub, cid = self.hub, check["collector_id"]
 
                     async def remote_probe(c, device):
@@ -391,8 +413,8 @@ class Monitor:
                     if now >= stale_at and f"c{check['id']}" not in self._inflight:
                         self._job(self._check_job(check))
                     continue
-                if check["collector_id"]:
-                    continue  # scheduled by the collector itself
+                if self._relayed(check["collector_id"]):
+                    continue  # scheduled by the collector itself (while it is connected)
                 due = self._next_check.get(check["id"])
                 if due is None:
                     due = (check["last_checked"] + interval) if check["last_checked"] else now + random.uniform(0, 2)

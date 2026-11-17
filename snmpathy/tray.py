@@ -6,12 +6,15 @@ server in a background thread and shows a tray icon with:
 * **Open SNMPathy** (also double-click / left-click on Windows)
 * a live status line (devices down / unreachable, checks down), and a red marker on the
   icon when something is down
-* **Start at login** - the same switch as Settings > Startup
+* **Server admin** (expands): **Server admin config** (the web UI's Server admin page, unlocked
+  in this computer's browser: startup, firewall, updates, backup, and the passcode other
+  computers need for it), **Start at login**, **Firewall** (open SNMPathy's ports, or remove
+  its rules), **Update SNMPathy**, **Open data folder**, **View log**
 * **Update SNMPathy** - downloads the latest release from GitHub and restarts, showing a
   progress window (``snmpathy/selfupdate.py``; nothing else needs to be installed). Checked
   every few hours; the menu says when a new version is available. Running from source, it
   pulls and rebuilds instead (``scripts/update_gui.py``, recorded in ``updater.json``).
-* **Open data folder**, **View log** (the log goes to ``snmpathy.log`` in tray mode)
+* (the log goes to ``snmpathy.log`` in tray mode)
 * **Quit SNMPathy**
 
 Needs the optional ``pystray`` and ``Pillow`` packages (``pip install snmpathy[tray]``;
@@ -28,6 +31,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 import sys
 import threading
 import webbrowser
@@ -340,15 +344,20 @@ class TrayApp:
         self.state, self.status = "ok", "Starting…"
         self.error = ""
         self.available = ""  # a newer release, when the update check found one
+        self.notice = ""  # shown once the icon is up
         self._stop = threading.Event()
 
     # ------------------------------------------------------------ server
     def _run_server(self) -> None:
         from .cli import _serve
 
+        def on_app(app: Any) -> None:
+            self.app = app
+            app.state.restart = self.restart  # Server admin > Web port > Save and restart
+
         try:
             asyncio.run(_serve(self.settings, open_browser=self.open_browser,
-                               on_app=lambda app: setattr(self, "app", app),
+                               on_app=on_app,
                                on_server=lambda server: setattr(self, "server", server)))
         except BaseException as exc:  # e.g. port already in use
             self.error = str(exc) or type(exc).__name__
@@ -507,6 +516,25 @@ class TrayApp:
         except Exception:
             log.warning(message)
 
+    def restart(self) -> None:
+        """Start a fresh copy of SNMPathy (e.g. on a new web port), then quit this one."""
+        from .procutil import self_env
+
+        argv = [sys.executable, *sys.argv[1:]] if is_frozen() else [sys.executable, "-m", "snmpathy", "tray"]
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+
+        def later() -> None:
+            time.sleep(1.0)  # let the web request that asked for this get its answer
+            try:
+                subprocess.Popen(argv, env=self_env({DETACHED_ENV: "1"}), cwd=os.getcwd(), creationflags=flags,
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 start_new_session=not sys.platform.startswith("win"))
+            except OSError as exc:
+                show_message(f"Could not restart SNMPathy: {exc}", "SNMPathy")
+                return
+            self.quit()
+        threading.Thread(target=later, name="snmpathy-restart", daemon=True).start()
+
     def quit(self, *_: Any) -> None:
         self._stop.set()
         if self.server is not None:
@@ -516,7 +544,67 @@ class TrayApp:
         if self.icon is not None:
             self.icon.stop()
 
+    # ------------------------------------------------------------ firewall
+    def firewall(self, groups: list[str], remove: bool = False) -> None:
+        """Open (or close) SNMPathy's ports in this computer's firewall, in the background."""
+        threading.Thread(target=self._firewall, args=(groups, remove), name="snmpathy-firewall", daemon=True).start()
+
+    def _firewall(self, groups: list[str], remove: bool) -> None:
+        from . import firewall
+
+        try:
+            result = firewall.apply(self.settings, groups, remove=remove)
+        except Exception as exc:
+            show_message(f"Could not change the firewall: {exc}", "SNMPathy firewall")
+            return
+        what = ", ".join(firewall.GROUPS[g] for g in groups)
+        if result.get("ok"):
+            self.notify(("Removed SNMPathy's firewall rules" if remove else f"Firewall opened for {what}")
+                        if result.get("rules") else result.get("output") or "Nothing to change")
+        elif result.get("manual"):
+            show_message(f"{result.get('output') or 'The rules were not changed automatically.'}\n\n"
+                         f"Run these commands as administrator:\n\n{result['manual']}", "SNMPathy firewall")
+        else:
+            show_message(result.get("output") or "The firewall was not changed.", "SNMPathy firewall")
+
+    def open_admin(self, *_: Any) -> None:
+        """Server admin config: the web page, unlocked in this computer's browser by a one-time link."""
+        from .adminauth import new_ticket
+
+        webbrowser.open(self.url.rstrip("/") + "/admin/open?ticket=" + new_ticket())
+
     # ------------------------------------------------------------ menu
+    def firewall_menu(self):
+        import pystray
+
+        from .firewall import GROUPS
+
+        item = pystray.MenuItem
+        opens = [item(f"Open ports: {label}", (lambda key: lambda *_: self.firewall([key]))(key))
+                 for key, label in GROUPS.items()]
+        return pystray.Menu(
+            *opens,
+            item("Open all SNMPathy ports", lambda *_: self.firewall(list(GROUPS))),
+            pystray.Menu.SEPARATOR,
+            item("Remove SNMPathy's firewall rules", lambda *_: self.firewall(list(GROUPS), remove=True)),
+        )
+
+    def admin_menu(self):
+        import pystray
+
+        item = pystray.MenuItem
+        return pystray.Menu(
+            item("Server admin config…", self.open_admin),
+            item(lambda _i: f"Web port: {self.settings.http_port} (change in Server admin config)", self.open_admin),
+            pystray.Menu.SEPARATOR,
+            item("Start at login", self.toggle_autostart, checked=self.autostart_enabled),
+            item("Firewall", self.firewall_menu()),
+            item(self.update_label, self.run_update, visible=lambda _i: update_available()),
+            pystray.Menu.SEPARATOR,
+            item("Open data folder", self.open_folder),
+            item("View log", self.view_log),
+        )
+
     def menu(self):
         import pystray
 
@@ -525,10 +613,7 @@ class TrayApp:
             item("Open SNMPathy", self.open_ui, default=True),
             item(lambda _i: self.status, None, enabled=False),
             pystray.Menu.SEPARATOR,
-            item("Start at login", self.toggle_autostart, checked=self.autostart_enabled),
-            item(self.update_label, self.run_update, visible=lambda _i: update_available()),
-            item("Open data folder", self.open_folder),
-            item("View log", self.view_log),
+            item("Server admin", self.admin_menu()),
             pystray.Menu.SEPARATOR,
             item("Quit SNMPathy", self.quit),
         )
@@ -545,6 +630,8 @@ class TrayApp:
             cleanup_old(Path(sys.executable).resolve())  # the previous version, kept until now
             threading.Thread(target=self._update_check_loop, name="snmpathy-update-check", daemon=True).start()
         self.icon = pystray.Icon("SNMPathy", make_icon("ok"), "SNMPathy - starting", self.menu())
+        if self.notice:  # e.g. "port 8080 is in use, the web UI is on 8081"
+            threading.Timer(3.0, lambda: self.notify(self.notice)).start()
         self.icon.run()
         self._stop.set()
         if self.server is not None:
@@ -562,8 +649,15 @@ def run_tray(settings: Settings, open_browser: bool = True) -> int:
     hide_own_console()
     setup_file_logging(log_file(settings))
     log.info("SNMPathy starting in the system tray")
+    from .webport import ensure_free_port
+
+    notice = ensure_free_port(settings)  # 8080 taken by another program: use the next free port
+    if notice:
+        log.warning(notice)
     try:
-        TrayApp(settings, open_browser=open_browser).run()
+        app = TrayApp(settings, open_browser=open_browser)
+        app.notice = notice
+        app.run()
     except Exception as exc:  # e.g. no display / tray on this Linux desktop
         log.error("tray unavailable (%s); running without it", exc)
         return 2
