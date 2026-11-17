@@ -46,6 +46,18 @@ def _duration_minutes(minutes: int) -> str:
 
 
 templates.env.filters["duration_minutes"] = _duration_minutes
+
+
+def _older_than_server(version: str) -> bool:
+    """A collector's version (e.g. '0.7.12 (build ...)') older than this server's."""
+    from .. import __version__
+    from ..collector_update import _version_tuple
+
+    mine, theirs = _version_tuple(__version__), _version_tuple(version or "")
+    return bool(mine and theirs and theirs < mine)
+
+
+templates.env.filters["older_than_server"] = _older_than_server
 templates.env.globals.update(
     SEVERITIES=SEVERITIES, SEVERITY_LABELS=SEVERITY_LABELS, FACILITIES=FACILITIES,
     IF_OPER=mibs.IF_OPER_STATUS_NAMES, METRIC_INFO=mibs.METRIC_INFO, now=time.time, AVAIL_MODES=AVAIL_MODES,

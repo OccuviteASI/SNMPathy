@@ -15,7 +15,7 @@
           <td><a href="/collectors/{{ c.id }}"><strong>{{ c.name }}</strong></a><div class="small muted">{{ c.description }}</div></td>
           <td>{{ c.site or '-' }}</td>
           <td>{{ c.hostname or '-' }}<div class="small muted">{{ c.last_ip }}{% if c.platform %} · {{ c.platform }}{% endif %}</div></td>
-          <td>{{ c.version or '-' }}</td>
+          <td>{{ c.version or '-' }}{% if c.version and c.version|older_than_server %}<div><span class="status warning" title="Collectors from 0.7.13 on update themselves to this server's version within a few minutes. Older ones: Update SNMPathy Collector in their tray menu, or run the install command again.">older than this server</span></div>{% endif %}</td>
           <td class="num">{{ c.devices }}</td>
           <td class="num">{{ c.checks }}</td>
           <td class="num">{{ '{:,}'.format(c.results) }}</td>

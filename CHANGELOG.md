@@ -5,6 +5,13 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
 ## 0.7.13
+- **Collectors update themselves** to their server's version. When the server is newer, a
+  collector (SNMPathy Collector, or SNMPathy run as a collector, from 0.7.13 on) downloads the
+  matching build from the server within a few minutes, checks that it starts, swaps it in and
+  restarts (results not sent yet are kept). It works for the tray app and for collectors installed
+  as a service. The server keeps the builds it fetches from the release per version. The
+  Collectors page marks collectors older than the server. Turn it off with `auto_update: false` in
+  the collector's `collector.yaml`.
 - **Server admin locks again by itself**: a browser unlocked with the passcode locks after 15
   minutes without Server admin being used (each Server admin page or action starts the time
   again; other pages do not). The page shows the time left and switches to the locked page when

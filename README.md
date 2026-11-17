@@ -316,6 +316,13 @@ code. The setup asks what this computer should be:
 Your server fetches the SNMPathy Collector files from the GitHub release the first time
 someone downloads them and keeps them in its `downloads` folder.
 
+**Updates:** collectors update themselves to the server's version. After you update the server,
+each collector downloads the matching build from it within a few minutes and restarts (unsent
+results are kept). The Collectors page marks any collector that is still older than the server.
+To turn it off, put `auto_update: false` in the collector's `collector.yaml`. Collectors older
+than 0.7.13 need one manual update (tray: *Update SNMPathy Collector*, or run the install command
+again).
+
 **Or install it as a service with one command** (no setup window): the same dialog shows the
 collector's token and copy-paste commands. Each downloads the collector **from your SNMPathy
 server** and sets it up as a service:
