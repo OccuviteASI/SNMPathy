@@ -14,6 +14,7 @@
       <div class="row"><button class="btn sm" id="maker-refresh">Refresh maker list</button><span class="small muted" id="maker-status">Maker list: {{ ml.source }}, {{ '{:,}'.format(ml.entries) }} entries{% if ml.updated %}, updated {{ ml.updated|ts('ago')|safe }}{% else %} - Wireshark's list is downloaded automatically when SNMPathy can reach the internet{% endif %}</span></div>
     </div>
   </div>
+  {% if admin_allowed %}
   <div class="card">
     <div class="card-head"><h2>Server admin</h2></div>
     <div class="card-body stack">
@@ -21,6 +22,7 @@
       <div class="row"><a class="btn" href="/admin">{{ icon('server') }} Open Server admin</a></div>
     </div>
   </div>
+  {% endif %}
   <div class="card" id="grafana" style="grid-column: 1 / -1">
     <div class="card-head"><h2>{{ icon('grafana') }} Grafana</h2></div>
     <div class="card-body stack">

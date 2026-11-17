@@ -4,6 +4,12 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 `snmpathy version`. Executables built with `scripts/build_executable` also show the git
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
+## 0.7.12
+- **Server admin is hidden** from browsers that cannot use it: on other computers the menu item
+  and the Settings card appear only after Server admin is unlocked with its passcode. The version
+  number at the bottom of the sidebar still leads to the unlock page. The server itself always
+  shows it.
+
 ## 0.7.11
 - **Server admin**: a new page (left menu, under Configure) for managing the computer SNMPathy
   runs on: system information, **Updates** (check; *Update now* on the executable), **Startup**,
