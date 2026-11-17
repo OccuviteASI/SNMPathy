@@ -4,6 +4,13 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 `snmpathy version`. Executables built with `scripts/build_executable` also show the git
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
+## 0.7.13
+- Fixed **Update SNMPathy** ending with "UPDATE FAILED: Error -3 while decompressing data:
+  incorrect header check" at *Starting SNMPathy…* (updates from 0.7.11 and 0.7.12). The new
+  version had been installed, but the updater loaded part of its own code from the executable
+  after replacing it. It now loads everything before the swap, and if restarting ever fails it
+  says the update worked and where to start SNMPathy from. The same applies to SNMPathy Collector.
+
 ## 0.7.12
 - **Server admin is hidden** from browsers that cannot use it: on other computers the menu item
   and the Settings card appear only after Server admin is unlocked with its passcode. The version

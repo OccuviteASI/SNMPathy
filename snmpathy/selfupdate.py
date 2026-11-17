@@ -326,6 +326,10 @@ def run_update(exe: Path, say: Say, force: bool = False, restart: bool = True) -
         new.unlink(missing_ok=True)
         raise UpdateError(f"the downloaded SNMPathy did not start properly ({reported or 'no output'})")
 
+    # This updater runs from the executable it replaces, and a one-file build reads its Python code
+    # from that file on first use: anything first imported after the swap would be read from the
+    # NEW file at the old file's offsets ("Error -3 while decompressing data"). Load it all now.
+    _preload()
     say(88, "Closing SNMPathy…")
     was_running = stop(exe)
     say(93, "Installing the new version…")
@@ -336,10 +340,24 @@ def run_update(exe: Path, say: Say, force: bool = False, restart: bool = True) -
             start(exe)
         raise UpdateError(f"could not replace {exe} ({exc}); is the folder read-only?")
     if restart:
-        say(97, "Starting SNMPathy…")
-        start(exe)
+        say(97, f"Starting {_title()}…")
+        try:
+            start(exe)
+        except Exception as exc:  # the update itself worked: say how to start it
+            log.warning("restart after the update failed: %s", exc)
+            say(100, f"Updated to {_title()} {release.version}, but it could not be started again ({exc}). "
+                     f"Start it from {exe}.")
+            return "ok"
     say(100, f"Updated to {_title()} {release.version}.")
     return "ok"
+
+
+def _preload() -> None:
+    """Import everything used after the executable is swapped (see run_update)."""
+    import importlib
+
+    for name in ("procutil", "autostart"):
+        importlib.import_module(f"{__package__}.{name}")
 
 
 def current_exe() -> Path:
