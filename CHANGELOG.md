@@ -4,6 +4,21 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 `snmpathy version`. Executables built with `scripts/build_executable` also show the git
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
+## 0.7.10
+- CI no longer tests or builds for macOS (Windows, Linux and Docker only); releases carry the
+  Windows and Linux executables.
+- **SNMP filter on the Devices page:** Responding / Not responding / Not polled yet / SNMP off,
+  with counts; it combines with the status and tag filters.
+
+## 0.7.9
+- **Status filter on the Devices page:** All / Online / Offline / Unreachable / Degraded / Unknown /
+  Disabled, with counts; it combines with the tag filter.
+- **Acknowledge all** on the Alerts page acknowledges every firing alert at once.
+- The **Alerts** count in the sidebar shows only firing alerts nobody has acknowledged yet.
+- Network scans no longer tag every device they add **discovered**. On the first start of this
+  version the tag is removed from the devices that have it and from the scans' saved tags (your
+  other tags stay); a scan's *Tags* field now starts empty.
+
 ## 0.7.8
 - **Scans no longer bog everything down.** Every SNMP attempt in a scan used to create its own
   SNMP engine (~60 ms of CPU each, on the thread that serves the web UI): a /24 with a few

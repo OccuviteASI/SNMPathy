@@ -215,3 +215,47 @@ async def test_scans_share_one_snmp_engine():
     a.close()  # closing one client leaves the shared engine for the others
     assert shared_engine() is b.engine and not a._own_engine
     b.close()
+
+
+async def test_scans_do_not_tag_devices_discovered(db):
+    net = Net()
+    manager = ScanManager(db, local_probe=net.probe, local_clients=net.client)
+    scan = manager.create({"name": "lab", "targets": "10.0.0.1", "options": {
+        "communities": ["secret"], "resolve_dns": False, "auto_add": "snmp"}})
+    assert __import__("json").loads(scan["options"])["tags"] == []
+    await manager.run(scan["id"])
+    dev = db.one("SELECT tags FROM devices WHERE hostname = '10.0.0.1'")
+    assert __import__("json").loads(dev["tags"]) == ["Cisco"]  # only the brand
+
+
+def test_existing_discovered_tags_are_removed_once(db, make_device):
+    import json
+
+    from snmpathy.scanner import DISCOVERED_TAG_META, drop_discovered_tag
+
+    a = make_device("a", "10.0.0.1", tags=["discovered", "lab", "Ubiquiti"])
+    b = make_device("b", "10.0.0.2", tags=["Discovered"])
+    c = make_device("c", "10.0.0.3", tags=["lab"])
+    db.insert("scans", {"name": "old", "targets": "10.0.0.0/30", "created_at": 0,
+                        "options": json.dumps({"tags": ["discovered", "lab"], "auto_add": "none"})})
+    db.set_meta(DISCOVERED_TAG_META, "")
+    assert drop_discovered_tag(db) == 2
+    tags = {r["name"]: json.loads(r["tags"]) for r in db.query("SELECT name, tags FROM devices")}
+    assert tags == {"a": ["lab", "Ubiquiti"], "b": [], "c": ["lab"]}
+    assert json.loads(db.one("SELECT options FROM scans")["options"])["tags"] == ["lab"]
+    assert "Removed the 'discovered' tag from 2 devices" in db.one(
+        "SELECT message FROM events WHERE type = 'scan.tags'")["message"]
+    # Only once: a "discovered" tag you add yourself later stays.
+    db.update("devices", c["id"], {"tags": json.dumps(["lab", "discovered"])})
+    assert drop_discovered_tag(db) == 0
+    assert json.loads(db.one("SELECT tags FROM devices WHERE id = ?", (c["id"],))["tags"]) == ["lab", "discovered"]
+    assert a and b
+
+
+def test_scan_form_tags_start_empty(tmp_path):
+    from snmpathy.db import Database
+
+    settings = Settings(database=str(tmp_path / "f.db"), enable_syslog=False)
+    with TestClient(create_app(settings, db=Database(settings.database), start_monitor=False)) as client:
+        html = client.get("/scans").text
+    assert 'name="options.tags"' in html and "discovered" not in html

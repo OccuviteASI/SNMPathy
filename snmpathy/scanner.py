@@ -143,7 +143,7 @@ class ScanOptions:
     # Ask hosts for their maker / model with Ubiquiti discovery and UPnP (snmpathy/identify.py).
     identify: bool = True
     add_ping_check: bool = True
-    tags: list[str] = field(default_factory=lambda: ["discovered"])
+    tags: list[str] = field(default_factory=list)
     location: str = ""
     poll_interval: int = 300
     avail_mode: str = "any"
@@ -360,6 +360,37 @@ def add_result(db: Database, scan: dict[str, Any], result: dict[str, Any]) -> in
 
 
 ADDED_TOTALS_META = "scan_added_totals"
+DISCOVERED_TAG_META = "scan_discovered_tag_removed"
+
+
+def drop_discovered_tag(db: Database) -> int:
+    """Once: scans used to tag every device they added "discovered". Take that tag off the devices
+    and out of the scans' saved tags (a "discovered" tag added after this is left alone).
+    Returns how many devices changed."""
+    if db.get_meta(DISCOVERED_TAG_META, "") == "1":
+        return 0
+
+    def without(tags: Any) -> list[str]:
+        return [t for t in (tags or []) if str(t).strip().lower() != "discovered"]
+
+    for scan in db.query("SELECT id, options FROM scans"):
+        options = loads(scan["options"], {})
+        if isinstance(options, dict) and isinstance(options.get("tags"), list):
+            kept = without(options["tags"])
+            if kept != options["tags"]:
+                db.update("scans", scan["id"], {"options": _dumps({**options, "tags": kept})})
+    changed = 0
+    for device in db.query("SELECT id, tags FROM devices WHERE tags LIKE '%iscovered%' COLLATE NOCASE"):
+        tags = loads(device["tags"], [])
+        kept = without(tags)
+        if kept != tags:
+            db.update("devices", device["id"], {"tags": _dumps(kept)})
+            changed += 1
+    if changed:
+        db.log_event("scan.tags", f"Removed the 'discovered' tag from {changed} device{'' if changed == 1 else 's'}",
+                     "info")
+    db.set_meta(DISCOVERED_TAG_META, "1")
+    return changed
 
 
 def backfill_added_totals(db: Database) -> None:
@@ -390,6 +421,7 @@ class ScanManager:
         # Scans that were running when the process stopped will never finish.
         db.execute("UPDATE scans SET state = 'interrupted', finished_at = ? WHERE state = 'running'", (time.time(),))
         backfill_added_totals(db)
+        drop_discovered_tag(db)
 
     # ---------------------------------------------------------------- CRUD
     def create(self, values: dict[str, Any]) -> dict[str, Any]:

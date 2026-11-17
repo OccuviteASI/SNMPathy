@@ -1,3 +1,4 @@
+import re
 """Nagios-style dashlets (snmpathy/hud.py), dashboard device groups, cluster dashboards and the HUD Overview."""
 
 import json
@@ -140,7 +141,7 @@ def test_cluster_api_overview_and_filters(tmp_path, db, make_device):
         assert "Problems" in client.get("/?classic=1").text
         # donut segments link to filtered lists
         down = client.get("/devices?state=critical").text
-        assert "Showing only devices that are down" in down and ">branch<" in down and ">core<" not in down
+        assert re.search(r'filter-chip active" href="/devices\?status=offline"', down) and ">branch<" in down and ">core<" not in down
         assert "Showing only checks that are in WARNING" in client.get("/checks?state=warning").text
         # deleting the HUD and restoring the built-ins brings it back
         hud_id = client.get("/api/dashboards/main-hud").json()["id"]
@@ -148,3 +149,69 @@ def test_cluster_api_overview_and_filters(tmp_path, db, make_device):
         assert "Problems" in client.get("/").text  # falls back to the classic overview
         assert client.post("/api/dashboards/reset").json()["created"] >= 1
         assert client.get("/api/dashboards/main-hud").status_code == 200
+
+
+def test_devices_status_filter(tmp_path, make_device, db):
+    from fastapi.testclient import TestClient
+
+    from snmpathy.app import create_app
+    from snmpathy.config import Settings
+
+    for name, status, degraded, enabled, tags in [("up1", "up", 0, 1, ["lab"]), ("up2", "up", 0, 1, []),
+                                                  ("slow", "up", 1, 1, ["lab"]), ("dead", "down", 0, 1, ["lab"]),
+                                                  ("far", "unreachable", 0, 1, []), ("new", "unknown", 0, 1, []),
+                                                  ("off", "down", 0, 0, [])]:
+        d = make_device(name, f"10.0.0.{len(name)}{ord(name[0]) % 9}", tags=tags)
+        db.update("devices", d["id"], {"status": status, "degraded": degraded, "enabled": enabled})
+    settings = Settings(database=db.path, enable_syslog=False)
+    with TestClient(create_app(settings, db=db, start_monitor=False)) as client:
+        def names(url):
+            html = client.get(url).text
+            return sorted(re.findall(r'<a href="/devices/\d+"><strong>([^<]+)</strong>', html)), html
+        assert names("/devices?status=online")[0] == ["up1", "up2"]
+        assert names("/devices?status=offline")[0] == ["dead"]  # a disabled device is not "offline"
+        assert names("/devices?status=disabled")[0] == ["off"]
+        assert names("/devices?status=degraded")[0] == ["slow"]
+        assert names("/devices?status=unreachable")[0] == ["far"]
+        found, html = names("/devices?status=online&tag=lab")
+        assert found == ["up1"]
+        assert 'href="/devices?status=online&amp;tag=lab"' in html or 'href="/devices?status=online&tag=lab"' in html
+        _, html = names("/devices?tag=lab")
+        counts = dict(re.findall(r'data-status="(\w+)"><span class="status \w+"></span>\w+ <span class="n">(\d+)', html))
+        assert counts == {"online": "1", "offline": "1", "unreachable": "0", "degraded": "1", "unknown": "0",
+                          "disabled": "0"}  # counts for this tag; every status is always offered
+        assert names("/devices?status=bogus")[0] == ["dead", "far", "new", "off", "slow", "up1", "up2"]
+        assert "No devices match this filter" in client.get("/devices?status=unknown&tag=lab").text
+
+
+def test_devices_snmp_filter(make_device, db):
+    from fastapi.testclient import TestClient
+
+    from snmpathy.app import create_app
+    from snmpathy.config import Settings
+
+    for i, (name, snmp, snmp_status, status, tags) in enumerate([
+            ("sw1", 1, "up", "up", ["lab"]), ("sw2", 1, "up", "down", []), ("ap1", 1, "down", "up", ["lab"]),
+            ("new", 1, "unknown", "unknown", []), ("cam", 0, "unknown", "up", ["lab"])]):
+        d = make_device(name, f"10.0.1.{i + 1}", tags=tags)
+        db.update("devices", d["id"], {"snmp_enabled": snmp, "snmp_status": snmp_status, "status": status})
+    settings = Settings(database=db.path, enable_syslog=False)
+    with TestClient(create_app(settings, db=db, start_monitor=False)) as client:
+        def names(url):
+            html = client.get(url).text
+            return sorted(re.findall(r'<a href="/devices/\d+"><strong>([^<]+)</strong>', html)), html
+        assert names("/devices?snmp=responding")[0] == ["sw1", "sw2"]
+        assert names("/devices?snmp=silent")[0] == ["ap1"]
+        assert names("/devices?snmp=pending")[0] == ["new"]
+        assert names("/devices?snmp=off")[0] == ["cam"]
+        found, html = names("/devices?snmp=responding&status=online")
+        assert found == ["sw1"]
+        # Status chips count within the SNMP filter, SNMP chips within the status filter.
+        status_counts = dict(re.findall(r'data-status="(\w+)"><span class="status \w+"></span>\w+ <span class="n">(\d+)', html))
+        snmp_counts = dict(re.findall(r'data-snmp="(\w+)"><span class="status \w+"></span>[\w ]+ <span class="n">(\d+)', html))
+        assert status_counts["online"] == "1" and status_counts["offline"] == "1"
+        assert snmp_counts == {"responding": "1", "silent": "1", "pending": "0", "off": "1"}
+        # Links keep the other filters.
+        assert "/devices?status=online&amp;snmp=off" in html or "/devices?status=online&snmp=off" in html
+        assert names("/devices?snmp=responding&tag=lab")[0] == ["sw1"]
+        assert names("/devices?snmp=nonsense")[0] == ["ap1", "cam", "new", "sw1", "sw2"]

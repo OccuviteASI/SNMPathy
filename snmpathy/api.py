@@ -575,6 +575,18 @@ def list_alerts(db: Database = Depends(get_db), state: Optional[str] = None, lim
     return db.query(sql, [*params, limit])
 
 
+@router.post("/alerts/ack-all", tags=["alerts"])
+def ack_all_alerts(body: AckIn, db: Database = Depends(get_db)):
+    """Acknowledge every firing alert that is not acknowledged yet."""
+    cur = db.execute("UPDATE alerts SET acknowledged = 1, ack_by = ?, ack_at = ? "
+                     "WHERE state = 'firing' AND acknowledged = 0", (body.by, time.time()))
+    count = cur.rowcount or 0
+    if count:
+        db.log_event("alert.ack", f"Acknowledged {count} alert{'' if count == 1 else 's'}"
+                     + (f" ({body.by})" if body.by else ""), "info")
+    return {"acknowledged": count}
+
+
 @router.post("/alerts/{alert_id}/ack", tags=["alerts"])
 def ack_alert(alert_id: int, body: AckIn, db: Database = Depends(get_db)):
     if not db.one("SELECT 1 FROM alerts WHERE id = ?", (alert_id,)):

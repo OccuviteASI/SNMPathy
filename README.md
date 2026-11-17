@@ -69,7 +69,8 @@ needs an inbound firewall rule: `New-NetFirewallRule -DisplayName SNMPathy-Syslo
 
 **Download it**: every change to `main` is built by CI and published on the
 [latest release](https://github.com/OccuviteASI/SNMPathy/releases/latest) page:
-`SNMPathy-windows.exe` (rename it to `SNMPathy.exe`), `SNMPathy-macos` and `SNMPathy-linux`.
+`SNMPathy-windows.exe` (rename it to `SNMPathy.exe`) and `SNMPathy-linux`. (No macOS build is
+published for now; on a Mac, build it yourself or run from Python.)
 Put it in a folder of its own and double-click it. Nothing else needs to be installed, and the
 tray's **Update SNMPathy** keeps it up to date.
 
@@ -109,7 +110,7 @@ failed" warnings from a shared cache don't apply.
 
 The packaged app keeps its database and configuration next to the executable, whatever
 directory it is started from. PyInstaller builds for the OS it runs on. CI also builds the
-Windows, macOS and Linux executables on every push; download them from the run's
+Windows and Linux executables on every push; download them from the run's
 *Artifacts* section.
 
 ### Docker
@@ -323,7 +324,7 @@ snmpathy collector --server https://nms.example.com --token col_...
 The **Downloads** list on the Collectors page serves the files directly from the main host
 at `/collector/download/…`. A server started from the standalone executable offers itself
 for its own OS; put the executables for other platforms (from `scripts/build_executable`
-or the CI artifacts, named e.g. `SNMPathy-windows.exe`, `SNMPathy-linux`, `SNMPathy-macos`)
+or the CI artifacts, named e.g. `SNMPathy-windows.exe`, `SNMPathy-linux`)
 in the `downloads` folder next to the database (or set `downloads_dir`). Without a
 prebuilt executable the installers fall back to the Python package the server also
 serves (`snmpathy-<version>.tar.gz`, needs Python 3.10+ at the site).
@@ -727,7 +728,8 @@ pytest
 snmpathy demo --log-level debug
 ```
 
-CI runs the test suite on Linux, macOS and Windows with Python 3.10 to 3.13.
+CI runs the test suite on Linux and Windows with Python 3.10 to 3.13, builds the Windows and Linux
+executables and the Docker image (macOS is not tested or built for now).
 
 ## License
 
