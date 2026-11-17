@@ -54,7 +54,8 @@ def render(request: Request, name: str, **context: Any) -> HTMLResponse:
         "devices": db.scalar("SELECT COUNT(*) FROM devices WHERE enabled = 1 AND status = 'down'"),
         "collectors": db.scalar("SELECT COUNT(*) FROM collectors WHERE enabled = 1 AND status = 'offline'"),
         "checks": db.scalar("SELECT COUNT(*) FROM checks WHERE enabled = 1 AND state = 'down'"),
-        "alerts": db.scalar("SELECT COUNT(*) FROM alerts WHERE state = 'firing'"),
+        # Only what still needs someone: firing alerts nobody has acknowledged.
+        "alerts": db.scalar("SELECT COUNT(*) FROM alerts WHERE state = 'firing' AND acknowledged = 0"),
     }
     context["auth_enabled"] = bool(request.app.state.settings.api_token)
     context.setdefault("collectors", db.query("SELECT id, name, site, status FROM collectors ORDER BY name COLLATE NOCASE"))
