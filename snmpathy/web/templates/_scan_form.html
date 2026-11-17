@@ -58,7 +58,7 @@
           <div class="form-grid">
             <label class="field">Add automatically<select name="options.auto_add">{% for v, l in [('none', "No - I'll pick from the results"), ('snmp', 'Hosts that answer SNMP'), ('alive', 'Every host that answers')] %}<option value="{{ v }}" {{ 'selected' if o.auto_add == v }}>{{ l }}</option>{% endfor %}</select></label>
             <label class="field">Online rule for new devices<select name="options.avail_mode">{% for k, l in AVAIL_MODES.items() %}<option value="{{ k }}" {{ 'selected' if o.avail_mode == k }}>{{ l }}</option>{% endfor %}</select></label>
-            <label class="field">Tags<input name="options.tags" data-type="list" value="{{ (o.tags or [])|join(', ') if s else 'discovered' }}"></label>
+            <label class="field">Tags <span class="hint">optional</span><input name="options.tags" data-type="list" placeholder="e.g. lab, branch-office" value="{{ (o.tags or [])|join(', ') }}"></label>
             <label class="field">Location<input name="options.location" value="{{ o.location or '' }}"></label>
             <label class="field">Poll interval (s)<input name="options.poll_interval" type="number" data-type="int" value="{{ o.poll_interval or 300 }}" min="10"></label>
             <label class="check"><input type="checkbox" name="options.add_public" {{ 'checked' if not s or o.add_public is not defined or o.add_public }}> Always add hosts that answer the "public" community</label>

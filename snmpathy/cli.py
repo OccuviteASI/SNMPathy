@@ -475,7 +475,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
         "concurrency": args.concurrency, "resolve_dns": not args.no_dns, "exclude": args.exclude or "",
         "v3": ([{"user": args.user, "auth_proto": args.auth_proto, "auth_key": args.auth_key or "",
                  "priv_proto": args.priv_proto, "priv_key": args.priv_key or ""}] if args.user else []),
-        "auto_add": args.add, "tags": args.tag or ["discovered"],
+        "auto_add": args.add, "tags": args.tag or [],
     })
     try:
         hosts = expand_targets(" ".join(args.targets), opts.exclude)
