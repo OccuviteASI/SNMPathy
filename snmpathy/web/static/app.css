@@ -513,6 +513,15 @@ a.dl-row:hover { background: var(--surface-2); text-decoration: none; }
 .hypermap .hm-node:hover circle { stroke: var(--accent); }
 
 .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.filter-row { flex-wrap: wrap; gap: 6px; }
+.filter-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 12.5px;
+  font-weight: 600; color: var(--text-2); background: var(--surface); border: 1px solid var(--border); }
+.filter-chip:hover { text-decoration: none; color: var(--text); border-color: var(--accent); }
+.filter-chip.active { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
+.filter-chip .n { font-weight: 500; color: var(--muted); }
+.filter-chip.active .n { color: inherit; }
+.filter-chip .status { font-size: 0; gap: 0; }
+.filter-chip.none:not(.active) { opacity: .5; }
 .chip { display: inline-block; padding: 2px 8px; border-radius: 5px; font-size: 11px; font-weight: 600; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip:hover { text-decoration: none; filter: brightness(1.08); }
 .ds-table td { vertical-align: middle; }

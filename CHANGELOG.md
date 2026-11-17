@@ -5,6 +5,8 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
 ## 0.7.9
+- **Status filter on the Devices page:** All / Online / Offline / Unreachable / Degraded / Unknown /
+  Disabled, with counts; it combines with the tag filter.
 - **Acknowledge all** on the Alerts page acknowledges every firing alert at once.
 - The **Alerts** count in the sidebar shows only firing alerts nobody has acknowledged yet.
 - Network scans no longer tag every device they add **discovered**. On the first start of this

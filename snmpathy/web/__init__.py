@@ -102,17 +102,41 @@ def dashboard(request: Request, classic: bool = False):
     )
 
 
-@router.get("/devices", response_class=HTMLResponse)
-def devices(request: Request, tag: str = "", q: str = "", state: str = ""):
-    from ..hud import LABEL, device_state
+# The Devices page's status filter: (value, label), in the order shown.
+DEVICE_FILTERS = [("online", "Online"), ("offline", "Offline"), ("unreachable", "Unreachable"),
+                  ("degraded", "Degraded"), ("unknown", "Unknown"), ("disabled", "Disabled")]
+# Dashboard donuts link with ?state=<severity>; the same filter by its other name.
+_STATE_TO_FILTER = {"ok": "online", "critical": "offline", "serious": "unreachable", "warning": "degraded",
+                    "unknown": "unknown"}
 
+
+def device_filter_of(d: dict[str, Any]) -> str:
+    """Which status filter a device falls under (degraded devices are up, but not fully)."""
+    if not d["enabled"]:
+        return "disabled"
+    if d["status"] == "down":
+        return "offline"
+    if d["status"] == "unreachable":
+        return "unreachable"
+    if d["status"] == "up":
+        return "degraded" if d.get("degraded") else "online"
+    return "unknown"
+
+
+@router.get("/devices", response_class=HTMLResponse)
+def devices(request: Request, tag: str = "", q: str = "", state: str = "", status: str = ""):
     db = db_of(request)
     rows = [services.public_device(d) for d in db.query("SELECT * FROM devices ORDER BY name COLLATE NOCASE")]
     all_tags = sorted({t for d in rows for t in d["tags"]})
     if tag:
         rows = [d for d in rows if tag in d["tags"]]
-    if state in LABEL:  # from a dashboard donut: e.g. ?state=critical lists the devices that are down
-        rows = [d for d in rows if d["enabled"] and device_state(d) == state]
+    status = status if status in dict(DEVICE_FILTERS) else _STATE_TO_FILTER.get(state, "")
+    status_counts = {key: 0 for key, _ in DEVICE_FILTERS}
+    for d in rows:
+        status_counts[device_filter_of(d)] += 1
+    total = len(rows)
+    if status:
+        rows = [d for d in rows if device_filter_of(d) == status]
     counts = {r["device_id"]: r for r in db.query(
         "SELECT device_id, COUNT(*) AS ifaces, SUM(CASE WHEN admin_status = 1 AND oper_status = 2 THEN 1 ELSE 0 END) "
         "AS down FROM interfaces GROUP BY device_id")}
@@ -121,9 +145,8 @@ def devices(request: Request, tag: str = "", q: str = "", state: str = ""):
     mem = {r["device_id"]: r["last_value"] for r in db.query(
         "SELECT device_id, last_value FROM metrics WHERE key = 'mem.used_pct'")}
     return render(request, "devices.html", devices=rows, tags=all_tags, tag=tag, q=q,
-                  counts=counts, cpu=cpu, mem=mem, state=state if state in LABEL else "",
-                  state_label={"ok": "up", "warning": "degraded", "serious": "unreachable", "critical": "down",
-                               "unknown": "unknown"}.get(state, ""))
+                  counts=counts, cpu=cpu, mem=mem, status_filter=status, status_counts=status_counts, total=total,
+                  device_filters=DEVICE_FILTERS)
 
 
 def _device_names(db: Database) -> list[dict[str, Any]]:
