@@ -182,3 +182,36 @@ def test_devices_status_filter(tmp_path, make_device, db):
                           "disabled": "0"}  # counts for this tag; every status is always offered
         assert names("/devices?status=bogus")[0] == ["dead", "far", "new", "off", "slow", "up1", "up2"]
         assert "No devices match this filter" in client.get("/devices?status=unknown&tag=lab").text
+
+
+def test_devices_snmp_filter(make_device, db):
+    from fastapi.testclient import TestClient
+
+    from snmpathy.app import create_app
+    from snmpathy.config import Settings
+
+    for i, (name, snmp, snmp_status, status, tags) in enumerate([
+            ("sw1", 1, "up", "up", ["lab"]), ("sw2", 1, "up", "down", []), ("ap1", 1, "down", "up", ["lab"]),
+            ("new", 1, "unknown", "unknown", []), ("cam", 0, "unknown", "up", ["lab"])]):
+        d = make_device(name, f"10.0.1.{i + 1}", tags=tags)
+        db.update("devices", d["id"], {"snmp_enabled": snmp, "snmp_status": snmp_status, "status": status})
+    settings = Settings(database=db.path, enable_syslog=False)
+    with TestClient(create_app(settings, db=db, start_monitor=False)) as client:
+        def names(url):
+            html = client.get(url).text
+            return sorted(re.findall(r'<a href="/devices/\d+"><strong>([^<]+)</strong>', html)), html
+        assert names("/devices?snmp=responding")[0] == ["sw1", "sw2"]
+        assert names("/devices?snmp=silent")[0] == ["ap1"]
+        assert names("/devices?snmp=pending")[0] == ["new"]
+        assert names("/devices?snmp=off")[0] == ["cam"]
+        found, html = names("/devices?snmp=responding&status=online")
+        assert found == ["sw1"]
+        # Status chips count within the SNMP filter, SNMP chips within the status filter.
+        status_counts = dict(re.findall(r'data-status="(\w+)"><span class="status \w+"></span>\w+ <span class="n">(\d+)', html))
+        snmp_counts = dict(re.findall(r'data-snmp="(\w+)"><span class="status \w+"></span>[\w ]+ <span class="n">(\d+)', html))
+        assert status_counts["online"] == "1" and status_counts["offline"] == "1"
+        assert snmp_counts == {"responding": "1", "silent": "1", "pending": "0", "off": "1"}
+        # Links keep the other filters.
+        assert "/devices?status=online&amp;snmp=off" in html or "/devices?status=online&snmp=off" in html
+        assert names("/devices?snmp=responding&tag=lab")[0] == ["sw1"]
+        assert names("/devices?snmp=nonsense")[0] == ["ap1", "cam", "new", "sw1", "sw2"]

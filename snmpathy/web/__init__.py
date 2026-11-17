@@ -105,6 +105,9 @@ def dashboard(request: Request, classic: bool = False):
 # The Devices page's status filter: (value, label), in the order shown.
 DEVICE_FILTERS = [("online", "Online"), ("offline", "Offline"), ("unreachable", "Unreachable"),
                   ("degraded", "Degraded"), ("unknown", "Unknown"), ("disabled", "Disabled")]
+# The SNMP filter: whether SNMPathy can poll the device over SNMP.
+SNMP_FILTERS = [("responding", "Responding"), ("silent", "Not responding"), ("pending", "Not polled yet"),
+                ("off", "SNMP off")]
 # Dashboard donuts link with ?state=<severity>; the same filter by its other name.
 _STATE_TO_FILTER = {"ok": "online", "critical": "offline", "serious": "unreachable", "warning": "degraded",
                     "unknown": "unknown"}
@@ -123,20 +126,32 @@ def device_filter_of(d: dict[str, Any]) -> str:
     return "unknown"
 
 
+def snmp_filter_of(d: dict[str, Any]) -> str:
+    if not d["snmp_enabled"]:
+        return "off"
+    return {"up": "responding", "down": "silent"}.get(d.get("snmp_status") or "", "pending")
+
+
 @router.get("/devices", response_class=HTMLResponse)
-def devices(request: Request, tag: str = "", q: str = "", state: str = "", status: str = ""):
+def devices(request: Request, tag: str = "", q: str = "", state: str = "", status: str = "", snmp: str = ""):
     db = db_of(request)
     rows = [services.public_device(d) for d in db.query("SELECT * FROM devices ORDER BY name COLLATE NOCASE")]
     all_tags = sorted({t for d in rows for t in d["tags"]})
     if tag:
         rows = [d for d in rows if tag in d["tags"]]
     status = status if status in dict(DEVICE_FILTERS) else _STATE_TO_FILTER.get(state, "")
+    snmp = snmp if snmp in dict(SNMP_FILTERS) else ""
+    # Each row of chips counts the devices the *other* filters leave (tag, and status or SNMP).
+    by_snmp = [d for d in rows if not snmp or snmp_filter_of(d) == snmp]
+    by_status = [d for d in rows if not status or device_filter_of(d) == status]
     status_counts = {key: 0 for key, _ in DEVICE_FILTERS}
-    for d in rows:
+    for d in by_snmp:
         status_counts[device_filter_of(d)] += 1
-    total = len(rows)
-    if status:
-        rows = [d for d in rows if device_filter_of(d) == status]
+    snmp_counts = {key: 0 for key, _ in SNMP_FILTERS}
+    for d in by_status:
+        snmp_counts[snmp_filter_of(d)] += 1
+    total, snmp_total = len(by_snmp), len(by_status)
+    rows = [d for d in by_status if not snmp or snmp_filter_of(d) == snmp]
     counts = {r["device_id"]: r for r in db.query(
         "SELECT device_id, COUNT(*) AS ifaces, SUM(CASE WHEN admin_status = 1 AND oper_status = 2 THEN 1 ELSE 0 END) "
         "AS down FROM interfaces GROUP BY device_id")}
@@ -146,7 +161,8 @@ def devices(request: Request, tag: str = "", q: str = "", state: str = "", statu
         "SELECT device_id, last_value FROM metrics WHERE key = 'mem.used_pct'")}
     return render(request, "devices.html", devices=rows, tags=all_tags, tag=tag, q=q,
                   counts=counts, cpu=cpu, mem=mem, status_filter=status, status_counts=status_counts, total=total,
-                  device_filters=DEVICE_FILTERS)
+                  device_filters=DEVICE_FILTERS, snmp_filter=snmp, snmp_counts=snmp_counts, snmp_total=snmp_total,
+                  snmp_filters=SNMP_FILTERS)
 
 
 def _device_names(db: Database) -> list[dict[str, Any]]:

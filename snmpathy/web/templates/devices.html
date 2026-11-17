@@ -7,8 +7,8 @@
 <a class="btn primary" href="/devices/new">{{ icon('plus') }} Add device</a>
 {% endblock %}
 {% block content %}
-{% macro devices_url(status_value, tag_value) -%}
-/devices{% set qs = [] %}{% if status_value %}{% set _ = qs.append('status=' ~ status_value) %}{% endif %}{% if tag_value %}{% set _ = qs.append('tag=' ~ tag_value|urlencode) %}{% endif %}{{ '?' ~ qs|join('&') if qs }}
+{% macro devices_url(status_value, tag_value, snmp_value=snmp_filter) -%}
+/devices{% set qs = [] %}{% if status_value %}{% set _ = qs.append('status=' ~ status_value) %}{% endif %}{% if snmp_value %}{% set _ = qs.append('snmp=' ~ snmp_value) %}{% endif %}{% if tag_value %}{% set _ = qs.append('tag=' ~ tag_value|urlencode) %}{% endif %}{{ '?' ~ qs|join('&') if qs }}
 {%- endmacro %}
 {% set dot = {'online': 'up', 'offline': 'down', 'unreachable': 'unreachable', 'degraded': 'warning', 'unknown': 'unknown', 'disabled': 'paused'} %}
 <div class="row mb filter-row" id="status-filter">
@@ -16,6 +16,14 @@
   <a class="filter-chip{{ ' active' if not status_filter }}" href="{{ devices_url('', tag) }}">All <span class="n">{{ total }}</span></a>
   {% for key, label in device_filters %}
   <a class="filter-chip{{ ' active' if status_filter == key }}{{ ' none' if not status_counts[key] }}" href="{{ devices_url(key, tag) }}" data-status="{{ key }}"><span class="status {{ dot[key] }}"></span>{{ label }} <span class="n">{{ status_counts[key] }}</span></a>
+  {% endfor %}
+</div>
+{% set snmp_dot = {'responding': 'up', 'silent': 'down', 'pending': 'unknown', 'off': 'paused'} %}
+<div class="row mb filter-row" id="snmp-filter">
+  <span class="muted small">SNMP:</span>
+  <a class="filter-chip{{ ' active' if not snmp_filter }}" href="{{ devices_url(status_filter, tag, '') }}">All <span class="n">{{ snmp_total }}</span></a>
+  {% for key, label in snmp_filters %}
+  <a class="filter-chip{{ ' active' if snmp_filter == key }}{{ ' none' if not snmp_counts[key] }}" href="{{ devices_url(status_filter, tag, key) }}" data-snmp="{{ key }}"><span class="status {{ snmp_dot[key] }}"></span>{{ label }} <span class="n">{{ snmp_counts[key] }}</span></a>
   {% endfor %}
 </div>
 {% if tags %}
@@ -55,7 +63,7 @@
           <td class="nowrap" data-sort="{{ d.last_polled or 0 }}">{% if d.snmp_enabled %}{{ d.last_polled|ts('ago')|safe }}{% if d.last_poll_ms %}<div class="small muted">{{ '%.0f'|format(d.last_poll_ms) }} ms</div>{% endif %}{% else %}<span class="muted">SNMP off</span>{% endif %}</td>
         </tr>
       {% else %}
-        <tr><td colspan="10"><div class="empty">{% if status_filter or tag %}No devices match this filter. <a href="/devices">Show all devices</a>{% else %}No devices yet. <a href="/devices/new">Add your first device</a>, or run <code>snmpathy demo</code> to explore with simulated ones.{% endif %}</div></td></tr>
+        <tr><td colspan="10"><div class="empty">{% if status_filter or snmp_filter or tag %}No devices match this filter. <a href="/devices">Show all devices</a>{% else %}No devices yet. <a href="/devices/new">Add your first device</a>, or run <code>snmpathy demo</code> to explore with simulated ones.{% endif %}</div></td></tr>
       {% endfor %}
       </tbody>
     </table>

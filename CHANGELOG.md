@@ -4,6 +4,10 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 `snmpathy version`. Executables built with `scripts/build_executable` also show the git
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
+## 0.7.10
+- **SNMP filter on the Devices page:** Responding / Not responding / Not polled yet / SNMP off,
+  with counts; it combines with the status and tag filters.
+
 ## 0.7.9
 - **Status filter on the Devices page:** All / Online / Offline / Unreachable / Degraded / Unknown /
   Disabled, with counts; it combines with the tag filter.
