@@ -97,7 +97,9 @@ def create_app(settings: Settings | None = None, db: Database | None = None, sta
         if adminauth.edit_denied(request):  # an edit passcode is set and this browser is view only
             return JSONResponse({"detail": "View only: unlock editing with the edit passcode", "code": "edit_locked"},
                                 status_code=403)
-        return await call_next(request)
+        response = await call_next(request)
+        adminauth.renew_admin(request, response)  # Server admin locks after a while without use
+        return response
 
     @app.post("/login", include_in_schema=False)
     async def do_login(token: str = Form(...), next: str = Form("/")):

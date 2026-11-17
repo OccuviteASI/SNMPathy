@@ -37,6 +37,15 @@ templates.env.filters.update(
     bps=fmt_bps, bytes=fmt_bytes, speed=fmt_speed, pct=fmt_pct, value=fmt_value, ago=ago,
     duration=reports.format_duration, ts=ts_html, loads=lambda v: loads(v, None),
 )
+def _duration_minutes(minutes: int) -> str:
+    minutes = int(minutes)
+    if minutes % 60 == 0:
+        hours = minutes // 60
+        return f"{hours} hour{'s' if hours != 1 else ''}"
+    return f"{minutes} minute{'s' if minutes != 1 else ''}"
+
+
+templates.env.filters["duration_minutes"] = _duration_minutes
 templates.env.globals.update(
     SEVERITIES=SEVERITIES, SEVERITY_LABELS=SEVERITY_LABELS, FACILITIES=FACILITIES,
     IF_OPER=mibs.IF_OPER_STATUS_NAMES, METRIC_INFO=mibs.METRIC_INFO, now=time.time, AVAIL_MODES=AVAIL_MODES,
@@ -426,20 +435,23 @@ def server_admin(request: Request, error: str = "", wait: int = 0):
     access = adminauth.access(request)
     if not access["allowed"]:
         return render(request, "admin_locked.html", nav="admin", hostname=socket.gethostname(),
-                      passcode_set=adminauth.passcode_set(db), error=error, wait=wait)
+                      passcode_set=adminauth.passcode_set(db), error=error, wait=wait,
+                      timeout=adminauth.timeout_minutes(db))
     return render(
         request, "admin.html", nav="admin", settings=s, version=version_string(), stats=storage.database_stats(db),
         python=sys.version.split()[0], platform=platform.platform(), icmp_mode=detect_icmp_mode(),
         fts=db.has_fts, monitor=monitor.status() if monitor else None, hostname=socket.gethostname(),
         frozen=is_frozen(), autostart=_autostart_status(s), firewall=_firewall_status(s),
         access=access, passcode_set=adminauth.passcode_set(db), local=adminauth.is_local(request),
-        edit_passcode_set=adminauth.passcode_set(db, "edit"),
+        edit_passcode_set=adminauth.passcode_set(db, "edit"), timeout=adminauth.timeout_minutes(db),
+        timeout_choices=adminauth.TIMEOUT_CHOICES, remaining=max(0, int((access["expires"] or 0) - time.time())),
     )
 
 
 def _admin_cookie(response: Any, request: Request, value: str, max_age: int) -> None:
-    response.set_cookie(adminauth_cookie(), value, max_age=max_age, httponly=True, samesite="strict",
-                        secure=request.url.scheme == "https", path="/")
+    from .. import adminauth
+
+    adminauth.set_cookie(response, request, adminauth.SESSION_COOKIE, value, max_age)
 
 
 def adminauth_cookie() -> str:
@@ -468,7 +480,7 @@ async def admin_unlock(request: Request):
     adminauth.clear_failures(address)
     db.log_event("admin.unlock", f"Server admin unlocked from {address}", "info")
     response = RedirectResponse("/admin", status_code=303)
-    _admin_cookie(response, request, adminauth.make_session(db), adminauth.SESSION_HOURS * 3600)
+    _admin_cookie(response, request, adminauth.make_session(db), adminauth.session_seconds(db))
     return response
 
 
@@ -537,7 +549,7 @@ def admin_open(request: Request, ticket: str = ""):
     response = RedirectResponse("/admin", status_code=303)
     if adminauth.use_ticket(ticket):
         db = db_of(request)
-        _admin_cookie(response, request, adminauth.make_session(db), adminauth.SESSION_HOURS * 3600)
+        _admin_cookie(response, request, adminauth.make_session(db), adminauth.session_seconds(db))
         token = request.app.state.settings.api_token
         if token:  # also signed in to the web UI: this is the server's own browser
             response.set_cookie("snmpathy_token", token, httponly=True, samesite="lax", max_age=30 * 86400)

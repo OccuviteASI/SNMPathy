@@ -5,6 +5,10 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
 ## 0.7.13
+- **Server admin locks again by itself**: a browser unlocked with the passcode locks after 15
+  minutes without Server admin being used (each Server admin page or action starts the time
+  again; other pages do not). The page shows the time left and switches to the locked page when
+  it runs out. Choose 5 minutes to 12 hours under **Server admin → Web access** on the server.
 - Fixed **Update SNMPathy** ending with "UPDATE FAILED: Error -3 while decompressing data:
   incorrect header check" at *Starting SNMPathy…* (updates from 0.7.11 and 0.7.12). The new
   version had been installed, but the updater loaded part of its own code from the executable

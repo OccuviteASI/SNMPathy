@@ -11,7 +11,7 @@
       <label class="field">Server admin passcode<input type="password" name="passcode" autocomplete="current-password" required autofocus></label>
       {% if error == 'wrong' %}<p class="small" style="margin:0;color:var(--critical)" id="unlock-error">That passcode is not right.</p>
       {% elif error == 'locked' %}<p class="small" style="margin:0;color:var(--critical)" id="unlock-error">Too many wrong passcodes from this address: try again in {{ ((wait + 59) // 60) }} minute{{ '' if wait <= 60 else 's' }}.</p>{% endif %}
-      <div class="row"><button class="btn primary" type="submit">Unlock</button><span class="small muted">This browser stays unlocked for 12 hours.</span></div>
+      <div class="row"><button class="btn primary" type="submit">Unlock</button><span class="small muted">It locks again after {{ timeout|duration_minutes }} without Server admin being used.</span></div>
     </form>
     <p class="small muted" style="margin:0">The passcode is set on the server itself: in the SNMPathy tray icon choose <em>Server admin &rsaquo; Server admin config</em>.</p>
     {% else %}
