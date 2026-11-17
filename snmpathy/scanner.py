@@ -359,6 +359,21 @@ def add_result(db: Database, scan: dict[str, Any], result: dict[str, Any]) -> in
     return device["id"]
 
 
+ADDED_TOTALS_META = "scan_added_totals"
+
+
+def backfill_added_totals(db: Database) -> None:
+    """Once: "added" used to count only the latest run. Make it the total, from the devices each
+    scan created (their notes name the scan); the latest run's count moves to added_last."""
+    if db.get_meta(ADDED_TOTALS_META, "") == "1":
+        return
+    for scan in db.query("SELECT id, name, added FROM scans"):
+        made = db.scalar("SELECT COUNT(*) FROM devices WHERE notes = ?",
+                         (f"Found by network scan '{scan['name']}'",)) or 0
+        db.update("scans", scan["id"], {"added_last": scan["added"], "added": max(scan["added"], made)})
+    db.set_meta(ADDED_TOTALS_META, "1")
+
+
 class ScanManager:
     """Runs scans in the background and re-runs recurring ones when due."""
 
@@ -374,6 +389,7 @@ class ScanManager:
         self._tasks: dict[int, asyncio.Task] = {}
         # Scans that were running when the process stopped will never finish.
         db.execute("UPDATE scans SET state = 'interrupted', finished_at = ? WHERE state = 'running'", (time.time(),))
+        backfill_added_totals(db)
 
     # ---------------------------------------------------------------- CRUD
     def create(self, values: dict[str, Any]) -> dict[str, Any]:
@@ -497,7 +513,8 @@ class ScanManager:
         started = time.time()
         hosts = expand_targets(scan["targets"], opts.exclude)
         self.db.update("scans", scan_id, {"state": "running", "started_at": started, "finished_at": None,
-                                          "total": len(hosts), "scanned": 0, "found": 0, "added": 0, "error": ""})
+                                          "total": len(hosts), "scanned": 0, "found": 0, "added_last": 0,
+                                          "error": ""})
         self.db.execute("DELETE FROM scan_results WHERE scan_id = ?", (scan_id,))
         state, error = "done", ""
         progress = {"scanned": 0, "found": 0}
@@ -530,11 +547,10 @@ class ScanManager:
             self.db.update("scans", scan_id, dict(progress))
             await self._macs_from_routers(scan_id, scan.get("collector_id") or 0)
             await self._match_existing(scan_id)
-            added = self.add(scan_id, mode=opts.auto_add) if opts.auto_add != "none" else []
+            if opts.auto_add != "none":  # add() keeps the totals (added: all runs, added_last: this one)
+                self.add(scan_id, mode=opts.auto_add)
             if opts.add_public and opts.auto_add != "alive":
-                added += self.add(scan_id, mode="public")
-            if opts.auto_add != "none" or added:
-                self.db.update("scans", scan_id, {"added": len(added)})
+                self.add(scan_id, mode="public")
         except asyncio.CancelledError:
             state = "cancelled"
             raise
@@ -551,7 +567,8 @@ class ScanManager:
             if state == "done":
                 self.db.log_event(
                     "scan.done", f"Scan '{scan['name']}' found {final['found']} hosts in {len(hosts)} addresses"
-                    + (f", added {final['added']} devices" if final["added"] else ""), "info")
+                    + (f", added {final['added_last']} devices ({final['added']} in all)" if final["added_last"] else ""),
+                    "info")
         return final
 
     def _store(self, scan_id: int, r: dict[str, Any]) -> None:
@@ -571,10 +588,27 @@ class ScanManager:
         )
 
     async def _macs_from_routers(self, scan_id: int, site: int) -> None:
-        """Give results without a MAC (other subnets) the one their router has in its ARP table."""
+        """Give results without a MAC the one in this computer's ARP table (read once, after the
+        sweep: hosts found between two reads during it) or, for other subnets, their router's."""
         missing = self.db.query("SELECT id, ip FROM scan_results WHERE scan_id = ? AND mac = ''", (scan_id,))
         if not missing:
             return
+        from .macvendor import describe, read_arp_table
+
+        if not site:  # this server's own ARP table only holds what this server reached itself
+            try:
+                local = await asyncio.to_thread(read_arp_table)
+            except Exception:
+                local = {}
+            still = []
+            for row in missing:
+                if local.get(row["ip"]):
+                    self.db.update("scan_results", row["id"], describe(local[row["ip"]]))
+                else:
+                    still.append(row)
+            missing = still
+            if not missing:
+                return
         if self.arp_hook is not None:
             try:
                 await self.arp_hook()
@@ -638,15 +672,17 @@ class ScanManager:
             self.db.update("scan_results", r["id"], {"status": "added", "device_id": device_id, "message": ""})
             added.append({"ip": r["ip"], "device_id": device_id})
         if added:
-            self.db.execute("UPDATE scans SET added = added + ? WHERE id = ?", (len(added), scan_id))
+            self.db.execute("UPDATE scans SET added = added + ?, added_last = added_last + ? WHERE id = ?",
+                            (len(added), len(added), scan_id))
             self.db.log_event("scan.added", f"Added {len(added)} devices from scan '{scan['name']}'", "info")
         return added
 
 
 def default_client_factory(target: str, cred: dict[str, Any], timeout: float) -> SnmpClient:
-    from .snmp.client import PySnmpClient, SnmpCredentials
+    from .snmp.client import PySnmpClient, SnmpCredentials, shared_engine
 
-    return PySnmpClient(target, SnmpCredentials.from_device(cred), timeout=timeout, retries=0)
+    return PySnmpClient(target, SnmpCredentials.from_device(cred), timeout=timeout, retries=0,
+                        engine=shared_engine())
 
 
 def _dumps(value: Any) -> str:

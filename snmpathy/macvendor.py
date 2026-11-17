@@ -467,7 +467,7 @@ def read_arp_table() -> dict[str, str]:
 class ArpCache:
     """Reads the ARP table at most every ``min_age`` seconds, however many hosts ask at once."""
 
-    def __init__(self, reader=read_arp_table, min_age: float = 0.5):
+    def __init__(self, reader=read_arp_table, min_age: float = 2.0):
         self.reader = reader
         self.min_age = min_age
         self.table: dict[str, str] = {}
@@ -483,6 +483,12 @@ class ArpCache:
 
 
 _cache = ArpCache()
+
+
+def warm_up() -> None:
+    """Load the maker lists now (a background thread at startup), not on a scan's first result."""
+    _load_table()
+    _load_wireshark()
 
 
 def mac_for(ip: str) -> str:

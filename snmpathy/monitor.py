@@ -51,7 +51,14 @@ def scan_client_factory(settings: Settings, snmp_factory: "SnmpFactory | None" =
     """Adapt a device-based SNMP factory to the scanner's (address, credentials, timeout) signature."""
     import dataclasses
 
-    factory = snmp_factory or default_snmp_factory
+    if snmp_factory is None:  # the real SNMP client: all scan probes share one engine
+        from .snmp.client import shared_engine
+
+        def make(target: str, cred: dict[str, Any], timeout: float) -> SnmpClient:
+            return PySnmpClient(target, SnmpCredentials.from_device(cred), timeout=timeout, retries=0,
+                                engine=shared_engine())
+        return make
+    factory = snmp_factory
 
     def make(target: str, cred: dict[str, Any], timeout: float) -> SnmpClient:
         quick = dataclasses.replace(settings, snmp_timeout=timeout, snmp_retries=0)
@@ -124,6 +131,7 @@ class Monitor:
         from . import macvendor
 
         macvendor.set_data_dir(Path(s.database).resolve().parent)
+        self._spawn(asyncio.to_thread(macvendor.warm_up), "maker-list")
         # Brand tags for devices discovered before auto-tagging existed (no-op once tagged).
         try:
             from .brands import tag_all

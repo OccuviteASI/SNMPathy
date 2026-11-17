@@ -4,6 +4,17 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 `snmpathy version`. Executables built with `scripts/build_executable` also show the git
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
+## 0.7.8
+- **Scans no longer bog everything down.** Every SNMP attempt in a scan used to create its own
+  SNMP engine (~60 ms of CPU each, on the thread that serves the web UI): a /24 with a few
+  communities froze the website for seconds at a time. Scans now share one engine: the same
+  254-address scan uses 4 s of CPU instead of 95 s, finishes in 37 s instead of 128 s, and
+  pages keep loading during it.
+- **Windows pings no longer start a `ping.exe` per address.** They use the Windows ICMP API
+  (no Administrator rights needed); where `ping` processes are still used, at most 16 run at once.
+- The ARP table is read less often during a scan, and once more after it.
+- **"Devices added" is the total over all runs** of a scan, with the latest run's count under it.
+
 ## 0.7.7
 - **Devices on other subnets / VLANs get their MAC address, maker and brand tag.** SNMPathy
   reads the ARP table of every router it polls over SNMP (UniFi gateway, pfSense, OPNsense,

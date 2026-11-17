@@ -13,7 +13,7 @@
   <div class="card stat"><div class="card-body"><div class="muted small">State</div><div id="s-state" class="big"></div><div class="progress mt"><span id="s-bar"></span></div></div></div>
   <div class="card stat"><div class="card-body"><div class="muted small">Addresses scanned</div><div class="big num" id="s-scanned"></div></div></div>
   <div class="card stat"><div class="card-body"><div class="muted small">Responding hosts</div><div class="big num" id="s-found"></div></div></div>
-  <div class="card stat"><div class="card-body"><div class="muted small">Devices added</div><div class="big num" id="s-added"></div></div></div>
+  <div class="card stat"><div class="card-body"><div class="muted small">Devices added (all runs)</div><div class="big num" id="s-added"></div><div class="small muted" id="s-added-last"></div></div></div>
 </div>
 <p class="small muted">Targets <code>{{ scan.targets }}</code> · runs from <strong>{{ collector.name if collector else 'this server' }}</strong> · {{ ('repeats every ' ~ (scan.interval|duration)) if scan.interval else 'runs once' }} · {% set comms = (scan.options.communities or [])|reject('equalto', 'public')|list %}communities tried: {{ comms|length + 1 }}{% if scan.options.v3 %} + {{ scan.options.v3|length }} SNMPv3 user{{ '' if scan.options.v3|length == 1 else 's' }}{% endif %}{% if scan.options.auto_add != 'none' %} · adds {{ 'SNMP hosts' if scan.options.auto_add == 'snmp' else 'every responding host' }} automatically{% elif scan.options.add_public is not defined or scan.options.add_public %} · adds hosts that answer <span class="mono">public</span> automatically{% endif %}</p>
 <div class="row mb">
@@ -49,6 +49,7 @@ document.addEventListener("DOMContentLoaded", () => {
     SP.$("#s-scanned").textContent = `${d.scanned.toLocaleString()} / ${d.total.toLocaleString()}`;
     SP.$("#s-found").textContent = d.found;
     SP.$("#s-added").textContent = d.added;
+    SP.$("#s-added-last").textContent = d.added_last ? `${d.added_last} from the latest run` : (d.added ? "none from the latest run" : "");
     SP.$("#s-bar").style.width = (d.total ? Math.round(d.scanned / d.total * 100) : 0) + "%";
     SP.$("#s-error").textContent = d.error || "";
     SP.$("#scan-cancel").classList.toggle("hidden", !d.running);

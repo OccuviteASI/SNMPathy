@@ -125,7 +125,8 @@ class PySnmpClient:
     GET_BATCH = 24          # varbinds per GET PDU
     MAX_REPETITIONS = 25    # GETBULK repetitions
 
-    def __init__(self, host: str, creds: SnmpCredentials, timeout: float = 2.0, retries: int = 1):
+    def __init__(self, host: str, creds: SnmpCredentials, timeout: float = 2.0, retries: int = 1,
+                 engine: Any = None):
         from pysnmp.hlapi.v3arch import asyncio as hl
 
         self._hl = hl
@@ -133,7 +134,9 @@ class PySnmpClient:
         self.creds = creds
         self.timeout = timeout
         self.retries = retries
-        self.engine = hl.SnmpEngine()
+        # An engine costs ~60 ms of CPU to create: network scans share one (shared_engine()).
+        self._own_engine = engine is None
+        self.engine = engine if engine is not None else hl.SnmpEngine()
         self._target = None
         self._auth = self._build_auth()
         self._context = hl.ContextData(contextName=creds.v3_context) if creds.v3_context else hl.ContextData()
@@ -273,10 +276,31 @@ class PySnmpClient:
         return result
 
     def close(self) -> None:
+        if not self._own_engine:
+            return  # the shared engine stays open for the other clients
         try:
             self.engine.close_dispatcher()
         except Exception:
             pass
+
+
+_shared: tuple[Any, Any] | None = None  # (event loop, SnmpEngine)
+
+
+def shared_engine() -> Any:
+    """One SNMP engine for the many short-lived clients of a network scan (per event loop).
+
+    Creating an engine takes ~60 ms of CPU on the event loop, and a scan tries every
+    credential on every address: hundreds of engines froze the web UI for seconds at a time.
+    One engine talks to any number of targets at once, and keeps SNMPv3 keys it derived.
+    """
+    global _shared
+    from pysnmp.hlapi.v3arch import asyncio as hl
+
+    loop = asyncio.get_running_loop()
+    if _shared is None or _shared[0] is not loop or loop.is_closed():
+        _shared = (loop, hl.SnmpEngine())
+    return _shared[1]
 
 
 class FakeSnmpClient:
