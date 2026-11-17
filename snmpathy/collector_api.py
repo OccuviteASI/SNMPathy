@@ -282,16 +282,25 @@ def release_asset(product: str, platform: str) -> str:
     return f"{product}-{platform}{RELEASE_PLATFORMS.get(platform, '')}"
 
 
-def fetch_release_asset(name: str, folder: Path) -> Path:
+def _fetch_release_asset(name: str, folder: Path) -> Path:
     """Download a release file from GitHub into the downloads folder (kept for next time).
 
-    The release matching this server's version first, then the latest release.
+    The release matching this server's version first, then the latest release. Kept per version
+    (``downloads/releases/v<version>/``), so after the server is updated collectors get the
+    matching build, and the files of older versions are removed.
     """
+    import shutil
+
     import httpx
 
-    folder.mkdir(parents=True, exist_ok=True)
-    dest = folder / name
+    cache = folder / "releases"
+    target = cache / f"v{__version__}"
+    target.mkdir(parents=True, exist_ok=True)
+    dest = target / name
     with _fetch_lock:
+        for old in cache.iterdir():
+            if old.is_dir() and old != target:
+                shutil.rmtree(old, ignore_errors=True)
         if dest.is_file() and dest.stat().st_size:
             return dest
         part = dest.with_name(dest.name + ".part")
@@ -316,6 +325,9 @@ def fetch_release_asset(name: str, folder: Path) -> Path:
             log.info("fetched %s from %s", name, url)
             return dest
     raise OSError("; ".join(errors) or f"{name} is not published")
+
+
+fetch_release_asset = _fetch_release_asset  # tests replace this (no network)
 
 
 def available_downloads(request: Request) -> list[dict[str, Any]]:

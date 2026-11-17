@@ -362,8 +362,9 @@ def make_agent(conf: dict[str, Any], server: str = "", token: str = "", insecure
 class CollectorTray:
     """The collector running in the tray: status icon and a short menu."""
 
-    def __init__(self, agent: Any):
+    def __init__(self, agent: Any, conf: dict[str, Any] | None = None):
         self.agent = agent
+        self.conf = conf or {}
         self.icon: Any = None
         self.loop: asyncio.AbstractEventLoop | None = None
         self.task: Any = None
@@ -377,7 +378,8 @@ class CollectorTray:
     def _run_agent(self) -> None:
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
-        self.task = self.loop.create_task(self.agent.run())
+        # Updated to the server's version: the new copy is running, so this one quits.
+        self.task = self.loop.create_task(run_with_updates(self.agent, self.conf, on_restart=self.quit))
         try:
             self.loop.run_until_complete(self.task)
         except BaseException:  # cancelled on quit
@@ -496,6 +498,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def run_console(args: argparse.Namespace) -> int:
     _logging(to_file=False)
+    if is_frozen():
+        from .selfupdate import cleanup_old
+
+        cleanup_old(Path(sys.executable).resolve())  # left by an update
     try:
         conf = load_config(args.config)
         agent = make_agent(conf, args.server or "", args.token or "", args.insecure, args.ca_file or "",
@@ -504,10 +510,18 @@ def run_console(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     try:
-        asyncio.run(agent.run())
+        asyncio.run(run_with_updates(agent, conf))
     except KeyboardInterrupt:
         pass
     return 0
+
+
+async def run_with_updates(agent: Any, conf: dict[str, Any], on_restart: Callable[[], None] | None = None) -> None:
+    """The agent plus automatic updates to the server's version (see collector_update)."""
+    from .collector_update import auto_update_loop
+
+    kwargs = {"on_restart": on_restart} if on_restart else {}
+    await asyncio.gather(agent.run(), auto_update_loop(agent, conf, **kwargs))
 
 
 def run_gui(force_setup: bool = False) -> int:
@@ -536,9 +550,9 @@ def run_gui(force_setup: bool = False) -> int:
         force_setup = False
         agent = make_agent(conf)
         if not tray.available():
-            asyncio.run(agent.run())
+            asyncio.run(run_with_updates(agent, conf))
             return 0
-        if not CollectorTray(agent).run():
+        if not CollectorTray(agent, conf).run():
             return 0
         force_setup = True  # Change setup…
 

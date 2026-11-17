@@ -5,7 +5,7 @@
 <p class="muted small" style="margin-top:0">These settings manage the computer SNMPathy runs on, <strong>{{ hostname }}</strong>, not the one your browser is on. They are also in the SNMPathy tray icon on the server, under <em>Server admin</em>.</p>
 <div class="grid grid-2">
   <div class="card" id="web-access" style="grid-column: 1 / -1">
-    <div class="card-head"><h2>Web access</h2><span class="small muted">{% if access.how == 'local' %}you are on the server{% elif access.how == 'passcode' %}unlocked with the passcode until {{ access.expires|ts|safe }}{% else %}API token{% endif %}</span></div>
+    <div class="card-head"><h2>Web access</h2><span class="small muted">{% if access.how == 'local' %}you are on the server{% elif access.how == 'passcode' %}unlocked: locks after {{ timeout|duration_minutes }} without use{% else %}API token{% endif %}</span></div>
     <div class="card-body stack">
       {% if local %}
       <p style="margin:0">{% if passcode_set %}{{ status('ok', 'A passcode is set') }} <span class="small muted">Browsers on other computers can open Server admin with it.</span>{% else %}{{ status('unknown', 'No passcode') }} <span class="small muted">Server admin is only available here, on the server. Set a passcode to manage it from other computers.</span>{% endif %}</p>
@@ -16,8 +16,15 @@
         {% if passcode_set %}<button class="btn danger" type="button" id="passcode-clear">Remove passcode</button>{% endif %}
       </form>
       <p class="small muted" style="margin:0">The passcode can only be set here, on the server. Changing or removing it signs out every browser that unlocked Server admin with it.</p>
+      <div class="row" id="admin-timeout">
+        <label class="field" style="margin:0">Lock Server admin in other browsers after
+          <select id="admin-timeout-select">
+            {% for m in timeout_choices %}<option value="{{ m }}" {{ 'selected' if m == timeout }}>{{ m|duration_minutes }} without use</option>{% endfor %}
+          </select></label>
+        <span class="small muted">Every Server admin page or action starts the time again. This server itself never locks.</span>
+      </div>
       {% else %}
-      <div class="row"><span>This browser can use Server admin {% if access.how == 'passcode' %}until {{ access.expires|ts|safe }}{% endif %}.</span>
+      <div class="row"><span>This browser can use Server admin.{% if access.how == 'passcode' %} It locks again after <strong>{{ timeout|duration_minutes }}</strong> without Server admin being used (<span id="admin-remaining" data-seconds="{{ remaining }}"></span>).{% endif %}</span>
         {% if access.how == 'passcode' %}<form method="post" action="/admin/lock" style="margin:0"><button class="btn" type="submit" id="admin-lock">Lock now</button></form>{% endif %}</div>
       <p class="small muted" style="margin:0">The passcode is set or changed on the server itself (tray: <em>Server admin &rsaquo; Server admin config</em>).</p>
       {% endif %}
@@ -170,6 +177,25 @@ document.addEventListener("DOMContentLoaded", () => {
 </script>
 <script>
 document.addEventListener("DOMContentLoaded", () => {
+  const timeoutSel = SP.$("#admin-timeout-select");
+  if (timeoutSel) timeoutSel.addEventListener("change", async () => {
+    try {
+      await SP.api("PUT", "/api/system/admin-timeout", { minutes: Number(timeoutSel.value) });
+      SP.toast("Saved: other browsers unlock again with the new time");
+    } catch (e) { SP.toast(e.message, "error"); }
+  });
+  // Unlocked with the passcode: show the page locked as soon as the time is up.
+  const left = SP.$("#admin-remaining");
+  if (left) {
+    const until = Date.now() + Number(left.dataset.seconds) * 1000;
+    const tick = () => {
+      const s = Math.max(0, Math.round((until - Date.now()) / 1000));
+      left.textContent = s > 0 ? `locks in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}` : "locked";
+      if (s <= 0) location.reload();
+      else setTimeout(tick, 1000);
+    };
+    tick();
+  }
   const editForm = SP.$("#edit-passcode-form");
   if (editForm) editForm.addEventListener("submit", async (ev) => {
     ev.preventDefault();

@@ -59,6 +59,7 @@ class CollectorAgent:
         self._clients: dict[int, tuple[str, PySnmpClient]] = {}
         self._tasks: set[asyncio.Task] = set()
         self.connected = False
+        self.server_version = ""  # from each poll answer (collector_update compares it with ours)
         self.stats = {"polls": 0, "checks": 0, "jobs": 0, "uploaded": 0, "errors": 0}
         self._client = None
         self._load_spool()
@@ -96,6 +97,8 @@ class CollectorAgent:
             log.warning("could not read %s: %s", self.spool, exc)
 
     def _save_spool(self) -> None:
+        if getattr(self, "_handed_over", False):
+            return
         try:
             if not self.outbox:
                 if self.spool.exists():
@@ -122,6 +125,12 @@ class CollectorAgent:
             if self._client is not None:
                 await self._client.aclose()
 
+    def hand_over(self) -> None:
+        """Before an updated copy takes over: write the unsent results to the buffer file it reads."""
+        self._save_spool()
+        self.outbox.clear()
+        self._handed_over = True  # this copy is stopping: never touch the buffer file again
+
     def _spawn(self, coro) -> None:
         task = asyncio.create_task(coro)
         self._tasks.add(task)
@@ -138,6 +147,7 @@ class CollectorAgent:
                     continue
                 r.raise_for_status()
                 body = r.json()
+                self.server_version = str(body.get("server_version") or "")
                 if not self.connected:
                     log.info("connected to %s", self.server)
                 self.connected, backoff = True, 2.0

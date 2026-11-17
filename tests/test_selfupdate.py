@@ -188,3 +188,79 @@ def test_release_notes():
     text = notes.notes("0123456789abcdef")
     assert "build 0123456789abcdef" in text and notes.changelog_section(__version__) in text
     assert Release.from_api({**api_release(commit="main"), "body": text}).commit == "0123456789abcdef"
+
+
+@pytest.mark.skipif(not POSIX, reason="uses a shell script as the downloaded executable")
+def test_nothing_is_imported_after_the_swap(monkeypatch, tmp_path):
+    """The updater runs from the executable it replaces: a one-file build cannot import code after the swap.
+
+    0.7.11 imported snmpathy.autostart while restarting, which failed in the executable with
+    "Error -3 while decompressing data: incorrect header check".
+    """
+    import importlib.abc
+    import subprocess
+
+    exe = tmp_path / "SNMPathy.exe"
+    exe.write_text("#!/bin/sh\necho 'snmpathy 0.7.0'\n")
+    exe.chmod(0o755)
+    rel = Release("0.9.0", "v0.9.0", "abcdef1234", "https://github.com/x", 0)
+    monkeypatch.setattr(selfupdate, "latest_release", lambda: rel)
+
+    def fake_download(release, dest, progress=None):
+        dest.write_text("#!/bin/sh\necho 'snmpathy 0.9.0'\n")
+        dest.chmod(0o755)
+        return dest
+
+    class SwappedArchive(importlib.abc.MetaPathFinder):
+        def find_spec(self, name, path=None, target=None):
+            if name.startswith("snmpathy"):
+                raise ImportError(f"Error -3 while decompressing data: incorrect header check ({name})")
+            return None
+
+    real_install = selfupdate.install
+
+    def install_then_break_imports(new, target):
+        real_install(new, target)
+        sys.meta_path.insert(0, blocker)
+
+    blocker = SwappedArchive()
+    # As in the updater process: the tray's modules were never loaded there.
+    import snmpathy
+
+    for name in ("autostart", "procutil"):
+        monkeypatch.delitem(sys.modules, f"snmpathy.{name}", raising=False)
+        monkeypatch.delattr(snmpathy, name, raising=False)  # both come back after the test
+    started = []
+    monkeypatch.setattr(selfupdate, "download", fake_download)
+    monkeypatch.setattr(selfupdate, "reported_version", lambda e: "snmpathy 0.9.0")
+    monkeypatch.setattr(selfupdate, "stop", lambda e: True)
+    monkeypatch.setattr(selfupdate, "install", install_then_break_imports)
+    monkeypatch.setattr(selfupdate, "IS_WINDOWS", True)
+    monkeypatch.setattr(subprocess, "Popen", lambda argv, **kw: started.append(argv))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    said = []
+    try:
+        assert selfupdate.run_update(exe, lambda pct, msg: said.append(msg)) == "ok"
+    finally:
+        if blocker in sys.meta_path:
+            sys.meta_path.remove(blocker)
+    assert started == [[str(exe), "tray"]], said[-2:]
+    assert said[-1] == "Updated to SNMPathy 0.9.0."
+
+
+def test_a_failed_restart_still_reports_the_update(monkeypatch, tmp_path):
+    exe = tmp_path / "SNMPathy"
+    exe.write_text("old")
+    rel = Release("0.9.0", "v0.9.0", "abcdef1234", "https://github.com/x", 0)
+    monkeypatch.setattr(selfupdate, "latest_release", lambda: rel)
+    monkeypatch.setattr(selfupdate, "download", lambda r, dest, progress=None: dest.write_text("new") or dest)
+    monkeypatch.setattr(selfupdate, "reported_version", lambda e: "snmpathy 0.9.0")
+    monkeypatch.setattr(selfupdate, "stop", lambda e: True)
+
+    def broken_start(e):
+        raise OSError("wscript.exe not found")
+
+    monkeypatch.setattr(selfupdate, "start", broken_start)
+    said = []
+    assert selfupdate.run_update(exe, lambda pct, msg: said.append(msg)) == "ok"
+    assert exe.read_text() == "new" and "could not be started again" in said[-1] and str(exe) in said[-1]

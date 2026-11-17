@@ -525,7 +525,9 @@ def cmd_collector(args: argparse.Namespace) -> int:
     agent = CollectorAgent(server, token, verify=verify, state_dir=state_dir,
                            concurrency=int(args.concurrency or conf.get("concurrency") or 32),
                            name=conf.get("name") or "")
-    _run(agent.run())
+    from .collector_app import run_with_updates
+
+    _run(run_with_updates(agent, conf))  # updates itself to the server's version (executables)
     return 0
 
 

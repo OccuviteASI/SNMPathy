@@ -316,6 +316,13 @@ code. The setup asks what this computer should be:
 Your server fetches the SNMPathy Collector files from the GitHub release the first time
 someone downloads them and keeps them in its `downloads` folder.
 
+**Updates:** collectors update themselves to the server's version. After you update the server,
+each collector downloads the matching build from it within a few minutes and restarts (unsent
+results are kept). The Collectors page marks any collector that is still older than the server.
+To turn it off, put `auto_update: false` in the collector's `collector.yaml`. Collectors older
+than 0.7.13 need one manual update (tray: *Update SNMPathy Collector*, or run the install command
+again).
+
 **Or install it as a service with one command** (no setup window): the same dialog shows the
 collector's token and copy-paste commands. Each downloads the collector **from your SNMPathy
 server** and sets it up as a service:
@@ -676,7 +683,9 @@ Browsers on other computers need a **passcode** for Server admin, set on the ser
 the tray choose **Server admin → Server admin config** (it opens the page in the server's
 browser, already unlocked) and use **Web access → Set passcode**, or run
 `snmpathy admin-passcode set` there. Until a passcode is set, Server admin only works on the
-server. A browser stays unlocked for 12 hours (**Lock now** ends it), five wrong passcodes lock
+server. An unlocked browser locks again after 15 minutes without Server admin being used (each
+Server admin page or action starts the time again; choose 5 minutes to 12 hours under **Web
+access** on the server; the page shows the time left; **Lock now** ends it), five wrong passcodes lock
 that address out for 10 minutes, and changing or removing the passcode signs every browser out.
 Scripts can use the API token in an `Authorization: Bearer` or `X-API-Key` header instead.
 Requests that arrive through a reverse proxy are never treated as coming from the server.

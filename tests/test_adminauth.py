@@ -148,3 +148,51 @@ def test_server_admin_is_hidden_from_browsers_that_cannot_use_it(app):
         assert 'id="nav-admin"' not in remote.get("/devices").text
         remote.post("/admin/unlock", data={"passcode": "s3cret-code"}, follow_redirects=False)
         assert 'id="nav-admin"' in remote.get("/devices").text
+
+
+def test_server_admin_locks_again_after_the_timeout(app):
+    import time
+
+    app, db = app
+    adminauth.set_passcode(db, "s3cret-code")
+    assert adminauth.timeout_minutes(db) == 15
+    local, remote = TestClient(app), TestClient(app, client=REMOTE)
+    with local, remote:
+        r = remote.post("/admin/unlock", data={"passcode": "s3cret-code"}, follow_redirects=False)
+        cookie = r.cookies[adminauth.SESSION_COOKIE]
+        expires = adminauth.session_expires(db, cookie)
+        assert 14 * 60 < expires - time.time() <= 15 * 60
+        page = remote.get("/admin").text
+        assert "15 minutes" in page and 'id="admin-remaining"' in page
+
+        # Unused for longer than the timeout: locked again.
+        _use_cookie(remote, adminauth.make_session(db, now=time.time() - 16 * 60))
+        assert "Server admin is locked" in remote.get("/admin").text
+        assert remote.get("/api/system/firewall").status_code == 403
+
+        # Used just before the time is up: it starts again.
+        _use_cookie(remote, adminauth.make_session(db, now=time.time() - 14 * 60))
+        r = remote.get("/api/system/autostart")
+        assert r.status_code == 200
+        renewed = adminauth.session_expires(db, r.cookies[adminauth.SESSION_COOKIE])
+        assert renewed - time.time() > 14 * 60
+        # Other pages do not keep Server admin unlocked.
+        assert adminauth.SESSION_COOKIE not in remote.get("/devices").cookies
+        # Locking clears it (and is not renewed on the way out).
+        r = remote.post("/admin/lock", follow_redirects=False)
+        assert r.cookies.get(adminauth.SESSION_COOKIE) in (None, "")
+
+        # Only the server sets the time; changing it signs other browsers out.
+        _use_cookie(remote, adminauth.make_session(db))
+        assert remote.put("/api/system/admin-timeout", json={"minutes": 720}).status_code == 403
+        assert local.put("/api/system/admin-timeout", json={"minutes": 7}).status_code == 422
+        assert local.put("/api/system/admin-timeout", json={"minutes": 5}).json() == {"minutes": 5}
+        assert "Server admin is locked" in remote.get("/admin").text
+        assert "5 minutes" in remote.get("/admin").text
+        assert 'value="5" selected' in local.get("/admin").text
+
+
+def _use_cookie(client, value):
+    """Replace the Server admin cookie (some httpx versions keep the old one next to a set() one)."""
+    client.cookies.clear()
+    client.cookies.set(adminauth.SESSION_COOKIE, value)

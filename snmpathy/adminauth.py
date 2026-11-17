@@ -8,7 +8,8 @@ A request may use Server admin when it is
 
 * **from the server itself**: a loopback address with no reverse-proxy headers, or a browser
   the tray opened with a one-time ticket (``/admin/open?ticket=...``),
-* **unlocked with the passcode**: a signed cookie, valid for ``SESSION_HOURS``,
+* **unlocked with the passcode**: a signed cookie that runs out after ``admin_timeout`` minutes
+  without Server admin being used (each Server admin page or action renews it),
 * **an API client with the API token** in a header (``Authorization: Bearer`` / ``X-API-Key``;
   the token cookie of a logged-in browser does not count).
 
@@ -36,7 +37,13 @@ from .db import Database
 
 SESSION_COOKIE = "snmpathy_admin"
 EDIT_COOKIE = "snmpathy_edit"
-SESSION_HOURS = 12
+SESSION_HOURS = 12  # the edit passcode
+TIMEOUT_CHOICES = (5, 10, 15, 30, 60, 240, 720)  # minutes without use before Server admin locks again
+DEFAULT_TIMEOUT = 15
+META_TIMEOUT = "admin_timeout_minutes"
+# Using any of these renews an unlocked Server admin (unlocking and locking set the cookie themselves).
+RENEW_PATHS = ("/admin", "/api/system/", "/api/export", "/api/import")
+NO_RENEW = ("/admin/lock", "/admin/unlock", "/admin/open")
 TICKET_SECONDS = 120
 MIN_LENGTH = 4
 PBKDF2_ROUNDS = 200_000
@@ -99,8 +106,28 @@ def _secret(db: Database, kind: str = "admin") -> bytes:
     return bytes.fromhex(secret)
 
 
+def timeout_minutes(db: Database) -> int:
+    """How long Server admin stays unlocked in a browser without being used."""
+    try:
+        minutes = int(db.get_meta(META_TIMEOUT, "") or DEFAULT_TIMEOUT)
+    except ValueError:
+        return DEFAULT_TIMEOUT
+    return minutes if minutes in TIMEOUT_CHOICES else DEFAULT_TIMEOUT
+
+
+def set_timeout(db: Database, minutes: int) -> None:
+    if int(minutes) not in TIMEOUT_CHOICES:
+        raise ValueError(f"choose one of {', '.join(map(str, TIMEOUT_CHOICES))} minutes")
+    db.set_meta(META_TIMEOUT, str(int(minutes)))
+    db.set_meta(META_SECRET, secrets.token_hex(32))  # unlocked browsers unlock again with the new timeout
+
+
+def session_seconds(db: Database, kind: str = "admin") -> int:
+    return timeout_minutes(db) * 60 if kind == "admin" else SESSION_HOURS * 3600
+
+
 def make_session(db: Database, now: float | None = None, kind: str = "admin") -> str:
-    expires = int((now or time.time()) + SESSION_HOURS * 3600)
+    expires = int((now or time.time()) + session_seconds(db, kind))
     sig = hmac.new(_secret(db, kind), str(expires).encode(), hashlib.sha256).hexdigest()
     return f"{expires}.{sig}"
 
@@ -252,3 +279,23 @@ def edit_denied(request: Any) -> bool:
     if not path.startswith("/api/") or is_view_post(path):
         return False
     return not edit_access(request)["allowed"]
+
+
+# ------------------------------------------------------------------ cookies
+def set_cookie(response: Any, request: Any, name: str, value: str, max_age: int) -> None:
+    response.set_cookie(name, value, max_age=max_age, httponly=True, samesite="strict",
+                        secure=request.url.scheme == "https", path="/")
+
+
+def renew_admin(request: Any, response: Any) -> None:
+    """Server admin was just used with the passcode: it stays unlocked for another timeout."""
+    path = request.url.path
+    if not (path == "/admin" or path.startswith(RENEW_PATHS)) or path.startswith(NO_RENEW):
+        return
+    if response.status_code >= 400 or not request.cookies.get(SESSION_COOKIE):
+        return
+    if any(k == b"set-cookie" and v.startswith(SESSION_COOKIE.encode() + b"=") for k, v in response.raw_headers):
+        return
+    db = request.app.state.db
+    if session_expires(db, request.cookies[SESSION_COOKIE]):
+        set_cookie(response, request, SESSION_COOKIE, make_session(db), session_seconds(db))

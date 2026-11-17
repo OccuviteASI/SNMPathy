@@ -1277,7 +1277,8 @@ def get_admin_passcode(request: Request, db: Database = Depends(get_db)):
     """Whether a Server admin passcode is set, and how this request may use Server admin."""
     from . import adminauth
 
-    return {"set": adminauth.passcode_set(db), **adminauth.access(request), "local": adminauth.is_local(request)}
+    return {"set": adminauth.passcode_set(db), **adminauth.access(request), "local": adminauth.is_local(request),
+            "timeout_minutes": adminauth.timeout_minutes(db)}
 
 
 @router.put("/system/admin-passcode", dependencies=[Depends(require_local)], tags=["system"])
@@ -1301,6 +1302,23 @@ def delete_admin_passcode(db: Database = Depends(get_db)):
     adminauth.clear_passcode(db)
     db.log_event("admin.passcode", "Server admin passcode removed", "info")
     return {"set": False}
+
+
+class TimeoutIn(BaseModel):
+    minutes: int
+
+
+@router.put("/system/admin-timeout", dependencies=[Depends(require_local)], tags=["system"])
+def put_admin_timeout(body: TimeoutIn, db: Database = Depends(get_db)):
+    """Minutes without use before Server admin locks again in other browsers (only on the server itself)."""
+    from . import adminauth
+
+    try:
+        adminauth.set_timeout(db, body.minutes)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    db.log_event("admin.passcode", f"Server admin now locks after {body.minutes} minutes without use", "info")
+    return {"minutes": body.minutes}
 
 
 @router.get("/system/edit-passcode", tags=["system"])
