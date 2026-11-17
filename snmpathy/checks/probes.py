@@ -6,7 +6,8 @@ system ``ping`` binary otherwise, so it works unprivileged on:
 * Linux   - raw socket as root / CAP_NET_RAW, unprivileged ICMP datagram
             socket when ``net.ipv4.ping_group_range`` allows, else ``ping``
 * macOS   - unprivileged ICMP datagram socket (always allowed)
-* Windows - raw socket as Administrator, else ``ping.exe``
+* Windows - the Windows ICMP API (``IcmpSendEcho``, no Administrator rights and no
+            ``ping.exe`` process per ping), else ``ping.exe``
 * Docker  - raw socket (containers get CAP_NET_RAW by default)
 """
 
@@ -77,7 +78,9 @@ def _checksum(data: bytes) -> int:
 
 
 # ------------------------------------------------------------------- ICMP
-_ICMP_MODE: str | None = None  # "raw" | "dgram" | "exec" | "tcp"
+_ICMP_MODE: str | None = None  # "raw" | "dgram" | "icmpapi" | "exec" | "tcp"
+ICMP_API_WORKERS = 16  # threads waiting on IcmpSendEcho at once
+PING_EXEC_LIMIT = 16  # ping.exe / ping processes running at once (network scans start many)
 
 
 def detect_icmp_mode() -> str:
@@ -86,13 +89,13 @@ def detect_icmp_mode() -> str:
     if _ICMP_MODE is not None:
         return _ICMP_MODE
     forced = os.environ.get("SNMPATHY_ICMP_MODE", "").strip().lower()
-    if forced in {"raw", "dgram", "exec", "tcp"}:
+    if forced in {"raw", "dgram", "icmpapi", "exec", "tcp"}:
         _ICMP_MODE = forced
         return forced
     if IS_WINDOWS:
-        # ping.exe needs no elevation and is always present; raw sockets need Administrator
-        # and behave inconsistently under the Proactor event loop.
-        _ICMP_MODE = "exec" if shutil.which("ping") else "tcp"
+        # The ICMP API needs no elevation and starts no process; raw sockets need Administrator
+        # and behave inconsistently under the Proactor event loop. ping.exe is the fallback.
+        _ICMP_MODE = "icmpapi" if _icmp_api_available() else ("exec" if shutil.which("ping") else "tcp")
         return _ICMP_MODE
     for mode, sock_type in (("raw", socket.SOCK_RAW), ("dgram", socket.SOCK_DGRAM)):
         try:
@@ -125,7 +128,7 @@ async def ping(host: str, timeout: float = 2.0, count: int = 1) -> ProbeResult:
     except OSError as exc:
         return ProbeResult(False, None, f"DNS lookup failed: {exc}")
     mode = detect_icmp_mode()
-    if family == socket.AF_INET6 and mode in {"raw", "dgram"}:
+    if family == socket.AF_INET6 and mode in {"raw", "dgram", "icmpapi"}:
         mode = "exec" if shutil.which("ping") else "tcp"
     last = ProbeResult(False, None, "no reply")
     for _ in range(max(1, count)):
@@ -141,6 +144,14 @@ async def ping(host: str, timeout: float = 2.0, count: int = 1) -> ProbeResult:
                     _set_icmp_mode("exec" if shutil.which("ping") else "tcp")
                     mode = _ICMP_MODE or "tcp"
                     last = await (_ping_exec(address, timeout, family) if mode == "exec" else _tcp_ping(address, timeout))
+        elif mode == "icmpapi":
+            try:
+                last = await _ping_icmp_api(address, timeout)
+            except (OSError, AttributeError, ValueError) as exc:  # the API is unusable after all
+                _set_icmp_mode("exec" if shutil.which("ping") else "tcp")
+                mode = _ICMP_MODE or "tcp"
+                last = await (_ping_exec(address, timeout, family) if mode == "exec" else _tcp_ping(address, timeout))
+                last.message = last.message or str(exc)
         elif mode == "exec":
             last = await _ping_exec(address, timeout, family)
         else:
@@ -148,6 +159,99 @@ async def ping(host: str, timeout: float = 2.0, count: int = 1) -> ProbeResult:
         if last.ok:
             return last
     return last
+
+
+# ----------------------------------------------------------- Windows ICMP API
+_icmp_pool: Any = None
+_icmp_lib: Any = None
+_IP_SUCCESS = 0
+_IP_STATUS = {11002: "destination net unreachable", 11003: "destination host unreachable",
+              11004: "destination protocol unreachable", 11005: "destination port unreachable",
+              11010: "request timed out", 11013: "TTL expired in transit"}
+
+
+def _icmp_api_available() -> bool:
+    global _icmp_lib
+    if not IS_WINDOWS:
+        return False
+    if _icmp_lib is None:
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            lib = ctypes.WinDLL("iphlpapi.dll", use_last_error=True)
+            lib.IcmpCreateFile.restype = wintypes.HANDLE
+            lib.IcmpCreateFile.argtypes = []
+            lib.IcmpCloseHandle.restype = wintypes.BOOL
+            lib.IcmpCloseHandle.argtypes = [wintypes.HANDLE]
+            lib.IcmpSendEcho.restype = wintypes.DWORD
+            lib.IcmpSendEcho.argtypes = [wintypes.HANDLE, wintypes.ULONG, ctypes.c_void_p, wintypes.WORD,
+                                         ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD]
+            _icmp_lib = lib
+        except (OSError, AttributeError):
+            _icmp_lib = False
+    return bool(_icmp_lib)
+
+
+def _icmp_echo(address: str, timeout: float) -> ProbeResult:
+    """One echo request through IcmpSendEcho (blocking: runs on the ICMP thread pool)."""
+    import ctypes
+
+    class IpOptionInformation(ctypes.Structure):
+        _fields_ = [("Ttl", ctypes.c_ubyte), ("Tos", ctypes.c_ubyte), ("Flags", ctypes.c_ubyte),
+                    ("OptionsSize", ctypes.c_ubyte), ("OptionsData", ctypes.c_void_p)]
+
+    class IcmpEchoReply(ctypes.Structure):
+        _fields_ = [("Address", ctypes.c_ulong), ("Status", ctypes.c_ulong), ("RoundTripTime", ctypes.c_ulong),
+                    ("DataSize", ctypes.c_ushort), ("Reserved", ctypes.c_ushort), ("Data", ctypes.c_void_p),
+                    ("Options", IpOptionInformation)]
+
+    lib = _icmp_lib
+    handle = lib.IcmpCreateFile()
+    if not handle or handle == ctypes.c_void_p(-1).value:
+        raise OSError(ctypes.get_last_error(), "IcmpCreateFile failed")
+    try:
+        payload = b"SNMPathy-ping-32-bytes-of-data!!"
+        size = ctypes.sizeof(IcmpEchoReply) + len(payload) + 8 + 64
+        reply = ctypes.create_string_buffer(size)
+        data = ctypes.create_string_buffer(payload, len(payload))
+        dest = struct.unpack("<L", socket.inet_aton(address))[0]
+        start = time.perf_counter()
+        count = lib.IcmpSendEcho(handle, dest, data, len(payload), None, reply, size, max(1, int(timeout * 1000)))
+        elapsed = (time.perf_counter() - start) * 1000
+        if count == 0:
+            err = ctypes.get_last_error()
+            return ProbeResult(False, None, _IP_STATUS.get(err, "request timed out" if err in (0, 11010) else
+                                                          f"no reply (error {err})"))
+        echo = IcmpEchoReply.from_buffer(reply)
+        if echo.Status != _IP_SUCCESS:
+            return ProbeResult(False, None, _IP_STATUS.get(echo.Status, f"ICMP status {echo.Status}"))
+        rtt = float(echo.RoundTripTime) if echo.RoundTripTime else round(min(elapsed, 1.0), 3)
+        return ProbeResult(True, rtt, "echo reply")
+    finally:
+        lib.IcmpCloseHandle(handle)
+
+
+async def _ping_icmp_api(address: str, timeout: float) -> ProbeResult:
+    global _icmp_pool
+    if _icmp_pool is None:
+        from concurrent.futures import ThreadPoolExecutor
+
+        _icmp_pool = ThreadPoolExecutor(max_workers=ICMP_API_WORKERS, thread_name_prefix="icmp")
+    return await asyncio.get_running_loop().run_in_executor(_icmp_pool, _icmp_echo, address, timeout)
+
+
+_exec_limits: dict[int, asyncio.Semaphore] = {}
+
+
+def _exec_limit() -> asyncio.Semaphore:
+    """At most PING_EXEC_LIMIT ping processes at once (per event loop)."""
+    loop = asyncio.get_running_loop()
+    sem = _exec_limits.get(id(loop))
+    if sem is None:
+        _exec_limits.clear()  # an old loop's semaphore is of no use
+        sem = _exec_limits[id(loop)] = asyncio.Semaphore(PING_EXEC_LIMIT)
+    return sem
 
 
 async def _ping_socket(address: str, timeout: float, raw: bool) -> ProbeResult:
@@ -240,6 +344,11 @@ def parse_ping_output(output: str, returncode: int) -> ProbeResult:
 
 
 async def _ping_exec(address: str, timeout: float, family: int) -> ProbeResult:
+    async with _exec_limit():
+        return await _ping_exec_now(address, timeout, family)
+
+
+async def _ping_exec_now(address: str, timeout: float, family: int) -> ProbeResult:
     cmd = ping_command(address, timeout, family)
     kwargs: dict[str, Any] = {}
     if IS_WINDOWS:

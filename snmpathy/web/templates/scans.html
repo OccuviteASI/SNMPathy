@@ -17,7 +17,7 @@
           <td>{{ s.collector_name or 'This server' }}</td>
           <td>{{ status({'done': 'up', 'running': 'pending', 'queued': 'pending', 'failed': 'down', 'interrupted': 'warning', 'cancelled': 'unknown'}.get(s.state, 'unknown'), s.state) }}{% if s.state == 'running' %} <span class="small muted">{{ s.scanned }}/{{ s.total }}</span>{% endif %}</td>
           <td class="num">{{ s.found }}</td>
-          <td class="num">{{ s.added }}</td>
+          <td class="num" title="{{ s.added_last }} from the latest run">{{ s.added }}</td>
           <td class="nowrap">{{ s.finished_at|ts('ago')|safe }}</td>
           <td>{{ (s.interval|duration) if s.interval else 'once' }}{% if s.interval and s.next_run %}<div class="small muted">next {{ s.next_run|ts('ago')|safe }}</div>{% endif %}</td>
           <td class="nowrap"><button class="btn sm" data-action="api" data-url="/api/scans/{{ s.id }}/run" data-success="Scan started">Run now</button> <a class="btn sm" href="/scans/{{ s.id }}?edit=1">Edit</a></td>

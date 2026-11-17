@@ -521,6 +521,9 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
     "alert_rules": [
         ("skip_online_devices", "INTEGER NOT NULL DEFAULT 1"),
     ],
+    "scans": [
+        ("added_last", "INTEGER NOT NULL DEFAULT 0"),  # devices added from the latest run (added = all runs)
+    ],
 }
 
 

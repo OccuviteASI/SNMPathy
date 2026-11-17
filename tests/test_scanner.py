@@ -176,3 +176,42 @@ def test_edit_scan(tmp_path, db):
             time.sleep(0.05)
         assert c.get(f"/api/scans/{scan['id']}").json()["found"] >= 1
         assert c.patch(f"/api/scans/{scan['id']}", json={"targets": "10.0.0.0/8"}).status_code == 422
+
+
+async def test_added_counts_every_run_and_the_latest(db):
+    from snmpathy.scanner import ADDED_TOTALS_META, backfill_added_totals
+
+    net = Net()
+    manager = ScanManager(db, local_probe=net.probe, local_clients=net.client)
+    scan = manager.create({"name": "lab", "targets": "10.0.0.1-3", "options": {
+        "communities": ["secret"], "resolve_dns": False, "auto_add": "snmp", "tags": []}})
+    first = await manager.run(scan["id"])
+    assert (first["added"], first["added_last"]) == (1, 1)  # 10.0.0.1 answers SNMP
+    net.snmp["10.0.0.2"] = "secret"
+    second = await manager.run(scan["id"])
+    assert (second["added"], second["added_last"]) == (2, 1)  # one more: the total keeps the first
+    manager.add(scan["id"], ips=["10.0.0.3"])  # picked by hand from the latest results
+    after = manager.get(scan["id"])
+    assert (after["added"], after["added_last"]) == (3, 2)
+    third = await manager.run(scan["id"])
+    assert (third["added"], third["added_last"]) == (3, 0)  # nothing new
+    # Upgrading: "added" held only the latest run; the devices the scan created give the total.
+    db.update("scans", scan["id"], {"added": 1, "added_last": 0})
+    db.set_meta(ADDED_TOTALS_META, "")
+    backfill_added_totals(db)
+    row = manager.get(scan["id"])
+    assert (row["added"], row["added_last"]) == (3, 1)
+    backfill_added_totals(db)  # only once
+    assert manager.get(scan["id"])["added"] == 3
+
+
+async def test_scans_share_one_snmp_engine():
+    from snmpathy.scanner import default_client_factory
+    from snmpathy.snmp.client import shared_engine
+
+    a = default_client_factory("192.0.2.1", {"snmp_version": "2c", "snmp_community": "x"}, 1.0)
+    b = default_client_factory("192.0.2.2", {"snmp_version": "2c", "snmp_community": "y"}, 1.0)
+    assert a.engine is b.engine is shared_engine()
+    a.close()  # closing one client leaves the shared engine for the others
+    assert shared_engine() is b.engine and not a._own_engine
+    b.close()

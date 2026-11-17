@@ -133,4 +133,4 @@ async def test_public_community_is_always_tried_and_added(db):
     db.execute("DELETE FROM devices")
     manager.update(scan["id"], {"options": {"add_public": False}})
     final = await manager.run(scan["id"])
-    assert final["added"] == 0 and db.scalar("SELECT COUNT(*) FROM devices") == 0
+    assert final["added_last"] == 0 and final["added"] == 1 and db.scalar("SELECT COUNT(*) FROM devices") == 0
