@@ -166,12 +166,12 @@ def test_server_admin_locks_again_after_the_timeout(app):
         assert "15 minutes" in page and 'id="admin-remaining"' in page
 
         # Unused for longer than the timeout: locked again.
-        remote.cookies.set(adminauth.SESSION_COOKIE, adminauth.make_session(db, now=time.time() - 16 * 60))
+        _use_cookie(remote, adminauth.make_session(db, now=time.time() - 16 * 60))
         assert "Server admin is locked" in remote.get("/admin").text
         assert remote.get("/api/system/firewall").status_code == 403
 
         # Used just before the time is up: it starts again.
-        remote.cookies.set(adminauth.SESSION_COOKIE, adminauth.make_session(db, now=time.time() - 14 * 60))
+        _use_cookie(remote, adminauth.make_session(db, now=time.time() - 14 * 60))
         r = remote.get("/api/system/autostart")
         assert r.status_code == 200
         renewed = adminauth.session_expires(db, r.cookies[adminauth.SESSION_COOKIE])
@@ -183,10 +183,16 @@ def test_server_admin_locks_again_after_the_timeout(app):
         assert r.cookies.get(adminauth.SESSION_COOKIE) in (None, "")
 
         # Only the server sets the time; changing it signs other browsers out.
-        remote.cookies.set(adminauth.SESSION_COOKIE, adminauth.make_session(db))
+        _use_cookie(remote, adminauth.make_session(db))
         assert remote.put("/api/system/admin-timeout", json={"minutes": 720}).status_code == 403
         assert local.put("/api/system/admin-timeout", json={"minutes": 7}).status_code == 422
         assert local.put("/api/system/admin-timeout", json={"minutes": 5}).json() == {"minutes": 5}
         assert "Server admin is locked" in remote.get("/admin").text
         assert "5 minutes" in remote.get("/admin").text
         assert 'value="5" selected' in local.get("/admin").text
+
+
+def _use_cookie(client, value):
+    """Replace the Server admin cookie (some httpx versions keep the old one next to a set() one)."""
+    client.cookies.clear()
+    client.cookies.set(adminauth.SESSION_COOKIE, value)
