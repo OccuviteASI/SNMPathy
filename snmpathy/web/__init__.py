@@ -59,6 +59,9 @@ def render(request: Request, name: str, **context: Any) -> HTMLResponse:
     from .. import adminauth
 
     context["edit"] = adminauth.edit_access(request)
+    # Server admin is left out of the menu for browsers that may not use it (the version link at
+    # the bottom of the sidebar still leads to its unlock page).
+    context["admin_allowed"] = adminauth.access(request)["allowed"]
     context.setdefault("collectors", db.query("SELECT id, name, site, status FROM collectors ORDER BY name COLLATE NOCASE"))
     from .. import version_string
 

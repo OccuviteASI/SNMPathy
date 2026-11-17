@@ -132,3 +132,19 @@ def test_sessions_expire():
     cookie = adminauth.make_session(db, now=time.time() - adminauth.SESSION_HOURS * 3600 - 5)
     assert adminauth.session_expires(db, cookie) is None
     assert adminauth.session_expires(db, adminauth.make_session(db)) and not adminauth.session_expires(db, "x.y")
+
+
+def test_server_admin_is_hidden_from_browsers_that_cannot_use_it(app):
+    app, db = app
+    local, remote = TestClient(app), TestClient(app, client=REMOTE)
+    with local, remote:
+        assert 'id="nav-admin"' in local.get("/devices").text
+        assert "Open Server admin" in local.get("/settings").text
+        for page in ("/devices", "/settings"):
+            text = remote.get(page).text
+            assert 'id="nav-admin"' not in text and "Open Server admin" not in text
+            assert 'href="/admin"' in text  # the version link still leads to the unlock page
+        adminauth.set_passcode(db, "s3cret-code")
+        assert 'id="nav-admin"' not in remote.get("/devices").text
+        remote.post("/admin/unlock", data={"passcode": "s3cret-code"}, follow_redirects=False)
+        assert 'id="nav-admin"' in remote.get("/devices").text

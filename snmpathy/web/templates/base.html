@@ -33,10 +33,10 @@
       <a href="/collectors" class="{{ 'active' if nav == 'collectors' }}">{{ icon('collector') }} Collectors{% if problems.collectors %}<span class="count">{{ problems.collectors }}</span>{% endif %}</a>
       <a href="/maintenance" class="{{ 'active' if nav == 'maintenance' }}">{{ icon('wrench') }} Maintenance</a>
       <a href="/settings" class="{{ 'active' if nav == 'settings' }}">{{ icon('settings') }} Settings</a>
-      <a href="/admin" class="{{ 'active' if nav == 'admin' }}">{{ icon('server') }} Server admin</a>
+      {% if admin_allowed %}<a href="/admin" class="{{ 'active' if nav == 'admin' }}" id="nav-admin">{{ icon('server') }} Server admin</a>{% endif %}
     </nav>
     <div class="sidebar-foot">
-      <a class="small muted" href="/admin" title="SNMPathy version (Server admin)" style="display:block;padding:0 4px 6px">v{{ version }}</a>
+      <a class="small muted" href="/admin" title="SNMPathy version{{ ' (Server admin)' if admin_allowed else ' (Server admin: passcode required)' }}" style="display:block;padding:0 4px 6px">v{{ version }}</a>
       <button class="btn ghost sm" data-action="theme" title="Switch light / dark / system theme">{{ icon('moon') }} Theme</button>
       {% if auth_enabled %}<a class="btn ghost sm" href="/logout">Log out</a>{% endif %}
     </div>

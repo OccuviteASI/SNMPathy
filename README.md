@@ -680,6 +680,8 @@ server. A browser stays unlocked for 12 hours (**Lock now** ends it), five wrong
 that address out for 10 minutes, and changing or removing the passcode signs every browser out.
 Scripts can use the API token in an `Authorization: Bearer` or `X-API-Key` header instead.
 Requests that arrive through a reverse proxy are never treated as coming from the server.
+Browsers that cannot use Server admin do not see it in the menu; to unlock it from another
+computer, click the version number at the bottom of the sidebar.
 
 **Edit passcode** (view-only users): a second, separate passcode, set in **Server admin → Edit
 passcode** (or `snmpathy edit-passcode set`). While it is set, browsers on other computers are
