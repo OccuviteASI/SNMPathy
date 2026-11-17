@@ -31,6 +31,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 import sys
 import threading
 import webbrowser
@@ -343,15 +344,20 @@ class TrayApp:
         self.state, self.status = "ok", "Starting…"
         self.error = ""
         self.available = ""  # a newer release, when the update check found one
+        self.notice = ""  # shown once the icon is up
         self._stop = threading.Event()
 
     # ------------------------------------------------------------ server
     def _run_server(self) -> None:
         from .cli import _serve
 
+        def on_app(app: Any) -> None:
+            self.app = app
+            app.state.restart = self.restart  # Server admin > Web port > Save and restart
+
         try:
             asyncio.run(_serve(self.settings, open_browser=self.open_browser,
-                               on_app=lambda app: setattr(self, "app", app),
+                               on_app=on_app,
                                on_server=lambda server: setattr(self, "server", server)))
         except BaseException as exc:  # e.g. port already in use
             self.error = str(exc) or type(exc).__name__
@@ -510,6 +516,25 @@ class TrayApp:
         except Exception:
             log.warning(message)
 
+    def restart(self) -> None:
+        """Start a fresh copy of SNMPathy (e.g. on a new web port), then quit this one."""
+        from .procutil import self_env
+
+        argv = [sys.executable, *sys.argv[1:]] if is_frozen() else [sys.executable, "-m", "snmpathy", "tray"]
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+
+        def later() -> None:
+            time.sleep(1.0)  # let the web request that asked for this get its answer
+            try:
+                subprocess.Popen(argv, env=self_env({DETACHED_ENV: "1"}), cwd=os.getcwd(), creationflags=flags,
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 start_new_session=not sys.platform.startswith("win"))
+            except OSError as exc:
+                show_message(f"Could not restart SNMPathy: {exc}", "SNMPathy")
+                return
+            self.quit()
+        threading.Thread(target=later, name="snmpathy-restart", daemon=True).start()
+
     def quit(self, *_: Any) -> None:
         self._stop.set()
         if self.server is not None:
@@ -570,6 +595,7 @@ class TrayApp:
         item = pystray.MenuItem
         return pystray.Menu(
             item("Server admin config…", self.open_admin),
+            item(lambda _i: f"Web port: {self.settings.http_port} (change in Server admin config)", self.open_admin),
             pystray.Menu.SEPARATOR,
             item("Start at login", self.toggle_autostart, checked=self.autostart_enabled),
             item("Firewall", self.firewall_menu()),
@@ -604,6 +630,8 @@ class TrayApp:
             cleanup_old(Path(sys.executable).resolve())  # the previous version, kept until now
             threading.Thread(target=self._update_check_loop, name="snmpathy-update-check", daemon=True).start()
         self.icon = pystray.Icon("SNMPathy", make_icon("ok"), "SNMPathy - starting", self.menu())
+        if self.notice:  # e.g. "port 8080 is in use, the web UI is on 8081"
+            threading.Timer(3.0, lambda: self.notify(self.notice)).start()
         self.icon.run()
         self._stop.set()
         if self.server is not None:
@@ -621,8 +649,15 @@ def run_tray(settings: Settings, open_browser: bool = True) -> int:
     hide_own_console()
     setup_file_logging(log_file(settings))
     log.info("SNMPathy starting in the system tray")
+    from .webport import ensure_free_port
+
+    notice = ensure_free_port(settings)  # 8080 taken by another program: use the next free port
+    if notice:
+        log.warning(notice)
     try:
-        TrayApp(settings, open_browser=open_browser).run()
+        app = TrayApp(settings, open_browser=open_browser)
+        app.notice = notice
+        app.run()
     except Exception as exc:  # e.g. no display / tray on this Linux desktop
         log.error("tray unavailable (%s); running without it", exc)
         return 2

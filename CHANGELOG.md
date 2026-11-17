@@ -20,6 +20,10 @@ commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
   Unlocking lasts 12 hours (*Lock now* ends it); 5 wrong passcodes lock that address out for
   10 minutes; API clients can use the API token in a header.
 - The left menu no longer shows counts next to **Devices** and **Uptime checks**.
+- **Web port.** If the web UI's port (8080) is taken by another program when SNMPathy starts
+  in the tray, it moves to the next free port, saves it in `snmpathy.yaml` and says so in a
+  notification. Change it by hand in **Server admin → Web port** (*Save and restart*); the tray's
+  Server admin menu shows the port in use.
 
 ## 0.7.10
 - CI no longer tests or builds for macOS (Windows, Linux and Docker only); releases carry the

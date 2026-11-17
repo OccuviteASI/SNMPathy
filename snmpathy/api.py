@@ -1303,6 +1303,36 @@ def delete_admin_passcode(db: Database = Depends(get_db)):
     return {"set": False}
 
 
+# =================================================================== web port
+class WebPortIn(BaseModel):
+    port: int = Field(..., ge=1, le=65535)
+
+
+@router.put("/system/web-port", dependencies=[Depends(require_admin)], tags=["system"])
+def put_web_port(body: WebPortIn, request: Request):
+    """Save the web UI's port in snmpathy.yaml; it takes effect when SNMPathy restarts."""
+    from . import webport
+
+    settings = request.app.state.settings
+    if body.port != settings.http_port and not webport.port_free(settings.http_host, body.port):
+        raise HTTPException(409, f"port {body.port} is already in use by another program")
+    path = webport.save_port(settings, body.port)
+    if path is None:
+        raise HTTPException(409, "no configuration file to save into: start SNMPathy with --config snmpathy.yaml")
+    restart = getattr(request.app.state, "restart", None)
+    return {"port": body.port, "saved_in": str(path), "can_restart": callable(restart)}
+
+
+@router.post("/system/restart", dependencies=[Depends(require_admin)], tags=["system"])
+def post_restart(request: Request):
+    """Restart SNMPathy (the tray app only)."""
+    restart = getattr(request.app.state, "restart", None)
+    if not callable(restart):
+        raise HTTPException(409, "only SNMPathy in the system tray can restart itself; restart the service instead")
+    restart()
+    return {"restarting": True}
+
+
 # =================================================================== updates
 @router.get("/system/update", tags=["system"])
 def get_update():

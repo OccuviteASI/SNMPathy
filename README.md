@@ -659,6 +659,11 @@ that address out for 10 minutes, and changing or removing the passcode signs eve
 Scripts can use the API token in an `Authorization: Bearer` or `X-API-Key` header instead.
 Requests that arrive through a reverse proxy are never treated as coming from the server.
 
+**Web port**: SNMPathy's web UI uses port 8080 (`http_port`). If another program already uses
+it when SNMPathy starts in the tray, SNMPathy takes the next free port (8081, 8082, …), saves it
+in `snmpathy.yaml` and shows a notification; the tray's **Server admin** menu shows the port in
+use. To choose one yourself: **Server admin → Web port → Save and restart**.
+
 ## Open the firewall for syslog
 
 **Server admin → Firewall** in the web UI (or the tray's **Server admin → Firewall**):

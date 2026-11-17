@@ -42,6 +42,17 @@
       </dl>
     </div>
   </div>
+  <div class="card" id="web-port">
+    <div class="card-head"><h2>Web port</h2></div>
+    <div class="card-body stack">
+      <p style="margin:0">The web UI listens on port <strong>{{ settings.http_port }}</strong>{% if settings.http_host not in ('0.0.0.0', '::', '') %} on {{ settings.http_host }}{% endif %}.</p>
+      <form class="row" id="port-form">
+        <input type="number" id="port-value" min="1" max="65535" value="{{ settings.http_port }}" style="max-width:130px" aria-label="Web port">
+        <button class="btn primary" type="submit">Save and restart</button>
+      </form>
+      <p class="small muted" style="margin:0">If the port is taken by another program when SNMPathy starts, it moves to the next free one by itself and shows a notification. Ports below 1024 need administrator / root rights. After a change, open the firewall for the new port (Firewall &rsaquo; Web UI and API) if other computers use the web UI.</p>
+    </div>
+  </div>
   <div class="card" id="updates">
     <div class="card-head"><h2>Updates</h2></div>
     <div class="card-body stack">
@@ -127,6 +138,23 @@
 </div>
 {% endblock %}
 {% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const form = SP.$("#port-form");
+  form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const port = parseInt(SP.$("#port-value").value, 10);
+    try {
+      const r = await SP.api("PUT", "/api/system/web-port", { port });
+      if (!r.can_restart) return SP.toast(`Port ${port} saved in ${r.saved_in}: restart SNMPathy to use it`);
+      await SP.api("POST", "/api/system/restart");
+      const next = `${location.protocol}//${location.hostname}:${port}/admin`;
+      SP.toast(`Restarting on port ${port}…`);
+      setTimeout(() => { location.href = next; }, 6000);
+    } catch (e) { SP.toast(e.message, "error"); }
+  });
+});
+</script>
 <script>
 document.addEventListener("DOMContentLoaded", () => {
   const form = SP.$("#passcode-form");
