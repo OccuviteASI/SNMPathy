@@ -467,7 +467,7 @@ def test_tray_server_admin_submenu(monkeypatch):
     assert "Server admin" in top and "Start at login" not in top and "View log" not in top
     admin = next(i for i in app.menu().items if str(i) == "Server admin").submenu
     names = [str(i) for i in admin.items]
-    for wanted in ("Start at login", "Firewall", "Server admin page", "Open data folder", "View log"):
+    for wanted in ("Server admin config…", "Start at login", "Firewall", "Open data folder", "View log"):
         assert wanted in names, wanted
     fw = [str(i) for i in next(i for i in admin.items if str(i) == "Firewall").submenu.items]
     assert "Open ports: Syslog (UDP and TCP)" in fw and "Open all SNMPathy ports" in fw

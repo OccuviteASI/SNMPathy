@@ -34,7 +34,8 @@ log = logging.getLogger(__name__)
 
 # Collector endpoints authenticate with the collector's own token; downloads and
 # install scripts must be reachable from a fresh site machine.
-PUBLIC_PATHS = ("/static/", "/status", "/api/status-page", "/login", "/healthz", "/api/collector/v1/", "/collector/")
+PUBLIC_PATHS = ("/static/", "/status", "/api/status-page", "/login", "/healthz", "/api/collector/v1/", "/collector/",
+                "/admin/open")
 COOKIE = "snmpathy_token"
 
 

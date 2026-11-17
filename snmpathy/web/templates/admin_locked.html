@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon %}
+{% block title %}Server admin{% endblock %}
+{% block content %}
+<div class="card" style="max-width:560px">
+  <div class="card-head"><h2>{{ icon('server') }} Server admin is locked</h2></div>
+  <div class="card-body stack">
+    <p style="margin:0">Server admin changes the computer SNMPathy runs on, <strong>{{ hostname }}</strong>: startup, firewall rules, updates and the configuration backup.</p>
+    {% if passcode_set %}
+    <form method="post" action="/admin/unlock" class="stack" id="unlock-form">
+      <label class="field">Server admin passcode<input type="password" name="passcode" autocomplete="current-password" required autofocus></label>
+      {% if error == 'wrong' %}<p class="small" style="margin:0;color:var(--critical)" id="unlock-error">That passcode is not right.</p>
+      {% elif error == 'locked' %}<p class="small" style="margin:0;color:var(--critical)" id="unlock-error">Too many wrong passcodes from this address: try again in {{ ((wait + 59) // 60) }} minute{{ '' if wait <= 60 else 's' }}.</p>{% endif %}
+      <div class="row"><button class="btn primary" type="submit">Unlock</button><span class="small muted">This browser stays unlocked for 12 hours.</span></div>
+    </form>
+    <p class="small muted" style="margin:0">The passcode is set on the server itself: in the SNMPathy tray icon choose <em>Server admin &rsaquo; Server admin config</em>.</p>
+    {% else %}
+    <p style="margin:0" id="no-passcode">No passcode has been set, so Server admin is only available on the server itself. To manage it from this browser, set a passcode on the server: in the SNMPathy tray icon choose <em>Server admin &rsaquo; Server admin config</em> (or run <code>snmpathy admin-passcode set</code> on the server).</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

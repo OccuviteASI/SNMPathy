@@ -12,6 +12,13 @@ commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 - The tray's menu has a **Server admin** item that expands: **Start at login**, **Firewall**
   (open SNMPathy's ports per group or all of them, or remove its rules), **Update SNMPathy**,
   the **Server admin page**, **Open data folder** and **View log**.
+- **Server admin passcode.** Browsers on other computers need a passcode for Server admin
+  (and its actions: startup, firewall, updates, configuration export / import). The passcode
+  can only be set on the server itself: the tray's new **Server admin config** item opens the
+  page there, unlocked, with a *Web access* card to set, change or remove it (or run
+  `snmpathy admin-passcode set`). Without a passcode, Server admin works only on the server.
+  Unlocking lasts 12 hours (*Lock now* ends it); 5 wrong passcodes lock that address out for
+  10 minutes; API clients can use the API token in a header.
 - The left menu no longer shows counts next to **Devices** and **Uptime checks**.
 
 ## 0.7.10

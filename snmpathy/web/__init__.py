@@ -402,9 +402,12 @@ def settings(request: Request):
 
 
 @router.get("/admin", response_class=HTMLResponse)
-def server_admin(request: Request):
-    """Managing the computer SNMPathy runs on: startup, firewall, updates, database, backup, config."""
-    from .. import storage, version_string
+def server_admin(request: Request, error: str = "", wait: int = 0):
+    """Managing the computer SNMPathy runs on: startup, firewall, updates, database, backup, config.
+
+    Browsers elsewhere need the passcode set on the server (snmpathy/adminauth.py).
+    """
+    from .. import adminauth, storage, version_string
     from ..checks.probes import detect_icmp_mode
     from ..config import is_frozen
     import platform
@@ -414,12 +417,79 @@ def server_admin(request: Request):
     db = db_of(request)
     s = request.app.state.settings
     monitor = request.app.state.monitor
+    access = adminauth.access(request)
+    if not access["allowed"]:
+        return render(request, "admin_locked.html", nav="admin", hostname=socket.gethostname(),
+                      passcode_set=adminauth.passcode_set(db), error=error, wait=wait)
     return render(
         request, "admin.html", nav="admin", settings=s, version=version_string(), stats=storage.database_stats(db),
         python=sys.version.split()[0], platform=platform.platform(), icmp_mode=detect_icmp_mode(),
         fts=db.has_fts, monitor=monitor.status() if monitor else None, hostname=socket.gethostname(),
         frozen=is_frozen(), autostart=_autostart_status(s), firewall=_firewall_status(s),
+        access=access, passcode_set=adminauth.passcode_set(db), local=adminauth.is_local(request),
     )
+
+
+def _admin_cookie(response: Any, request: Request, value: str, max_age: int) -> None:
+    response.set_cookie(adminauth_cookie(), value, max_age=max_age, httponly=True, samesite="strict",
+                        secure=request.url.scheme == "https", path="/")
+
+
+def adminauth_cookie() -> str:
+    from ..adminauth import SESSION_COOKIE
+
+    return SESSION_COOKIE
+
+
+@router.post("/admin/unlock")
+async def admin_unlock(request: Request):
+    """Unlock Server admin in this browser with the passcode set on the server."""
+    from fastapi.responses import RedirectResponse
+
+    from .. import adminauth
+
+    db = db_of(request)
+    address = adminauth.client_address(request)
+    wait = adminauth.locked_out(address)
+    if wait:
+        return RedirectResponse(f"/admin?error=locked&wait={int(wait)}", status_code=303)
+    form = await request.form()
+    if not adminauth.passcode_set(db) or not adminauth.check_passcode(db, str(form.get("passcode") or "")):
+        adminauth.record_failure(address)
+        db.log_event("admin.unlock", f"Wrong Server admin passcode from {address}", "warning")
+        return RedirectResponse("/admin?error=wrong", status_code=303)
+    adminauth.clear_failures(address)
+    db.log_event("admin.unlock", f"Server admin unlocked from {address}", "info")
+    response = RedirectResponse("/admin", status_code=303)
+    _admin_cookie(response, request, adminauth.make_session(db), adminauth.SESSION_HOURS * 3600)
+    return response
+
+
+@router.post("/admin/lock")
+def admin_lock(request: Request):
+    """Lock Server admin again in this browser."""
+    from fastapi.responses import RedirectResponse
+
+    response = RedirectResponse("/admin", status_code=303)
+    _admin_cookie(response, request, "", 0)
+    return response
+
+
+@router.get("/admin/open")
+def admin_open(request: Request, ticket: str = ""):
+    """The tray's one-time link: opens Server admin unlocked in the server's own browser."""
+    from fastapi.responses import RedirectResponse
+
+    from .. import adminauth
+
+    response = RedirectResponse("/admin", status_code=303)
+    if adminauth.use_ticket(ticket):
+        db = db_of(request)
+        _admin_cookie(response, request, adminauth.make_session(db), adminauth.SESSION_HOURS * 3600)
+        token = request.app.state.settings.api_token
+        if token:  # also signed in to the web UI: this is the server's own browser
+            response.set_cookie("snmpathy_token", token, httponly=True, samesite="lax", max_age=30 * 86400)
+    return response
 
 
 def _firewall_status(settings: Any) -> dict[str, Any]:

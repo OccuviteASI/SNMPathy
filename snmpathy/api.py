@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from . import dashboards, reporting, reports, scheduled, services, storage
 from .db import Database
+from .adminauth import require_admin, require_local
 from .services import ValidationError
 from .snmp.client import PySnmpClient, SnmpCredentials, SnmpError
 from .snmp.discovery import discover
@@ -734,12 +735,12 @@ def status_page(db: Database = Depends(get_db)):
     return {"generated_at": now, "checks": out}
 
 
-@router.get("/export", tags=["system"])
+@router.get("/export", dependencies=[Depends(require_admin)], tags=["system"])
 def export(db: Database = Depends(get_db)):
     return services.export_config(db)
 
 
-@router.post("/import", tags=["system"])
+@router.post("/import", dependencies=[Depends(require_admin)], tags=["system"])
 def import_(data: dict[str, Any], db: Database = Depends(get_db)):
     try:
         return services.import_config(db, data)
@@ -1186,7 +1187,7 @@ class AutostartIn(BaseModel):
     enabled: bool
 
 
-@router.get("/system/autostart", tags=["system"])
+@router.get("/system/autostart", dependencies=[Depends(require_admin)], tags=["system"])
 def get_autostart(request: Request):
     """Whether SNMPathy starts automatically when the current user logs in."""
     from . import autostart
@@ -1194,7 +1195,7 @@ def get_autostart(request: Request):
     return autostart.status(request.app.state.settings)
 
 
-@router.put("/system/autostart", tags=["system"])
+@router.put("/system/autostart", dependencies=[Depends(require_admin)], tags=["system"])
 def put_autostart(body: AutostartIn, request: Request):
     from . import autostart
 
@@ -1266,6 +1267,42 @@ async def refresh_maker_list(db: Database = Depends(get_db)):
     return {"maker_list": status, "changed": changed, **tagged}
 
 
+# =================================================================== server admin passcode
+class PasscodeIn(BaseModel):
+    passcode: str = Field(..., min_length=1, max_length=200)
+
+
+@router.get("/system/admin-passcode", tags=["system"])
+def get_admin_passcode(request: Request, db: Database = Depends(get_db)):
+    """Whether a Server admin passcode is set, and how this request may use Server admin."""
+    from . import adminauth
+
+    return {"set": adminauth.passcode_set(db), **adminauth.access(request), "local": adminauth.is_local(request)}
+
+
+@router.put("/system/admin-passcode", dependencies=[Depends(require_local)], tags=["system"])
+def put_admin_passcode(body: PasscodeIn, db: Database = Depends(get_db)):
+    """Set or change the passcode for Server admin in browsers elsewhere (only on the server itself)."""
+    from . import adminauth
+
+    try:
+        adminauth.set_passcode(db, body.passcode)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    db.log_event("admin.passcode", "Server admin passcode set", "info")
+    return {"set": True}
+
+
+@router.delete("/system/admin-passcode", dependencies=[Depends(require_local)], tags=["system"])
+def delete_admin_passcode(db: Database = Depends(get_db)):
+    """Remove the passcode: Server admin is then only available on the server itself."""
+    from . import adminauth
+
+    adminauth.clear_passcode(db)
+    db.log_event("admin.passcode", "Server admin passcode removed", "info")
+    return {"set": False}
+
+
 # =================================================================== updates
 @router.get("/system/update", tags=["system"])
 def get_update():
@@ -1283,7 +1320,7 @@ def get_update():
     return out
 
 
-@router.post("/system/update", tags=["system"])
+@router.post("/system/update", dependencies=[Depends(require_admin)], tags=["system"])
 def post_update():
     """Update this server's SNMPathy to the latest release (it restarts). Executable builds only."""
     import subprocess
@@ -1307,7 +1344,7 @@ class FirewallIn(BaseModel):
     remove: bool = False
 
 
-@router.get("/system/firewall", tags=["system"])
+@router.get("/system/firewall", dependencies=[Depends(require_admin)], tags=["system"])
 def get_firewall(request: Request):
     """The host firewall backend and whether SNMPathy's ports are open."""
     from . import firewall
@@ -1315,7 +1352,7 @@ def get_firewall(request: Request):
     return firewall.status(request.app.state.settings)
 
 
-@router.post("/system/firewall", tags=["system"])
+@router.post("/system/firewall", dependencies=[Depends(require_admin)], tags=["system"])
 def post_firewall(body: FirewallIn, request: Request):
     """Add (or remove) inbound firewall rules for the selected listener groups."""
     from . import firewall

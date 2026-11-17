@@ -650,6 +650,15 @@ retention), **Configuration backup** (export / import) and the settings in effec
 keeps device tagging, Grafana and the API. The same server actions are in the tray icon under
 **Server admin**.
 
+Browsers on other computers need a **passcode** for Server admin, set on the server itself: in
+the tray choose **Server admin → Server admin config** (it opens the page in the server's
+browser, already unlocked) and use **Web access → Set passcode**, or run
+`snmpathy admin-passcode set` there. Until a passcode is set, Server admin only works on the
+server. A browser stays unlocked for 12 hours (**Lock now** ends it), five wrong passcodes lock
+that address out for 10 minutes, and changing or removing the passcode signs every browser out.
+Scripts can use the API token in an `Authorization: Bearer` or `X-API-Key` header instead.
+Requests that arrive through a reverse proxy are never treated as coming from the server.
+
 ## Open the firewall for syslog
 
 **Server admin → Firewall** in the web UI (or the tray's **Server admin → Firewall**):

@@ -6,9 +6,10 @@ server in a background thread and shows a tray icon with:
 * **Open SNMPathy** (also double-click / left-click on Windows)
 * a live status line (devices down / unreachable, checks down), and a red marker on the
   icon when something is down
-* **Server admin** (expands): **Start at login** (the same switch as Server admin > Startup in
-  the web UI), **Firewall** (open SNMPathy's ports, or remove its rules), **Update SNMPathy**,
-  the web UI's **Server admin page**, **Open data folder**, **View log**
+* **Server admin** (expands): **Server admin config** (the web UI's Server admin page, unlocked
+  in this computer's browser: startup, firewall, updates, backup, and the passcode other
+  computers need for it), **Start at login**, **Firewall** (open SNMPathy's ports, or remove
+  its rules), **Update SNMPathy**, **Open data folder**, **View log**
 * **Update SNMPathy** - downloads the latest release from GitHub and restarts, showing a
   progress window (``snmpathy/selfupdate.py``; nothing else needs to be installed). Checked
   every few hours; the menu says when a new version is available. Running from source, it
@@ -542,7 +543,10 @@ class TrayApp:
             show_message(result.get("output") or "The firewall was not changed.", "SNMPathy firewall")
 
     def open_admin(self, *_: Any) -> None:
-        webbrowser.open(self.url.rstrip("/") + "/admin")
+        """Server admin config: the web page, unlocked in this computer's browser by a one-time link."""
+        from .adminauth import new_ticket
+
+        webbrowser.open(self.url.rstrip("/") + "/admin/open?ticket=" + new_ticket())
 
     # ------------------------------------------------------------ menu
     def firewall_menu(self):
@@ -565,11 +569,12 @@ class TrayApp:
 
         item = pystray.MenuItem
         return pystray.Menu(
+            item("Server admin config…", self.open_admin),
+            pystray.Menu.SEPARATOR,
             item("Start at login", self.toggle_autostart, checked=self.autostart_enabled),
             item("Firewall", self.firewall_menu()),
             item(self.update_label, self.run_update, visible=lambda _i: update_available()),
             pystray.Menu.SEPARATOR,
-            item("Server admin page", self.open_admin),
             item("Open data folder", self.open_folder),
             item("View log", self.view_log),
         )

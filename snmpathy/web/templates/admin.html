@@ -4,6 +4,25 @@
 {% block content %}
 <p class="muted small" style="margin-top:0">These settings manage the computer SNMPathy runs on, <strong>{{ hostname }}</strong>, not the one your browser is on. They are also in the SNMPathy tray icon on the server, under <em>Server admin</em>.</p>
 <div class="grid grid-2">
+  <div class="card" id="web-access" style="grid-column: 1 / -1">
+    <div class="card-head"><h2>Web access</h2><span class="small muted">{% if access.how == 'local' %}you are on the server{% elif access.how == 'passcode' %}unlocked with the passcode until {{ access.expires|ts|safe }}{% else %}API token{% endif %}</span></div>
+    <div class="card-body stack">
+      {% if local %}
+      <p style="margin:0">{% if passcode_set %}{{ status('ok', 'A passcode is set') }} <span class="small muted">Browsers on other computers can open Server admin with it.</span>{% else %}{{ status('unknown', 'No passcode') }} <span class="small muted">Server admin is only available here, on the server. Set a passcode to manage it from other computers.</span>{% endif %}</p>
+      <form class="row" id="passcode-form" autocomplete="off">
+        <input type="password" id="passcode-new" placeholder="{{ 'New passcode' if passcode_set else 'Passcode' }} (at least 4 characters)" autocomplete="new-password" minlength="4" required style="max-width:260px">
+        <input type="password" id="passcode-again" placeholder="Same again" autocomplete="new-password" minlength="4" required style="max-width:200px">
+        <button class="btn primary" type="submit">{{ 'Change passcode' if passcode_set else 'Set passcode' }}</button>
+        {% if passcode_set %}<button class="btn danger" type="button" id="passcode-clear">Remove passcode</button>{% endif %}
+      </form>
+      <p class="small muted" style="margin:0">The passcode can only be set here, on the server. Changing or removing it signs out every browser that unlocked Server admin with it.</p>
+      {% else %}
+      <div class="row"><span>This browser can use Server admin {% if access.how == 'passcode' %}until {{ access.expires|ts|safe }}{% endif %}.</span>
+        {% if access.how == 'passcode' %}<form method="post" action="/admin/lock" style="margin:0"><button class="btn" type="submit" id="admin-lock">Lock now</button></form>{% endif %}</div>
+      <p class="small muted" style="margin:0">The passcode is set or changed on the server itself (tray: <em>Server admin &rsaquo; Server admin config</em>).</p>
+      {% endif %}
+    </div>
+  </div>
   <div class="card">
     <div class="card-head"><h2>System</h2></div>
     <div class="card-body">
@@ -108,6 +127,28 @@
 </div>
 {% endblock %}
 {% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const form = SP.$("#passcode-form");
+  if (!form) return;
+  form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const a = SP.$("#passcode-new").value, b = SP.$("#passcode-again").value;
+    if (a !== b) return SP.toast("The two passcodes are not the same", "error");
+    try {
+      await SP.api("PUT", "/api/system/admin-passcode", { passcode: a });
+      SP.toast("Passcode saved: other computers can now unlock Server admin with it");
+      setTimeout(() => location.reload(), 800);
+    } catch (e) { SP.toast(e.message, "error"); }
+  });
+  const clear = SP.$("#passcode-clear");
+  if (clear) clear.addEventListener("click", async () => {
+    if (!confirm("Remove the passcode? Server admin will only be available on this server.")) return;
+    try { await SP.api("DELETE", "/api/system/admin-passcode"); SP.toast("Passcode removed"); setTimeout(() => location.reload(), 800); }
+    catch (e) { SP.toast(e.message, "error"); }
+  });
+});
+</script>
 <script>
 document.addEventListener("DOMContentLoaded", () => {
   const add = SP.$("#fw-add");
