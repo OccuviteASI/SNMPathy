@@ -26,6 +26,19 @@ APP_ID = "SNMPathy"
 MAC_LABEL = "com.snmpathy.autostart"
 LINUX_UNIT = "snmpathy.service"
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+VBS_NAME = "autostart.vbs"
+DESKTOP_NAME = "snmpathy.desktop"
+APP_TITLE = "SNMPathy"
+LAUNCH: Any = None  # the collector app sets its own command (use_collector_profile)
+
+
+def use_collector_profile() -> None:
+    """Autostart entries for the SNMPathy Collector app (separate from the full app's)."""
+    global APP_ID, MAC_LABEL, LINUX_UNIT, VBS_NAME, DESKTOP_NAME, APP_TITLE, LAUNCH
+    APP_ID, MAC_LABEL, LINUX_UNIT = "SNMPathy Collector", "com.snmpathy.collector", "snmpathy-collector.service"
+    VBS_NAME, DESKTOP_NAME, APP_TITLE = "collector-autostart.vbs", "snmpathy-collector.desktop", "SNMPathy Collector"
+    LAUNCH = lambda settings=None: ([sys.executable] if is_frozen()  # noqa: E731
+                                    else [sys.executable, "-m", "snmpathy.collector_app"])
 
 
 class AutostartError(RuntimeError):
@@ -34,7 +47,9 @@ class AutostartError(RuntimeError):
 
 # ------------------------------------------------------------------ command
 def launch_command(settings: Settings | None = None) -> list[str]:
-    """The command line that starts this SNMPathy installation's server."""
+    """The command line that starts this SNMPathy installation's server (or the Collector app)."""
+    if LAUNCH is not None:
+        return LAUNCH(settings)
     tray = _tray_available()
     if is_frozen():
         argv = [sys.executable, "tray", "--no-browser"] if tray else [sys.executable, "serve"]
@@ -78,7 +93,7 @@ def _in_container() -> bool:
 # ------------------------------------------------------------------ Windows
 def _vbs_path() -> Path:
     base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "SNMPathy"
-    return base / "autostart.vbs"
+    return base / VBS_NAME
 
 
 def _vbs_quote(arg: str) -> str:
@@ -171,7 +186,7 @@ def _linux_unit() -> Path:
 
 def _linux_desktop() -> Path:
     base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
-    return base / "autostart" / "snmpathy.desktop"
+    return base / "autostart" / DESKTOP_NAME
 
 
 def _linux_enable(argv: list[str], cwd: str) -> str:
@@ -179,7 +194,7 @@ def _linux_enable(argv: list[str], cwd: str) -> str:
         unit = _linux_unit()
         unit.parent.mkdir(parents=True, exist_ok=True)
         unit.write_text(
-            "[Unit]\nDescription=SNMPathy network monitoring (autostart)\nAfter=network-online.target\n\n"
+            f"[Unit]\nDescription={APP_TITLE} network monitoring (autostart)\nAfter=network-online.target\n\n"
             f"[Service]\nWorkingDirectory={cwd}\nExecStart={shlex.join(argv)}\nRestart=on-failure\nRestartSec=10\n\n"
             "[Install]\nWantedBy=default.target\n",
             encoding="utf-8",
@@ -192,7 +207,7 @@ def _linux_enable(argv: list[str], cwd: str) -> str:
     desktop = _linux_desktop()
     desktop.parent.mkdir(parents=True, exist_ok=True)
     desktop.write_text(
-        "[Desktop Entry]\nType=Application\nName=SNMPathy\nComment=Network monitoring\n"
+        f"[Desktop Entry]\nType=Application\nName={APP_TITLE}\nComment=Network monitoring\n"
         f"Exec={shlex.join(argv)}\nPath={cwd}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n",
         encoding="utf-8",
     )

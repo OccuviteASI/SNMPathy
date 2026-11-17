@@ -27,7 +27,9 @@ def notes(commit: str) -> str:
     body = changelog_section(ver) or "See CHANGELOG.md."
     return (f"{body}\n\n---\nbuild {commit}\n\n"
             "**Updating:** choose **Update SNMPathy** in the tray menu. To install, download the file for "
-            "your system below (`SNMPathy-windows.exe` → rename to `SNMPathy.exe`).\n")
+            "your system below (`SNMPathy-windows.exe` → rename to `SNMPathy.exe`). "
+            "`SNMPathy-Collector-*` is the small app for site computers: download it from your server's "
+            "**Collectors** page and paste the setup code shown there.\n")
 
 
 if __name__ == "__main__":

@@ -302,9 +302,23 @@ rules or VPN, then:
   original timestamps, so graphs and uptime have no gaps,
 * runs discovery, *check now* and network scans for the main server.
 
-**Install one:** **Collectors → Add collector** shows a token (once) and copy-paste install
-commands. Each downloads the collector **from your SNMPathy server** and sets it up as a
-service:
+**Install one with SNMPathy Collector** (Windows or Linux): **Collectors → Add collector**
+shows download buttons for **SNMPathy Collector**, the small site app (no web UI, database or
+dashboards), and a **setup code**. Run SNMPathy Collector on the site computer and paste the
+code. The setup asks what this computer should be:
+
+* **Collector**: it runs in the tray (status icon; *Start at login*, *Update SNMPathy Collector*,
+  *Change setup…*, *View log*, *Quit*) and does the collector's work for the server, or
+* **Full SNMPathy server**: it downloads the full SNMPathy from your server, starts it on a free
+  port (opening the firewall for it if you tick that) and adds it to your server's **Fusion**
+  dashboard in place of the collector.
+
+Your server fetches the SNMPathy Collector files from the GitHub release the first time
+someone downloads them and keeps them in its `downloads` folder.
+
+**Or install it as a service with one command** (no setup window): the same dialog shows the
+collector's token and copy-paste commands. Each downloads the collector **from your SNMPathy
+server** and sets it up as a service:
 
 ```powershell
 # Windows (elevated PowerShell): scheduled task at startup, restarts on failure
@@ -323,9 +337,10 @@ snmpathy collector --server https://nms.example.com --token col_...
 ```
 
 The **Downloads** list on the Collectors page serves the files directly from the main host
-at `/collector/download/…`. A server started from the standalone executable offers itself
-for its own OS; put the executables for other platforms (from `scripts/build_executable`
-or the CI artifacts, named e.g. `SNMPathy-windows.exe`, `SNMPathy-linux`)
+at `/collector/download/…`: SNMPathy Collector for Windows and Linux (from the release, or your
+own `scripts/build_executable --collector` builds named `SNMPathy-Collector-windows.exe` /
+`SNMPathy-Collector-linux`), and the full SNMPathy. A server started from the standalone
+executable offers itself for its own OS; put other executables (e.g. `SNMPathy-linux`)
 in the `downloads` folder next to the database (or set `downloads_dir`). Without a
 prebuilt executable the installers fall back to the Python package the server also
 serves (`snmpathy-<version>.tar.gz`, needs Python 3.10+ at the site).

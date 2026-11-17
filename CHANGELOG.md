@@ -29,6 +29,17 @@ commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
   in the tray, it moves to the next free port, saves it in `snmpathy.yaml` and says so in a
   notification. Change it by hand in **Server admin → Web port** (*Save and restart*); the tray's
   Server admin menu shows the port in use.
+- **SNMPathy Collector**, a separate small app for site computers (no web UI, database or
+  dashboards), is what the Collectors page now hands out. **Add collector** shows its download
+  buttons (Windows, Linux) and a **setup code**; run it on the site computer and paste the code.
+  The setup window asks whether the computer becomes a **Collector** (runs in the tray with a
+  status icon, *Start at login*, *Update SNMPathy Collector*, *Change setup…* and *View log*) or
+  a **Full SNMPathy server**: it downloads the full SNMPathy from your server, starts it on a free
+  port, optionally opens the firewall for it, and adds it to your server's **Fusion** dashboard
+  in place of the collector. The one-line install commands still work and now install
+  SNMPathy Collector as the service. Releases carry `SNMPathy-Collector-windows.exe` and
+  `SNMPathy-Collector-linux`; the server fetches them from the release the first time they are
+  downloaded and keeps them in its downloads folder.
 
 ## 0.7.10
 - CI no longer tests or builds for macOS (Windows, Linux and Docker only); releases carry the

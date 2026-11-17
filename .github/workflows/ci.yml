@@ -97,13 +97,41 @@ jobs:
           done
           kill $pid 2>/dev/null || true
           [ -n "$ok" ] || { cat serve.log; exit 1; }
-      - name: Name the executable for the collector downloads folder
+      - name: Build SNMPathy Collector (the small site app)
+        run: python scripts/build_executable.py --collector
+      - name: Check SNMPathy Collector reports to a running server
+        shell: bash
+        run: |
+          exe=dist/SNMPathy; [ -f dist/SNMPathy.exe ] && exe=dist/SNMPathy.exe
+          col=dist/SNMPathy-Collector; [ -f dist/SNMPathy-Collector.exe ] && col=dist/SNMPathy-Collector.exe
+          "$col" version | tee col-version.txt
+          grep -q "snmpathy-collector" col-version.txt
+          "$exe" serve --config ci-smoke.yaml --no-syslog > serve2.log 2>&1 &
+          spid=$!
+          for i in $(seq 1 60); do curl -fs http://127.0.0.1:18765/healthz && break; sleep 2; done
+          created=$(curl -fs -X POST -H "Content-Type: application/json" -d '{"name":"ci-site"}' http://127.0.0.1:18765/api/collectors)
+          token=$(echo "$created" | python -c "import json,sys; print(json.load(sys.stdin)['token'])")
+          code=$(echo "$created" | python -c "import json,sys; print(json.load(sys.stdin)['install']['app'])")
+          "$col" setup-code "$code"
+          "$col" run --server http://127.0.0.1:18765 --token "$token" --state-dir col-state > collector.log 2>&1 &
+          cpid=$!
+          ok=""
+          for i in $(seq 1 60); do
+            if curl -fs http://127.0.0.1:18765/api/collectors | grep -q '"status": *"online"'; then ok=1; break; fi
+            sleep 2
+          done
+          kill $cpid $spid 2>/dev/null || true
+          [ -n "$ok" ] || { echo "collector never came online"; cat collector.log; cat serve2.log; exit 1; }
+          echo "collector online"
+      - name: Name the executables for the release and the collector downloads folder
         shell: bash
         run: |
           mkdir -p downloads
           case "${{ runner.os }}" in
-            Windows) cp dist/SNMPathy.exe downloads/SNMPathy-windows.exe ;;
-            Linux)   cp dist/SNMPathy downloads/SNMPathy-linux ;;
+            Windows) cp dist/SNMPathy.exe downloads/SNMPathy-windows.exe
+                     cp dist/SNMPathy-Collector.exe downloads/SNMPathy-Collector-windows.exe ;;
+            Linux)   cp dist/SNMPathy downloads/SNMPathy-linux
+                     cp dist/SNMPathy-Collector downloads/SNMPathy-Collector-linux ;;
           esac
       - uses: actions/upload-artifact@v4
         with:
