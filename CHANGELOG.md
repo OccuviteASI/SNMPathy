@@ -5,6 +5,8 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
 ## 0.7.10
+- CI no longer tests or builds for macOS (Windows, Linux and Docker only); releases carry the
+  Windows and Linux executables.
 - **SNMP filter on the Devices page:** Responding / Not responding / Not polled yet / SNMP off,
   with counts; it combines with the status and tag filters.
 

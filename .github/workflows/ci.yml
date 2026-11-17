@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest]  # macOS is not built or tested for now
         python: ["3.10", "3.13"]
         include:
           - os: ubuntu-latest
@@ -57,7 +57,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
+        os: [windows-latest, ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -103,7 +103,6 @@ jobs:
           mkdir -p downloads
           case "${{ runner.os }}" in
             Windows) cp dist/SNMPathy.exe downloads/SNMPathy-windows.exe ;;
-            macOS)   cp dist/SNMPathy downloads/SNMPathy-macos ;;
             Linux)   cp dist/SNMPathy downloads/SNMPathy-linux ;;
           esac
       - uses: actions/upload-artifact@v4
