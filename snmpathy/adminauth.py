@@ -14,6 +14,10 @@ A request may use Server admin when it is
 
 The passcode is stored as a salted PBKDF2 hash in the database; repeated wrong guesses lock
 that address out for a while.
+
+**Edit passcode** (separate, optional, set in Server admin): while one is set, browsers off the
+server are *view only*: they see everything but need the edit passcode (or Server admin access)
+for any change, i.e. any API call other than GET. See ``edit_access``.
 """
 
 from __future__ import annotations
@@ -31,6 +35,7 @@ from fastapi import Request
 from .db import Database
 
 SESSION_COOKIE = "snmpathy_admin"
+EDIT_COOKIE = "snmpathy_edit"
 SESSION_HOURS = 12
 TICKET_SECONDS = 120
 MIN_LENGTH = 4
@@ -39,6 +44,8 @@ MAX_FAILURES = 5  # wrong passcodes from one address ...
 FAILURE_WINDOW = 600  # ... within this many seconds lock it out for as long
 META_HASH = "admin_passcode"
 META_SECRET = "admin_secret"
+# kind -> (meta key of the passcode hash, meta key of the session secret)
+KINDS = {"admin": (META_HASH, META_SECRET), "edit": ("edit_passcode", "edit_secret")}
 PROXY_HEADERS = ("x-forwarded-for", "forwarded", "x-real-ip", "x-forwarded-host")
 
 _tickets: dict[str, float] = {}
@@ -51,27 +58,29 @@ class AdminDenied(Exception):
 
 
 # ------------------------------------------------------------------ passcode
-def passcode_set(db: Database) -> bool:
-    return bool(db.get_meta(META_HASH, ""))
+def passcode_set(db: Database, kind: str = "admin") -> bool:
+    return bool(db.get_meta(KINDS[kind][0], ""))
 
 
-def set_passcode(db: Database, passcode: str) -> None:
+def set_passcode(db: Database, passcode: str, kind: str = "admin") -> None:
     passcode = (passcode or "").strip()
     if len(passcode) < MIN_LENGTH:
         raise ValueError(f"the passcode needs at least {MIN_LENGTH} characters")
     salt = secrets.token_hex(16)
     digest = hashlib.pbkdf2_hmac("sha256", passcode.encode(), bytes.fromhex(salt), PBKDF2_ROUNDS).hex()
-    db.set_meta(META_HASH, f"pbkdf2-sha256${PBKDF2_ROUNDS}${salt}${digest}")
-    db.set_meta(META_SECRET, secrets.token_hex(32))  # a new passcode signs out every unlocked browser
+    meta_hash, meta_secret = KINDS[kind]
+    db.set_meta(meta_hash, f"pbkdf2-sha256${PBKDF2_ROUNDS}${salt}${digest}")
+    db.set_meta(meta_secret, secrets.token_hex(32))  # a new passcode signs out every unlocked browser
 
 
-def clear_passcode(db: Database) -> None:
-    db.set_meta(META_HASH, "")
-    db.set_meta(META_SECRET, secrets.token_hex(32))
+def clear_passcode(db: Database, kind: str = "admin") -> None:
+    meta_hash, meta_secret = KINDS[kind]
+    db.set_meta(meta_hash, "")
+    db.set_meta(meta_secret, secrets.token_hex(32))
 
 
-def check_passcode(db: Database, passcode: str) -> bool:
-    stored = db.get_meta(META_HASH, "") or ""
+def check_passcode(db: Database, passcode: str, kind: str = "admin") -> bool:
+    stored = db.get_meta(KINDS[kind][0], "") or ""
     try:
         _, rounds, salt, digest = stored.split("$")
         got = hashlib.pbkdf2_hmac("sha256", (passcode or "").strip().encode(), bytes.fromhex(salt), int(rounds)).hex()
@@ -81,28 +90,29 @@ def check_passcode(db: Database, passcode: str) -> bool:
 
 
 # ------------------------------------------------------------------ sessions
-def _secret(db: Database) -> bytes:
-    secret = db.get_meta(META_SECRET, "")
+def _secret(db: Database, kind: str = "admin") -> bytes:
+    meta_secret = KINDS[kind][1]
+    secret = db.get_meta(meta_secret, "")
     if not secret:
         secret = secrets.token_hex(32)
-        db.set_meta(META_SECRET, secret)
+        db.set_meta(meta_secret, secret)
     return bytes.fromhex(secret)
 
 
-def make_session(db: Database, now: float | None = None) -> str:
+def make_session(db: Database, now: float | None = None, kind: str = "admin") -> str:
     expires = int((now or time.time()) + SESSION_HOURS * 3600)
-    sig = hmac.new(_secret(db), str(expires).encode(), hashlib.sha256).hexdigest()
+    sig = hmac.new(_secret(db, kind), str(expires).encode(), hashlib.sha256).hexdigest()
     return f"{expires}.{sig}"
 
 
-def session_expires(db: Database, value: str, now: float | None = None) -> float | None:
+def session_expires(db: Database, value: str, now: float | None = None, kind: str = "admin") -> float | None:
     """When a session cookie runs out, or None if it is not valid (any more)."""
     try:
         expires_text, sig = (value or "").split(".", 1)
         expires = int(expires_text)
     except ValueError:
         return None
-    good = hmac.new(_secret(db), expires_text.encode(), hashlib.sha256).hexdigest()
+    good = hmac.new(_secret(db, kind), expires_text.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(sig, good) or expires < (now or time.time()):
         return None
     return float(expires)
@@ -204,3 +214,41 @@ def require_local(request: Request) -> None:
 
         raise HTTPException(403, "the passcode can only be changed on the server itself "
                             "(tray: Server admin > Server admin config)")
+
+
+# ------------------------------------------------------------------ edit passcode
+# POSTs that only read (or feed data in) and stay open in view-only mode.
+VIEW_POSTS = ("/api/panel-data", "/api/query", "/api/scans/preview", "/api/devices/test", "/api/passive",
+              "/api/collector/v1/")
+
+
+def is_view_post(path: str) -> bool:
+    import re
+
+    return path.startswith(VIEW_POSTS) or bool(re.fullmatch(r"/api/collectors/\d+/ping", path))
+
+
+def edit_access(request: Any) -> dict[str, Any]:
+    """Whether this request may change things (devices, checks, alerts, dashboards, settings...)."""
+    db = request.app.state.db
+    if not passcode_set(db, "edit"):
+        return {"allowed": True, "how": "open", "expires": None, "required": False}
+    if is_local(request):
+        return {"allowed": True, "how": "local", "expires": None, "required": True}
+    expires = session_expires(db, request.cookies.get(EDIT_COOKIE, ""), kind="edit")
+    if expires:
+        return {"allowed": True, "how": "passcode", "expires": expires, "required": True}
+    admin = access(request)
+    if admin["allowed"]:  # Server admin access includes editing
+        return {"allowed": True, "how": "admin-" + admin["how"], "expires": admin["expires"], "required": True}
+    return {"allowed": False, "how": "", "expires": None, "required": True}
+
+
+def edit_denied(request: Any) -> bool:
+    """For the middleware: a change attempted by a view-only browser."""
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return False
+    path = request.url.path
+    if not path.startswith("/api/") or is_view_post(path):
+        return False
+    return not edit_access(request)["allowed"]

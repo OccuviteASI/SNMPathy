@@ -49,6 +49,13 @@
         <h1>{% block heading %}{{ self.title() }}{% endblock %}</h1>
       </div>
       <div class="spacer"></div>
+      {% if edit and edit.required %}
+      <div class="edit-state row" id="edit-state">
+        {% if not edit.allowed %}<span class="status warning" title="An edit passcode is set: this browser can look but not change anything">View only</span>
+        <button class="btn sm" type="button" id="edit-unlock-btn">{{ icon('lock') }} Unlock editing</button>
+        {% elif edit.how == 'passcode' %}<button class="btn ghost sm" type="button" id="edit-lock-btn" title="Editing is unlocked in this browser until {{ edit.expires|ts }}">Lock editing</button>{% endif %}
+      </div>
+      {% endif %}
       <div class="actions row">{% block actions %}{% endblock %}</div>
     </header>
     <main class="content">
@@ -56,6 +63,21 @@
     </main>
   </div>
 </div>
+{% if edit and edit.required and not edit.allowed %}
+<div class="modal-back hidden" id="edit-modal">
+  <div class="modal" style="max-width:440px">
+    <div class="card-head"><h2>Unlock editing</h2><button class="btn ghost" data-action="close-modal">&times;</button></div>
+    <form id="edit-unlock-form">
+      <div class="modal-body stack">
+        <p class="small muted" style="margin:0">This browser is view only. Enter the edit passcode to make changes (it stays unlocked for 12 hours).</p>
+        <label class="field">Edit passcode<input type="password" name="passcode" autocomplete="current-password" required></label>
+        <p class="small" style="margin:0;color:var(--critical)" id="edit-unlock-error"></p>
+      </div>
+      <div class="modal-foot"><button type="button" class="btn" data-action="close-modal">Cancel</button><button class="btn primary" type="submit">Unlock</button></div>
+    </form>
+  </div>
+</div>
+{% endif %}
 {% block scripts %}{% endblock %}
 </body>
 </html>

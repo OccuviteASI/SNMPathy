@@ -1303,6 +1303,40 @@ def delete_admin_passcode(db: Database = Depends(get_db)):
     return {"set": False}
 
 
+@router.get("/system/edit-passcode", tags=["system"])
+def get_edit_passcode(request: Request, db: Database = Depends(get_db)):
+    """Whether an edit passcode is set (browsers off the server are view only without it)."""
+    from . import adminauth
+
+    return {"set": adminauth.passcode_set(db, "edit"), **adminauth.edit_access(request)}
+
+
+@router.put("/system/edit-passcode", dependencies=[Depends(require_admin)], tags=["system"])
+def put_edit_passcode(body: PasscodeIn, db: Database = Depends(get_db)):
+    """Set or change the passcode for making changes from browsers elsewhere (Server admin only)."""
+    from . import adminauth
+
+    try:
+        adminauth.set_passcode(db, body.passcode, kind="edit")
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    if adminauth.passcode_set(db) and adminauth.check_passcode(db, body.passcode):
+        adminauth.clear_passcode(db, "edit")
+        raise HTTPException(422, "use a different passcode from the Server admin passcode")
+    db.log_event("admin.passcode", "Edit passcode set: other computers are view only until unlocked", "info")
+    return {"set": True}
+
+
+@router.delete("/system/edit-passcode", dependencies=[Depends(require_admin)], tags=["system"])
+def delete_edit_passcode(db: Database = Depends(get_db)):
+    """Remove the edit passcode: every browser can make changes again."""
+    from . import adminauth
+
+    adminauth.clear_passcode(db, "edit")
+    db.log_event("admin.passcode", "Edit passcode removed", "info")
+    return {"set": False}
+
+
 # =================================================================== web port
 class WebPortIn(BaseModel):
     port: int = Field(..., ge=1, le=65535)

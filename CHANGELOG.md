@@ -19,6 +19,11 @@ commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
   `snmpathy admin-passcode set`). Without a passcode, Server admin works only on the server.
   Unlocking lasts 12 hours (*Lock now* ends it); 5 wrong passcodes lock that address out for
   10 minutes; API clients can use the API token in a header.
+- **Edit passcode** (separate from the Server admin passcode): set it in **Server admin → Edit
+  passcode** (or `snmpathy edit-passcode set`) and browsers on other computers become **view
+  only**: they can look at everything, but changing anything asks for the edit passcode
+  (*Unlock editing* in the top bar, 12 hours; the change then goes through). The server itself,
+  unlocked Server admin and the API token in a header can always edit.
 - The left menu no longer shows counts next to **Devices** and **Uptime checks**.
 - **Collector failover.** Devices, checks and scans assigned to a collector run on that collector
   (it relays them and forwards the results). While it is offline (or before it ever connects)

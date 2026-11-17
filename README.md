@@ -681,6 +681,16 @@ that address out for 10 minutes, and changing or removing the passcode signs eve
 Scripts can use the API token in an `Authorization: Bearer` or `X-API-Key` header instead.
 Requests that arrive through a reverse proxy are never treated as coming from the server.
 
+**Edit passcode** (view-only users): a second, separate passcode, set in **Server admin → Edit
+passcode** (or `snmpathy edit-passcode set`). While it is set, browsers on other computers are
+**view only**: they see every page, dashboard and report, but any change (adding or editing
+devices, checks, alerts, dashboards, scans, settings...) asks for the edit passcode first. The
+top bar shows **View only** with **Unlock editing**; unlocking lasts 12 hours (**Lock editing**
+ends it) and the change that asked for it then goes through. The server itself, browsers that
+unlocked Server admin and API clients with the API token in a header can always edit. It must
+differ from the Server admin passcode; wrong guesses count toward the same 5-in-10-minutes
+lockout.
+
 **Web port**: SNMPathy's web UI uses port 8080 (`http_port`). If another program already uses
 it when SNMPathy starts in the tray, SNMPathy takes the next free port (8081, 8082, …), saves it
 in `snmpathy.yaml` and shows a notification; the tray's **Server admin** menu shows the port in

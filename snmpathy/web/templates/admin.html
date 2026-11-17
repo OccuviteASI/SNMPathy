@@ -23,6 +23,19 @@
       {% endif %}
     </div>
   </div>
+  <div class="card" id="edit-access">
+    <div class="card-head"><h2>Edit passcode</h2><span class="small muted">for changes from other computers</span></div>
+    <div class="card-body stack">
+      <p style="margin:0">{% if edit_passcode_set %}{{ status('ok', 'An edit passcode is set') }} <span class="small muted">Browsers on other computers are <strong>view only</strong> until someone unlocks editing with it (top right of every page).</span>{% else %}{{ status('unknown', 'No edit passcode') }} <span class="small muted">Every browser that can open SNMPathy can also change things. Set one to make other computers view only until unlocked.</span>{% endif %}</p>
+      <form class="row" id="edit-passcode-form" autocomplete="off">
+        <input type="password" id="edit-passcode-new" placeholder="{{ 'New edit passcode' if edit_passcode_set else 'Edit passcode' }} (at least 4 characters)" autocomplete="new-password" minlength="4" required style="max-width:280px">
+        <input type="password" id="edit-passcode-again" placeholder="Same again" autocomplete="new-password" minlength="4" required style="max-width:200px">
+        <button class="btn primary" type="submit">{{ 'Change edit passcode' if edit_passcode_set else 'Set edit passcode' }}</button>
+        {% if edit_passcode_set %}<button class="btn danger" type="button" id="edit-passcode-clear">Remove edit passcode</button>{% endif %}
+      </form>
+      <p class="small muted" style="margin:0">Separate from the Server admin passcode (use a different one). Unlocking Server admin also allows editing; the server itself is never view only. Changing or removing it signs out every browser that unlocked editing.</p>
+    </div>
+  </div>
   <div class="card">
     <div class="card-head"><h2>System</h2></div>
     <div class="card-body">
@@ -157,6 +170,23 @@ document.addEventListener("DOMContentLoaded", () => {
 </script>
 <script>
 document.addEventListener("DOMContentLoaded", () => {
+  const editForm = SP.$("#edit-passcode-form");
+  if (editForm) editForm.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const a = SP.$("#edit-passcode-new").value, b = SP.$("#edit-passcode-again").value;
+    if (a !== b) return SP.toast("The two passcodes are not the same", "error");
+    try {
+      await SP.api("PUT", "/api/system/edit-passcode", { passcode: a });
+      SP.toast("Edit passcode saved: other computers are now view only until unlocked");
+      setTimeout(() => location.reload(), 800);
+    } catch (e) { SP.toast(e.message, "error"); }
+  });
+  const editClear = SP.$("#edit-passcode-clear");
+  if (editClear) editClear.addEventListener("click", async () => {
+    if (!confirm("Remove the edit passcode? Every browser will be able to change things again.")) return;
+    try { await SP.api("DELETE", "/api/system/edit-passcode"); SP.toast("Edit passcode removed"); setTimeout(() => location.reload(), 800); }
+    catch (e) { SP.toast(e.message, "error"); }
+  });
   const form = SP.$("#passcode-form");
   if (!form) return;
   form.addEventListener("submit", async (ev) => {

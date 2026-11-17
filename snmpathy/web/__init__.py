@@ -56,6 +56,9 @@ def render(request: Request, name: str, **context: Any) -> HTMLResponse:
         "alerts": db.scalar("SELECT COUNT(*) FROM alerts WHERE state = 'firing' AND acknowledged = 0"),
     }
     context["auth_enabled"] = bool(request.app.state.settings.api_token)
+    from .. import adminauth
+
+    context["edit"] = adminauth.edit_access(request)
     context.setdefault("collectors", db.query("SELECT id, name, site, status FROM collectors ORDER BY name COLLATE NOCASE"))
     from .. import version_string
 
@@ -427,6 +430,7 @@ def server_admin(request: Request, error: str = "", wait: int = 0):
         fts=db.has_fts, monitor=monitor.status() if monitor else None, hostname=socket.gethostname(),
         frozen=is_frozen(), autostart=_autostart_status(s), firewall=_firewall_status(s),
         access=access, passcode_set=adminauth.passcode_set(db), local=adminauth.is_local(request),
+        edit_passcode_set=adminauth.passcode_set(db, "edit"),
     )
 
 
@@ -472,6 +476,51 @@ def admin_lock(request: Request):
 
     response = RedirectResponse("/admin", status_code=303)
     _admin_cookie(response, request, "", 0)
+    return response
+
+
+@router.post("/edit/unlock")
+async def edit_unlock(request: Request):
+    """Unlock editing in this browser with the edit passcode (JSON: {"passcode": "..."})."""
+    from fastapi.responses import JSONResponse
+
+    from .. import adminauth
+
+    db = db_of(request)
+    address = adminauth.client_address(request)
+    wait = adminauth.locked_out(address)
+    if wait:
+        minutes = int((wait + 59) // 60)
+        return JSONResponse({"detail": f"Too many wrong passcodes from this address: try again in {minutes} "
+                                       f"minute{'s' if minutes != 1 else ''}."}, status_code=429)
+    try:
+        body = await request.json()
+    except ValueError:
+        body = dict(await request.form())
+    if not adminauth.passcode_set(db, "edit") or not adminauth.check_passcode(db, str(body.get("passcode") or ""),
+                                                                              kind="edit"):
+        adminauth.record_failure(address)
+        db.log_event("edit.unlock", f"Wrong edit passcode from {address}", "warning")
+        return JSONResponse({"detail": "That passcode is not right."}, status_code=403)
+    adminauth.clear_failures(address)
+    db.log_event("edit.unlock", f"Editing unlocked from {address}", "info")
+    response = JSONResponse({"ok": True, "hours": adminauth.SESSION_HOURS})
+    response.set_cookie(adminauth.EDIT_COOKIE, adminauth.make_session(db, kind="edit"),
+                        max_age=adminauth.SESSION_HOURS * 3600, httponly=True, samesite="strict",
+                        secure=request.url.scheme == "https", path="/")
+    return response
+
+
+@router.post("/edit/lock")
+def edit_lock(request: Request):
+    """Back to view only in this browser."""
+    from fastapi.responses import JSONResponse
+
+    from .. import adminauth
+
+    response = JSONResponse({"ok": True})
+    response.set_cookie(adminauth.EDIT_COOKIE, "", max_age=0, httponly=True, samesite="strict",
+                        secure=request.url.scheme == "https", path="/")
     return response
 
 

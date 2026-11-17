@@ -25,8 +25,16 @@
       opts.headers["Content-Type"] = "application/json";
       opts.body = JSON.stringify(body);
     }
-    const resp = await fetch(url, opts);
+    let resp = await fetch(url, opts);
     if (resp.status === 401) { location.href = "/login?next=" + encodeURIComponent(location.pathname); throw new Error("login required"); }
+    if (resp.status === 403 && (resp.headers.get("content-type") || "").includes("json")) {
+      const info = await resp.clone().json().catch(() => ({}));
+      if (info && info.code === "edit_locked") {
+        // View only: ask for the edit passcode, then try the same change again.
+        if (!(await SP.unlockEdit())) throw new Error("View only: editing was not unlocked");
+        resp = await fetch(url, opts);
+      }
+    }
     if (resp.status === 204) return null;
     const text = await resp.text();
     let data = null;
@@ -218,6 +226,50 @@
     if (first) setTimeout(() => first.focus(), 30);
   };
   SP.closeModal = function (back) { if (back) back.classList.add("hidden"); };
+
+  // Edit passcode: resolves true once this browser is unlocked for editing.
+  let unlockWaiters = [];
+  SP.unlockEdit = function () {
+    const modal = $("#edit-modal");
+    if (!modal) return Promise.resolve(false);
+    SP.openModal(modal);
+    return new Promise((resolve) => unlockWaiters.push(resolve));
+  };
+  function settleUnlock(ok) { const w = unlockWaiters; unlockWaiters = []; w.forEach((r) => r(ok)); }
+  document.addEventListener("DOMContentLoaded", () => {
+    const modal = $("#edit-modal"), form = $("#edit-unlock-form");
+    const btn = $("#edit-unlock-btn"), lock = $("#edit-lock-btn");
+    if (btn) btn.addEventListener("click", () => SP.unlockEdit().then((ok) => ok && location.reload()));
+    if (lock) lock.addEventListener("click", async () => {
+      await fetch("/edit/lock", { method: "POST", credentials: "same-origin" });
+      location.reload();
+    });
+    if (!form) return;
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const err = $("#edit-unlock-error");
+      err.textContent = "";
+      const resp = await fetch("/edit/unlock", { method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ passcode: form.passcode.value }) });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        err.textContent = data.detail || "Could not unlock";
+        form.passcode.select();
+        return;
+      }
+      form.reset();
+      SP.closeModal(modal);
+      const state = $("#edit-state");
+      if (state) state.innerHTML = '<span class="small muted">Editing unlocked</span>';
+      document.body.dataset.viewOnly = "0";
+      SP.toast("Editing unlocked for 12 hours");
+      settleUnlock(true);
+    });
+    // Closing the dialog without unlocking: the change that asked for it is not made.
+    new MutationObserver(() => { if (modal.classList.contains("hidden")) settleUnlock(false); })
+      .observe(modal, { attributes: true, attributeFilter: ["class"] });
+  });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") $$(".modal-back:not(.hidden)").forEach((m) => m.dataset.static || SP.closeModal(m));
   });

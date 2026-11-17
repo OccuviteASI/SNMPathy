@@ -431,6 +431,40 @@ def cmd_admin_passcode(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_edit_passcode(args: argparse.Namespace) -> int:
+    """Set / remove / show the edit passcode (other computers are view only without it)."""
+    import getpass
+
+    from . import adminauth
+    from .db import Database
+
+    db = Database(_settings(args).database)
+    if args.action == "status":
+        print("an edit passcode is set: other computers are view only until unlocked"
+              if adminauth.passcode_set(db, "edit") else "no edit passcode: every browser can make changes")
+        return 0
+    if args.action == "clear":
+        adminauth.clear_passcode(db, "edit")
+        db.log_event("admin.passcode", "Edit passcode removed (command line)", "info")
+        print("edit passcode removed: every browser can make changes")
+        return 0
+    code = args.passcode or getpass.getpass("New edit passcode: ")
+    if not args.passcode and getpass.getpass("Same again: ") != code:
+        print("error: the two passcodes are not the same", file=sys.stderr)
+        return 2
+    if adminauth.passcode_set(db) and adminauth.check_passcode(db, code):
+        print("error: use a different passcode from the Server admin passcode", file=sys.stderr)
+        return 2
+    try:
+        adminauth.set_passcode(db, code, kind="edit")
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    db.log_event("admin.passcode", "Edit passcode set (command line)", "info")
+    print("edit passcode set: other computers are view only until they unlock editing with it")
+    return 0
+
+
 def cmd_self_update(args: argparse.Namespace) -> int:
     """Download the latest SNMPathy release and replace this executable with it."""
     from . import selfupdate
@@ -743,6 +777,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--passcode", help="the passcode (default: asked for, not echoed)")
     p.add_argument("--config")
     p.set_defaults(func=cmd_admin_passcode)
+    p = sub.add_parser("edit-passcode", help="set / clear the passcode other browsers need to change anything")
+    p.add_argument("action", choices=["set", "clear", "status"])
+    p.add_argument("--passcode", help="the passcode (default: asked for, not echoed)")
+    p.add_argument("--config")
+    p.set_defaults(func=cmd_edit_passcode)
 
     p = sub.add_parser("_spawn-check")  # (CI) a restarted copy of the executable still works
     p.add_argument("file")
