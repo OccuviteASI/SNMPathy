@@ -405,6 +405,15 @@ def backfill_added_totals(db: Database) -> None:
     db.set_meta(ADDED_TOTALS_META, "1")
 
 
+def found_new_counts(db: Database, scan_id: int | None = None) -> dict[int, int]:
+    """Per scan: hosts in its latest run that were not devices already (new, added by it, or failed to add)."""
+    where, params = ("WHERE status != 'existing'", ())
+    if scan_id is not None:
+        where, params = ("WHERE status != 'existing' AND scan_id = ?", (scan_id,))
+    rows = db.query(f"SELECT scan_id, COUNT(*) AS n FROM scan_results {where} GROUP BY scan_id", params)
+    return {r["scan_id"]: r["n"] for r in rows}
+
+
 class ScanManager:
     """Runs scans in the background and re-runs recurring ones when due."""
 
@@ -603,8 +612,9 @@ class ScanManager:
             final = self.get(scan_id)
             if state == "done":
                 self.db.log_event(
-                    "scan.done", f"Scan '{scan['name']}' found {final['found']} hosts in {len(hosts)} addresses"
-                    + (f", added {final['added_last']} devices ({final['added']} in all)" if final["added_last"] else ""),
+                    "scan.done", f"Scan '{scan['name']}' found {final['found']} hosts "
+                    f"({found_new_counts(self.db, scan_id).get(scan_id, 0)} not yet devices) in {len(hosts)} addresses, "
+                    f"added {final['added_last']}",
                     "info")
         return final
 

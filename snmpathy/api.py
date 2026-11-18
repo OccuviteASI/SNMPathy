@@ -1020,8 +1020,12 @@ def _public_scan(db: Database, scan: dict[str, Any], results: bool = False) -> d
     from .scanner import public_options
     from .db import loads
 
+    from .scanner import found_new_counts
+
     out = dict(scan)
     out["options"] = public_options(loads(scan["options"], {}))
+    # Latest run: hosts that were not devices yet (the list's "Found"); added_last is its "Added".
+    out["found_new"] = found_new_counts(db, scan["id"]).get(scan["id"], 0)
     if results:
         rows = db.query("SELECT scan_results.*, devices.name AS device_name FROM scan_results "
                         "LEFT JOIN devices ON devices.id = scan_results.device_id WHERE scan_id = ? ORDER BY id",

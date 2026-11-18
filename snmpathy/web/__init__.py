@@ -630,6 +630,11 @@ def scans_page(request: Request):
     db = db_of(request)
     rows = db.query("SELECT scans.*, collectors.name AS collector_name FROM scans "
                     "LEFT JOIN collectors ON collectors.id = scans.collector_id ORDER BY scans.created_at DESC")
+    from ..scanner import found_new_counts
+
+    new = found_new_counts(db)
+    for row in rows:
+        row["found_new"] = new.get(row["id"], 0)
     return render(request, "scans.html", nav="devices", scans=rows)
 
 

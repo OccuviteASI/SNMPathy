@@ -130,6 +130,7 @@ ENTERPRISES = {
     5624: "Enterasys",
     34861: "Rajant",
     57344: "Tachyon Networks",
+    16177: "Westermo",
 }
 
 

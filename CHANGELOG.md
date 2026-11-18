@@ -4,6 +4,18 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 `snmpathy version`. Executables built with `scripts/build_executable` also show the git
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
+## 0.7.14
+- **Scans update live**: the Scans list now follows running scans (addresses scanned so far and a
+  progress bar) and shows the final counts when they finish, without reloading the page.
+- **Found and Added describe the latest run**: *Found* is the hosts that answered and are not
+  devices yet (with how many answered in all), *Added* is the devices that run added (with the
+  total over all runs underneath). A rescan with nothing new shows 0 and 0. Each scan's page
+  shows the same.
+- **Westermo** devices are tagged *Westermo*: SNMPathy now knows Westermo's SNMP enterprise number
+  (16177) and recognises *Westermo* / *WeOS* in device descriptions. Devices added earlier are
+  renamed from "Enterprise 16177" and tagged on the next tagging run (2 minutes after start, or
+  *Apply brand tags* in Settings).
+
 ## 0.7.13
 - **Collectors update themselves** to their server's version. When the server is newer, a
   collector (SNMPathy Collector, or SNMPathy run as a collector, from 0.7.13 on) downloads the

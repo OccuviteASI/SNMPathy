@@ -253,3 +253,23 @@ def test_refresh_endpoint_reresolves_and_tags(tmp_path, monkeypatch):
             assert "Maker list: Wireshark" in client.get("/settings").text
     finally:
         macvendor.set_data_dir(None)
+
+
+def test_westermo_devices_are_tagged(db, make_device):
+    import json
+
+    from snmpathy import brands
+    from snmpathy.snmp.mibs import vendor_from_sysobjectid
+
+    assert vendor_from_sysobjectid("1.3.6.1.4.1.16177.1.1") == "Westermo"
+    assert brands.brand_for("Westermo") == "Westermo"
+    assert brands.brand_for("Enterprise 99999", "WeOS 4.33.0 Lynx-3510") == "Westermo"
+    assert brands.brand_for("", "Westermo RedFox-5528") == "Westermo"
+    # Added before SNMPathy knew the number: named and tagged by the next tagging run.
+    dev = make_device("lynx", "10.6.0.1")
+    db.update("devices", dev["id"], {"vendor": "Enterprise 16177", "sys_object_id": "1.3.6.1.4.1.16177.1.1",
+                                     "sys_descr": "Lynx-3510"})
+    result = brands.tag_all(db)
+    row = db.one("SELECT vendor, tags FROM devices WHERE id = ?", (dev["id"],))
+    assert row["vendor"] == "Westermo" and "Westermo" in json.loads(row["tags"])
+    assert result["brands"] == {"Westermo": 1}
