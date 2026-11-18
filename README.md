@@ -213,6 +213,10 @@ vendor, MAC address and description; hosts you already monitor are marked.
 * **Run from**: this server, or a remote collector to scan another site's network.
 * **Edit**: change a scan's targets, credentials, schedule or adding rules later with **Edit**
   on the scan list or the scan's page (**Save & run now** re-runs it straight away).
+* **Results**: the scan list and each scan's page follow a running scan live (addresses scanned,
+  hosts answering so far). When a run finishes they show that run: **Found** is the hosts that
+  answered and are not devices yet (with how many answered in all), **Added** is the devices the
+  run added (with the total over all runs). A rescan that finds nothing new shows 0 and 0.
 
 From the command line (prints results; `--add snmp|alive` also adds them to the database):
 
@@ -223,7 +227,7 @@ snmpathy scan 10.0.0.0/24 -c public -c s3cret --tcp 22,443 --add snmp --tag lab
 ### Brand tags
 
 When discovery or a network scan detects who made a device, SNMPathy tags it with the brand:
-`Cisco`, `Ubiquiti`, `Rajant`, `Tachyon`, `Juniper`, `Fortinet`, `Synology`, ... The brand
+`Cisco`, `Ubiquiti`, `Rajant`, `Tachyon`, `Westermo`, `Juniper`, `Fortinet`, `Synology`, ... The brand
 comes from the SNMP sysObjectID (or a vendor MIB such as Ubiquiti's); devices that only
 report a generic Net-SNMP agent are recognised from their description (Synology, QNAP,
 pfSense, OPNsense, MikroTik, UniFi, Proxmox, ...).

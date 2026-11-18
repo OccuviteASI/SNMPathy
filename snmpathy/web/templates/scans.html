@@ -11,13 +11,18 @@
       <thead><tr><th>Scan</th><th>Targets</th><th>Runs from</th><th>State</th><th>Found</th><th>Added</th><th>Last run</th><th>Repeats</th><th></th></tr></thead>
       <tbody>
       {% for s in scans %}
-        <tr>
+        <tr data-scan-id="{{ s.id }}" data-state="{{ s.state }}">
           <td><a href="/scans/{{ s.id }}"><strong>{{ s.name }}</strong></a></td>
           <td class="mono small" style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ s.targets }}">{{ s.targets }}</td>
           <td>{{ s.collector_name or 'This server' }}</td>
-          <td>{{ status({'done': 'up', 'running': 'pending', 'queued': 'pending', 'failed': 'down', 'interrupted': 'warning', 'cancelled': 'unknown'}.get(s.state, 'unknown'), s.state) }}{% if s.state == 'running' %} <span class="small muted">{{ s.scanned }}/{{ s.total }}</span>{% endif %}</td>
-          <td class="num">{{ s.found }}</td>
-          <td class="num" title="{{ s.added_last }} from the latest run">{{ s.added }}</td>
+          <td class="scan-state">{{ status({'done': 'up', 'running': 'pending', 'queued': 'pending', 'failed': 'down', 'interrupted': 'warning', 'cancelled': 'unknown'}.get(s.state, 'unknown'), s.state) }}{% if s.state == 'running' %} <span class="small muted">{{ s.scanned }}/{{ s.total }}</span>{% endif %}</td>
+          {% if s.state in ('running', 'queued') %}
+          <td class="num"><span class="muted">…</span><div class="small muted scan-so-far">{{ s.found }} responding so far</div></td>
+          <td class="num"><span class="muted">…</span></td>
+          {% else %}
+          <td class="num" title="Hosts in the latest run that were not devices yet">{{ s.found_new }}<div class="small muted">of {{ s.found }} responding</div></td>
+          <td class="num" title="Devices the latest run added">{{ s.added_last }}{% if s.added != s.added_last %}<div class="small muted">{{ s.added }} in all runs</div>{% endif %}</td>
+          {% endif %}
           <td class="nowrap">{{ s.finished_at|ts('ago')|safe }}</td>
           <td>{{ (s.interval|duration) if s.interval else 'once' }}{% if s.interval and s.next_run %}<div class="small muted">next {{ s.next_run|ts('ago')|safe }}</div>{% endif %}</td>
           <td class="nowrap"><button class="btn sm" data-action="api" data-url="/api/scans/{{ s.id }}/run" data-success="Scan started">Run now</button> <a class="btn sm" href="/scans/{{ s.id }}?edit=1">Edit</a></td>
@@ -31,5 +36,35 @@
 </div>
 
 {% include "_scan_form.html" %}
+{% endblock %}
+{% block scripts %}
+<script>
+// Running scans: show their progress here, then reload once they finish for the final counts.
+document.addEventListener("DOMContentLoaded", () => {
+  const active = (state) => state === "running" || state === "queued";
+  const rows = () => SP.$$("tr[data-scan-id]");
+  if (!rows().some((tr) => active(tr.dataset.state))) return;
+  async function poll() {
+    let scans;
+    try { scans = await SP.api("GET", "/api/scans"); } catch (e) { return setTimeout(poll, 4000); }
+    let finished = false;
+    for (const s of scans) {
+      const tr = SP.$(`tr[data-scan-id="${s.id}"]`);
+      if (!tr) continue;
+      if (active(tr.dataset.state) && !active(s.state)) finished = true;
+      if (!active(s.state)) continue;
+      const pct = s.total ? Math.round(s.scanned / s.total * 100) : 0;
+      SP.$(".scan-state", tr).innerHTML = `<span class="status pending">${SP.esc(s.state)}</span> `
+        + `<span class="small muted">${s.scanned.toLocaleString()}/${s.total.toLocaleString()}</span>`
+        + `<div class="progress" style="margin-top:4px;max-width:140px"><span style="width:${pct}%"></span></div>`;
+      const soFar = SP.$(".scan-so-far", tr);
+      if (soFar) soFar.textContent = `${s.found} responding so far`;
+    }
+    if (finished) return location.reload();
+    setTimeout(poll, 2000);
+  }
+  poll();
+});
+</script>
 {% endblock %}
 

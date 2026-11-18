@@ -49,6 +49,7 @@ DESCR_HINTS: list[tuple[str, str]] = [
     (r"\bubiquiti\b|\bunifi\b|\bubnt\b|\bairos\b|\bedgeos\b|\bedgeswitch\b|\buisp\b", "Ubiquiti"),
     (r"\brajant\b|\bbreadcrumb\b", "Rajant"),
     (r"\btachyon\b", "Tachyon"),
+    (r"\bwestermo\b|\bweos\b", "Westermo"),
     (r"\bcisco\b", "Cisco"),
     (r"\bjuniper\b|\bjunos\b", "Juniper"),
     (r"\bfortigate\b|\bfortinet\b", "Fortinet"),
@@ -216,10 +217,24 @@ async def identify_existing(db: Database, limit: int = 500, concurrency: int = 3
     return updated
 
 
+def reresolve_enterprises(db: Database) -> int:
+    """Name the makers SNMP reported by number only ("Enterprise 16177") now that they are known."""
+    from .snmp.mibs import vendor_from_sysobjectid
+
+    changed = 0
+    for row in db.query("SELECT id, vendor, sys_object_id FROM devices WHERE vendor LIKE 'Enterprise %'"):
+        vendor = vendor_from_sysobjectid(row["sys_object_id"])
+        if vendor and vendor != row["vendor"] and not vendor.startswith("Enterprise "):
+            db.update("devices", row["id"], {"vendor": vendor})
+            changed += 1
+    return changed
+
+
 def tag_all(db: Database, force: bool = False, arp: dict[str, str] | None = None) -> dict[str, Any]:
     """Tag every device whose brand is known and that SNMPathy has not tagged yet."""
     if not force and not enabled(db):
         return {"tagged": 0, "brands": {}}
+    reresolve_enterprises(db)
     try:
         refresh_macs(db, arp)
     except Exception:  # the ARP table is a bonus: never block tagging on it
