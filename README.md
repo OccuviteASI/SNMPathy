@@ -524,6 +524,25 @@ message. A rule with no channels selected notifies every enabled channel. **Main
 windows** (for everything, one device or one check) suppress alerts and are excluded from
 SLA calculations.
 
+### Live updates
+
+Open pages keep themselves current. Every page with the sidebar checks the server every 15
+seconds: the **Alerts** and **Collectors** counts update in place and the browser tab shows the
+alert count (e.g. `(3) Devices · SNMPathy`). When a new alert fires, a page that is open
+announces it with a **pop-up** (with *View alerts*), a **Windows notification** and a short
+**sound**, once per alert even with several tabs open.
+
+Status pages (Devices, a device, Alerts, Uptime checks, a check, Collectors, Scans, Maintenance)
+also reload themselves every 30 seconds, keeping your scroll position and filter text. A reload
+waits while you are typing, have something ticked, have a dialog open or used the page in the
+last 10 seconds. Dashboards, the Overview, Fusion, the Network analyzer and Logs update
+themselves as before.
+
+The **Live** button at the bottom of the sidebar sets this per browser: the refresh interval
+(off, 15 s, 30 s, 1 minute, 5 minutes) and which alert notices to use. Browsers allow Windows
+notifications only on the server itself (`http://localhost:...`) or over HTTPS, and sound only
+after you have clicked on the page; Windows notifications make their own sound.
+
 ### Dashboards
 
 The **Overview** page is the **Main HUD** dashboard (Nagios Fusion style): device and check

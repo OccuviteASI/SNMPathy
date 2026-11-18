@@ -68,14 +68,21 @@ def db_of(request: Request) -> Database:
     return request.app.state.db
 
 
+# Status pages that reload themselves (seconds; each browser can change it under Live updates).
+# Pages with their own timers (dashboards, Fusion, traffic, logs, map, a scan) and forms are not here.
+AUTO_REFRESH = {name: 30 for name in ("devices.html", "device.html", "alerts.html", "checks.html", "check.html",
+                                      "collectors.html", "collector.html", "scans.html", "maintenance.html")}
+
+
 def render(request: Request, name: str, **context: Any) -> HTMLResponse:
     db = db_of(request)
     context.setdefault("nav", name.split(".")[0])
-    context["problems"] = {
-        "collectors": db.scalar("SELECT COUNT(*) FROM collectors WHERE enabled = 1 AND status = 'offline'"),
-        # Only what still needs someone: firing alerts nobody has acknowledged.
-        "alerts": db.scalar("SELECT COUNT(*) FROM alerts WHERE state = 'firing' AND acknowledged = 0"),
-    }
+    from ..services import attention_counts
+
+    # Only what still needs someone: offline collectors, firing alerts nobody has acknowledged.
+    context["problems"] = attention_counts(db)
+    # Pages that refresh themselves (base.html data-refresh; the interval is per browser).
+    context.setdefault("refresh", AUTO_REFRESH.get(name, 0))
     context["auth_enabled"] = bool(request.app.state.settings.api_token)
     from .. import adminauth
 

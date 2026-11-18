@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 {% from "_macros.html" import status, icon %}
 {% block title %}Uptime checks{% endblock %}
-{% set refresh = 60 %}
 {% block actions %}
 <input type="search" placeholder="Filter checks…" data-filter="#check-table" aria-label="Filter checks">
 <a class="btn" href="/reports/uptime">SLA report</a>

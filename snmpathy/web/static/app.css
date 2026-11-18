@@ -530,3 +530,14 @@ a.dl-row:hover { background: var(--surface-2); text-decoration: none; }
 /* Edit passcode: view-only chip and unlock button in the top bar */
 .edit-state { gap: 8px; margin-right: 8px; }
 @media (max-width: 640px) { .edit-state .status { display: none; } }
+
+/* Live updates menu (sidebar footer) */
+.sidebar-foot { position: relative; flex-wrap: wrap; }
+.live-menu { position: absolute; left: 10px; right: 10px; bottom: calc(100% + 6px); z-index: 60; background: var(--surface);
+  border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 8px 28px rgba(0,0,0,.18);
+  padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.live-menu.hidden { display: none; }
+.live-menu .live-head { font-weight: 650; }
+.live-menu .live-sub { font-weight: 600; margin-top: 4px; }
+.live-menu select { width: 100%; }
+.live-menu label.check.disabled { opacity: .55; }

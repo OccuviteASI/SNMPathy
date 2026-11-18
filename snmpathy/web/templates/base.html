@@ -25,12 +25,12 @@
       <a href="/checks" class="{{ 'active' if nav in ('checks', 'check') }}">{{ icon('check') }} Uptime checks</a>
       <a href="/syslog" class="{{ 'active' if nav in ('syslog', 'logsources') }}">{{ icon('log') }} Logs</a>
       <a href="/traffic" class="{{ 'active' if nav == 'traffic' }}">{{ icon('flow') }} Network analyzer</a>
-      <a href="/alerts" class="{{ 'active' if nav == 'alerts' }}">{{ icon('alert') }} Alerts{% if problems.alerts %}<span class="count">{{ problems.alerts }}</span>{% endif %}</a>
+      <a href="/alerts" id="nav-alerts" class="{{ 'active' if nav == 'alerts' }}">{{ icon('alert') }} Alerts{% if problems.alerts %}<span class="count">{{ problems.alerts }}</span>{% endif %}</a>
       <div class="nav-label">Analyse</div>
       <a href="/reports" class="{{ 'active' if nav in ('reports', 'report') }}">{{ icon('report') }} Reports</a>
       <a href="/status" target="_blank" rel="noopener">{{ icon('globe') }} Public status page</a>
       <div class="nav-label">Configure</div>
-      <a href="/collectors" class="{{ 'active' if nav == 'collectors' }}">{{ icon('collector') }} Collectors{% if problems.collectors %}<span class="count">{{ problems.collectors }}</span>{% endif %}</a>
+      <a href="/collectors" id="nav-collectors" class="{{ 'active' if nav == 'collectors' }}">{{ icon('collector') }} Collectors{% if problems.collectors %}<span class="count">{{ problems.collectors }}</span>{% endif %}</a>
       <a href="/maintenance" class="{{ 'active' if nav == 'maintenance' }}">{{ icon('wrench') }} Maintenance</a>
       <a href="/settings" class="{{ 'active' if nav == 'settings' }}">{{ icon('settings') }} Settings</a>
       {% if admin_allowed %}<a href="/admin" class="{{ 'active' if nav == 'admin' }}" id="nav-admin">{{ icon('server') }} Server admin</a>{% endif %}
@@ -38,6 +38,22 @@
     <div class="sidebar-foot">
       <a class="small muted" href="/admin" title="SNMPathy version{{ ' (Server admin)' if admin_allowed else ' (Server admin: passcode required)' }}" style="display:block;padding:0 4px 6px">v{{ version }}</a>
       <button class="btn ghost sm" data-action="theme" title="Switch light / dark / system theme">{{ icon('moon') }} Theme</button>
+      <button class="btn ghost sm" type="button" id="live-btn" aria-expanded="false" aria-controls="live-menu" title="Live updates: page refresh and new-alert notices">{{ icon('refresh') }} Live</button>
+      <div class="live-menu hidden" id="live-menu" role="dialog" aria-label="Live updates">
+        <div class="live-head">Live updates <span class="small muted">(this browser)</span></div>
+        <label class="field">Refresh pages
+          <select id="live-refresh">
+            <option value="0">Off</option><option value="15">Every 15 seconds</option><option value="30">Every 30 seconds</option>
+            <option value="60">Every minute</option><option value="300">Every 5 minutes</option>
+          </select></label>
+        <div class="small muted">Waits while you type, have something ticked or a dialog open. The alert count stays live either way.</div>
+        <div class="live-sub">New alerts</div>
+        <label class="check"><input type="checkbox" id="live-popups"> Pop-up in the page</label>
+        <label class="check"><input type="checkbox" id="live-notify"> Windows notification</label>
+        <div class="small muted" id="live-notify-note"></div>
+        <label class="check"><input type="checkbox" id="live-sound"> Sound</label>
+        <div class="small muted">Browsers only play sound after you have clicked on the page.</div>
+      </div>
       {% if auth_enabled %}<a class="btn ghost sm" href="/logout">Log out</a>{% endif %}
     </div>
   </aside>

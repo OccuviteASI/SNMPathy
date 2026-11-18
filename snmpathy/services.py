@@ -479,3 +479,20 @@ def overview(db: Database) -> dict[str, Any]:
             "errors_last_hour": q("SELECT COUNT(*) FROM syslog WHERE ts > ? AND severity <= 3", (time.time() - 3600,)),
         },
     }
+
+
+def attention_counts(db: Database) -> dict[str, int]:
+    """What the sidebar counts: offline collectors, and firing alerts nobody has acknowledged yet."""
+    return {
+        "collectors": db.scalar("SELECT COUNT(*) FROM collectors WHERE enabled = 1 AND status = 'offline'") or 0,
+        "alerts": db.scalar("SELECT COUNT(*) FROM alerts WHERE state = 'firing' AND acknowledged = 0") or 0,
+    }
+
+
+def new_alerts(db: Database, since: float, limit: int = 5) -> list[dict[str, Any]]:
+    """Firing, unacknowledged alerts that fired after ``since`` (newest first), for the pages' notices."""
+    return db.query(
+        "SELECT alerts.id, alerts.subject, alerts.message, alerts.severity, alerts.device_id, alerts.fired_at, "
+        "devices.name AS device_name FROM alerts LEFT JOIN devices ON devices.id = alerts.device_id "
+        "WHERE alerts.state = 'firing' AND alerts.acknowledged = 0 AND alerts.fired_at > ? "
+        "ORDER BY alerts.fired_at DESC LIMIT ?", (since, limit))
