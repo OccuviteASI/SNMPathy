@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from "_macros.html" import status, icon %}
 {% block title %}Alerts{% endblock %}
-{% set refresh = 60 if tab in ('active', 'history') else none %}
+{% set refresh = 30 if tab in ("active", "history") else 0 %}
 {% block actions %}
 {% set unacked = active|selectattr('state', 'equalto', 'firing')|rejectattr('acknowledged')|list|length %}
 {% if tab == 'active' and unacked %}<button class="btn primary" id="ack-all" data-action="api" data-url="/api/alerts/ack-all" data-body='{"by": "web"}' data-confirm="Acknowledge all {{ unacked }} firing alert{{ '' if unacked == 1 else 's' }}?" data-success="Acknowledged {acknowledged} alerts">Acknowledge all ({{ unacked }})</button>{% endif %}

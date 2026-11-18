@@ -4,6 +4,17 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 `snmpathy version`. Executables built with `scripts/build_executable` also show the git
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
+## 0.7.15
+- **Live updates.** Open pages keep the sidebar's Alerts and Collectors counts current and show
+  the alert count in the browser tab. A new alert is announced on open pages with a pop-up
+  (*View alerts*), a Windows notification and a sound, once per alert across tabs.
+- Devices, device pages, Alerts, Uptime checks, check pages, Collectors, Scans and Maintenance
+  **reload themselves every 30 seconds**, keeping the scroll position and filter text, and wait
+  while you are typing, have something ticked, have a dialog open or are using the page.
+- The **Live** button at the bottom of the sidebar sets this per browser: refresh interval
+  (off / 15 s / 30 s / 1 min / 5 min), pop-ups, Windows notifications (asks the browser's
+  permission; browsers allow these only on `localhost` or over HTTPS) and sound.
+
 ## 0.7.14
 - **Scans update live**: the Scans list now follows running scans (addresses scanned so far and a
   progress bar) and shows the final counts when they finish, without reloading the page.

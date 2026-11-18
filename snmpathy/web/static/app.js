@@ -48,7 +48,7 @@
   };
 
   // SP.toast(message, kind, {label, onClick}) - the optional action adds a button (e.g. "Undo").
-  SP.toast = function (msg, kind, action) {
+  SP.toast = function (msg, kind, action, ms) {
     let box = $("#toasts");
     if (!box) { box = document.createElement("div"); box.id = "toasts"; document.body.appendChild(box); }
     const t = document.createElement("div");
@@ -61,7 +61,7 @@
       t.appendChild(btn);
     }
     box.appendChild(t);
-    setTimeout(() => t.remove(), kind === "error" ? 7000 : action ? 8000 : 3500);
+    setTimeout(() => t.remove(), ms || (kind === "error" ? 7000 : action ? 8000 : 3500));
   };
 
   // --------------------------------------------------------------- format
@@ -1430,14 +1430,202 @@
   };
 
   // --------------------------------------------------------------- boot
+  // ------------------------------------------------------- live updates
+  // Per browser: page refresh interval and how new alerts are announced (Live menu in the sidebar).
+  const LIVE_KEY = "snmpathy.live";
+  const LIVE_DEFAULTS = { refresh: 30, popups: true, notify: true, sound: true };
+  function liveSettings() {
+    try { return Object.assign({}, LIVE_DEFAULTS, JSON.parse(localStorage.getItem(LIVE_KEY) || "{}")); }
+    catch (e) { return Object.assign({}, LIVE_DEFAULTS); }
+  }
+  function saveLive(settings) { try { localStorage.setItem(LIVE_KEY, JSON.stringify(settings)); } catch (e) { /* private window */ } }
+  SP.liveSettings = liveSettings;
+  const canNotify = () => "Notification" in window && window.isSecureContext;
+
+  // Page refresh: reload, but never while someone is using the page.
+  let lastInteraction = 0;
+  ["pointerdown", "keydown", "wheel", "touchstart"].forEach((type) =>
+    document.addEventListener(type, () => { lastInteraction = Date.now(); }, { passive: true, capture: true }));
+  function pageBusy() {
+    if (document.hidden) return true;
+    if ($(".modal-back:not(.hidden)") || $(".live-menu:not(.hidden)")) return true;
+    const active = document.activeElement;
+    if (active && active.matches && active.matches("input, select, textarea, [contenteditable]")) return true;
+    if (window.getSelection && String(window.getSelection()).trim()) return true;
+    if ($$("main input[type=checkbox]").some((c) => c.checked !== c.defaultChecked)) return true;  // e.g. a selection
+    return Date.now() - lastInteraction < 10000;
+  }
+  const VIEW_KEY = "snmpathy.view:" + location.pathname + location.search;
+  function keepView() {
+    const filters = {};
+    $$("input[data-filter]").forEach((el, i) => { if (el.value) filters[i] = el.value; });
+    try { sessionStorage.setItem(VIEW_KEY, JSON.stringify({ y: window.scrollY, filters, at: Date.now() })); } catch (e) { /* ignore */ }
+  }
+  function restoreView() {
+    let view = null;
+    try { view = JSON.parse(sessionStorage.getItem(VIEW_KEY) || "null"); sessionStorage.removeItem(VIEW_KEY); } catch (e) { return; }
+    if (!view || Date.now() - view.at > 120000) return;
+    $$("input[data-filter]").forEach((el, i) => {
+      if (view.filters && view.filters[i]) { el.value = view.filters[i]; el.dispatchEvent(new Event("input", { bubbles: true })); }
+    });
+    const scroll = () => window.scrollTo(0, view.y || 0);
+    scroll();
+    setTimeout(scroll, 150);  // after pages that draw their tables with script
+  }
   SP.autoRefresh = function (seconds) {
-    setInterval(() => { if (!document.hidden && !$(".modal-back:not(.hidden)") && !document.activeElement.closest("form")) location.reload(); }, seconds * 1000);
+    if (!seconds) return;
+    const due = Date.now() + seconds * 1000;
+    const timer = setInterval(() => {
+      if (Date.now() < due || pageBusy()) return;
+      clearInterval(timer);
+      keepView();
+      location.reload();
+    }, 1000);
   };
+
+  // Sidebar counts and new alerts, on every page.
+  const ANNOUNCED_KEY = "snmpathy.alertsAnnounced";
+  const baseTitle = document.title;
+  let openedAt = 0;
+  let audio = null;
+  function unlockAudio() {
+    try {
+      if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)();
+      if (audio.state === "suspended") audio.resume();
+    } catch (e) { audio = null; }
+  }
+  document.addEventListener("pointerdown", unlockAudio, { passive: true });
+  document.addEventListener("keydown", unlockAudio);
+  function chime() {
+    if (!audio || audio.state !== "running") return;
+    const t = audio.currentTime;
+    [[880, 0], [660, 0.18]].forEach(([freq, at]) => {
+      const osc = audio.createOscillator(), gain = audio.createGain();
+      osc.type = "sine"; osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, t + at);
+      gain.gain.exponentialRampToValueAtTime(0.25, t + at + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + at + 0.32);
+      osc.connect(gain); gain.connect(audio.destination);
+      osc.start(t + at); osc.stop(t + at + 0.35);
+    });
+  }
+  SP.chime = chime;
+  function setBadge(id, count) {
+    const link = $("#" + id);
+    if (!link) return;
+    let badge = $(".count", link);
+    if (count > 0) {
+      if (!badge) { badge = document.createElement("span"); badge.className = "count"; link.appendChild(badge); }
+      badge.textContent = count;
+    } else if (badge) badge.remove();
+  }
+  function announced() {
+    try { return new Set(JSON.parse(localStorage.getItem(ANNOUNCED_KEY) || "[]")); } catch (e) { return new Set(); }
+  }
+  function announce(alerts) {
+    const done = announced();  // other tabs may have announced some already
+    const fresh = alerts.filter((a) => !done.has(a.id));
+    if (!fresh.length) return;
+    fresh.forEach((a) => done.add(a.id));
+    try { localStorage.setItem(ANNOUNCED_KEY, JSON.stringify([...done].slice(-200))); } catch (e) { /* ignore */ }
+    const settings = liveSettings();
+    fresh.slice(0, 3).forEach((a) => {
+      const text = (a.device_name ? a.device_name + ": " : "") + a.subject;
+      if (settings.popups) {
+        SP.toast("New alert - " + text, a.severity === "critical" ? "error" : "",
+                 { label: "View alerts", onClick: () => { location.href = "/alerts"; } }, 15000);
+      }
+      if (settings.notify && canNotify() && Notification.permission === "granted") {
+        try {
+          const note = new Notification("SNMPathy alert", { body: text + (a.message ? "\n" + a.message : ""), tag: "snmpathy-alert-" + a.id });
+          note.onclick = () => { window.focus(); location.href = "/alerts"; note.close(); };
+        } catch (e) { /* e.g. Android needs a service worker */ }
+      }
+    });
+    if (fresh.length > 3 && settings.popups) SP.toast(`${fresh.length - 3} more new alerts`, "", { label: "View alerts", onClick: () => { location.href = "/alerts"; } }, 15000);
+    if (settings.sound) chime();
+  }
+  async function livePoll() {
+    try {
+      const since = openedAt ? openedAt - 60 : 0;
+      const resp = await fetch(`/api/ui/status?since=${since}`, { credentials: "same-origin", headers: { Accept: "application/json" } });
+      if (resp.ok) {
+        const d = await resp.json();
+        setBadge("nav-alerts", d.alerts);
+        setBadge("nav-collectors", d.collectors_offline);
+        document.title = (d.alerts ? `(${d.alerts}) ` : "") + baseTitle;
+        if (!openedAt) openedAt = d.now;  // only alerts from now on are announced
+        else if (d.new_alerts && d.new_alerts.length) announce(d.new_alerts);
+      }
+    } catch (e) { /* server restarting: try again */ }
+    setTimeout(livePoll, document.hidden ? 30000 : 15000);
+  }
+  SP.livePoll = livePoll;
+
+  // The Live menu.
+  function liveMenu() {
+    const btn = $("#live-btn"), menu = $("#live-menu");
+    if (!btn || !menu) return;
+    const settings = liveSettings();
+    const refresh = $("#live-refresh"), popups = $("#live-popups"), notify = $("#live-notify"), sound = $("#live-sound");
+    refresh.value = String(settings.refresh);
+    if (!refresh.value) refresh.value = "30";
+    popups.checked = settings.popups;
+    sound.checked = settings.sound;
+    const note = $("#live-notify-note");
+    if (!canNotify()) {
+      notify.checked = false; notify.disabled = true; notify.closest("label").classList.add("disabled");
+      note.textContent = "Browsers allow these only on the server itself (localhost) or over HTTPS.";
+    } else {
+      notify.checked = settings.notify && Notification.permission !== "denied";
+      if (Notification.permission === "denied") note.textContent = "Blocked in this browser's site settings.";
+    }
+    const save = () => {
+      saveLive({ refresh: Number(refresh.value), popups: popups.checked, notify: notify.checked, sound: sound.checked });
+    };
+    refresh.addEventListener("change", () => { save(); SP.toast(Number(refresh.value) ? "Pages refresh " + refresh.selectedOptions[0].textContent.toLowerCase() : "Page refresh is off"); });
+    [popups, sound].forEach((el) => el.addEventListener("change", save));
+    sound.addEventListener("change", () => { if (sound.checked) { unlockAudio(); setTimeout(chime, 50); } });
+    notify.addEventListener("change", async () => {
+      save();
+      if (notify.checked && Notification.permission === "default") {
+        const answer = await Notification.requestPermission();
+        if (answer !== "granted") { notify.checked = false; save(); note.textContent = "Not allowed in this browser."; }
+      }
+    });
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const open = menu.classList.toggle("hidden") === false;
+      btn.setAttribute("aria-expanded", String(open));
+    });
+    document.addEventListener("click", (e) => {
+      if (!menu.classList.contains("hidden") && !menu.contains(e.target) && e.target !== btn) {
+        menu.classList.add("hidden"); btn.setAttribute("aria-expanded", "false");
+      }
+    });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") menu.classList.add("hidden"); });
+    // Browsers ask for notification permission only after a click: offer it once.
+    let asked = false;
+    try { asked = !!localStorage.getItem("snmpathy.notifyAsked"); } catch (e) { asked = true; }
+    if (settings.notify && canNotify() && Notification.permission === "default" && !asked) {
+      SP.toast("Get a Windows notification when an alert fires?", "", {
+        label: "Turn on", onClick: () => { Notification.requestPermission().then((a) => { if (a !== "granted") { notify.checked = false; save(); } }); },
+      }, 20000);
+      try { localStorage.setItem("snmpathy.notifyAsked", "1"); } catch (e) { /* ignore */ }
+    }
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     localizeTimes(document);
     setInterval(() => $$("time[data-fmt=ago]").forEach((el) => (el.textContent = SP.ago(+el.dataset.ts))), 15000);
     $$("[data-spark]").forEach((el) => { try { SP.sparkline(el, JSON.parse(el.dataset.spark), el.dataset.unit); } catch (e) { /* ignore */ } });
-    const refresh = document.body.dataset.refresh;
-    if (refresh) SP.autoRefresh(+refresh);
+    restoreView();
+    const pageRefresh = +(document.body.dataset.refresh || 0);
+    if (pageRefresh) {
+      const chosen = liveSettings().refresh;  // this browser's choice (Live menu); 0 = off
+      SP.autoRefresh(chosen == null ? pageRefresh : chosen);
+    }
+    liveMenu();
+    if ($("#nav-alerts")) livePoll();  // pages with the sidebar (not the public status page)
   });
 })();

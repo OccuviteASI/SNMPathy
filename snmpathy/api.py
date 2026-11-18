@@ -1055,6 +1055,15 @@ def preview_scan(body: dict[str, Any]):
     return {"count": len(hosts), "first": hosts[:5], "last": hosts[-3:] if len(hosts) > 5 else []}
 
 
+@router.get("/ui/status", tags=["system"])
+def ui_status(since: float = 0, db: Database = Depends(get_db)):
+    """For open pages: the sidebar counts and alerts that fired after ``since`` (server time)."""
+    now = time.time()
+    counts = services.attention_counts(db)
+    fresh = services.new_alerts(db, since) if since > 0 else []
+    return {"now": now, "alerts": counts["alerts"], "collectors_offline": counts["collectors"], "new_alerts": fresh}
+
+
 @router.get("/scans", tags=["scans"])
 def list_scans(request: Request, db: Database = Depends(get_db)):
     return [_public_scan(db, s) for s in db.query("SELECT * FROM scans ORDER BY created_at DESC")]

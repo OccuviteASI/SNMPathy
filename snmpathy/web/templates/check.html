@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 {% from "_macros.html" import status, icon %}
 {% block title %}{{ check.name }}{% endblock %}
-{% set refresh = 60 %}
 {% block crumbs %}<div class="crumbs"><a href="/checks">Uptime checks</a>{% if check.device_name %} / <a href="/devices/{{ check.device_id }}">{{ check.device_name }}</a>{% endif %}</div>{% endblock %}
 {% block heading %}{{ check.name }} {% if not check.enabled %}{{ status('paused') }}{% else %}{{ status(check.state) }}{% endif %}{% endblock %}
 {% block actions %}
