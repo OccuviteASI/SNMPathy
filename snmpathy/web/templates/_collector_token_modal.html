@@ -4,6 +4,11 @@
     <div class="card-head"><h2>Set up the collector</h2></div>
     <div class="modal-body">
       <div class="callout mb small"><strong>Copy the setup code now</strong> - it holds the collector's token, which is shown only once. If it is lost, issue a new one from the collector's page.</div>
+      <label class="field mb">Collectors connect to the server at
+        <input id="tok-server" list="tok-servers" autocomplete="off" spellcheck="false" style="max-width:420px">
+        <datalist id="tok-servers"></datalist>
+      </label>
+      <p class="small muted" id="tok-server-note" style="margin-top:-6px"></p>
       <h3 style="margin:0 0 6px">1. Download SNMPathy Collector on the site's computer</h3>
       <div class="row mb" id="tok-apps">
         <a class="btn" href="/collector/download/SNMPathy-Collector-windows.exe">{{ icon('download') }} Windows</a>

@@ -18,17 +18,39 @@
     box.appendChild(b);
   }
   function setBox(box, text) { box.textContent = text; box.dataset.text = text; copyButton(box); }
+  // Same format as collector_app.encode_setup_code: base64url of {"s": server, "t": token}.
+  SP.setupCode = function (server, token) {
+    const json = JSON.stringify({ s: server.replace(/\/+$/, ""), t: token });
+    const b64 = btoa(unescape(encodeURIComponent(json))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    return "SNMPATHY-SETUP-1:" + b64;
+  };
   SP.showCollectorToken = function (r, doneHref) {
     const modal = SP.$("#token-modal");
-    setBox(SP.$("#tok-token"), r.token);
-    setBox(SP.$("#tok-setup"), r.install.app);
-    const show = (os) => {
+    let os = /Mac/.test(navigator.platform) ? "macos" : /Linux/.test(navigator.platform) ? "linux" : "windows";
+    const server = SP.$("#tok-server");
+    const base = r.server || "";
+    const current = () => (server.value.trim() || base).replace(/\/+$/, "");
+    // The install commands carry the server address: swap it for the one chosen here.
+    const withServer = (text) => (base ? text.split(base).join(current()) : text);
+    const show = (pick) => {
+      os = pick || os;
       SP.$$("#tok-tabs button").forEach((b) => b.classList.toggle("on", b.dataset.os === os));
-      setBox(SP.$("#tok-cmd"), r.install[os]);
+      setBox(SP.$("#tok-cmd"), withServer(r.install[os]));
       SP.$("#tok-hint").textContent = hints[os];
     };
+    const update = () => {
+      setBox(SP.$("#tok-setup"), base ? SP.setupCode(current(), r.token) : r.install.app);
+      show();
+    };
+    server.value = base;
+    SP.$("#tok-servers").innerHTML = (r.servers || []).map((u) => `<option value="${SP.esc(u)}">`).join("");
+    SP.$("#tok-server-note").textContent = r.opened_on_server
+      ? "You opened SNMPathy on the server itself (localhost), so this is the server's network address. Change it if the site reaches the server another way (VPN, public address or a name)."
+      : "The address you opened SNMPathy with. Change it if the site reaches the server another way (VPN, public address or a name).";
+    server.oninput = update;
+    setBox(SP.$("#tok-token"), r.token);
     SP.$$("#tok-tabs button").forEach((b) => (b.onclick = () => show(b.dataset.os)));
-    show(/Mac/.test(navigator.platform) ? "macos" : /Linux/.test(navigator.platform) ? "linux" : "windows");
+    update();
     SP.$("#tok-done").href = doneHref || location.pathname;
     SP.openModal(modal);
   };

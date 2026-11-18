@@ -105,8 +105,10 @@ def server_name(settings: Any) -> str:
 
 
 def base_url_of(request: Request) -> str:
-    settings = request.app.state.settings
-    return (getattr(settings, "public_url", "") or str(request.base_url)).rstrip("/")
+    """This server's address for other computers (public_url, or the network address instead of localhost)."""
+    from .collector_api import _base_url
+
+    return _base_url(request)
 
 
 # ======================================================================= summary
