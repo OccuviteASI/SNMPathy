@@ -4,6 +4,17 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 `snmpathy version`. Executables built with `scripts/build_executable` also show the git
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
+## 0.7.16
+- **Collector setup codes no longer point at localhost.** A collector added from a browser on the
+  server itself (the tray opens `http://localhost:8080`) got a setup code and install commands
+  with `localhost`, which the site computer cannot use. They now use the server's network
+  address. The *Set up the collector* dialog shows the address with suggestions (network address,
+  computer name) and updates the code and commands when you change it; `public_url` still wins.
+  Fusion uses the same address.
+- SNMPathy Collector's setup window has a **Server address** field, filled in from the setup code
+  and editable, so an existing code can be used with the right address. A localhost address that
+  cannot be reached explains what to enter.
+
 ## 0.7.15
 - **Live updates.** Open pages keep the sidebar's Alerts and Collectors counts current and show
   the alert count in the browser tab. A new alert is announced on open pages with a pop-up

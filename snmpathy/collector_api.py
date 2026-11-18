@@ -148,9 +148,86 @@ class CollectorPatch(BaseModel):
     failover: Optional[bool] = None  # this server takes over while the collector is offline
 
 
+LOOPBACK_NAMES = ("localhost", "localhost.localdomain", "ip6-localhost")
+
+
+def _is_loopback(host: str) -> bool:
+    import ipaddress
+
+    host = (host or "").strip("[]").lower()
+    if host in LOOPBACK_NAMES:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def lan_address() -> str:
+    """This computer's address on the network (the interface it uses to reach others); '' if unknown."""
+    import socket
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("10.254.254.254", 1))  # UDP connect sends nothing: it only picks the route
+            address = sock.getsockname()[0]
+        if address and not _is_loopback(address) and address != "0.0.0.0":
+            return address
+    except OSError:
+        pass
+    try:
+        address = socket.gethostbyname(socket.gethostname())
+        return "" if _is_loopback(address) else address
+    except OSError:
+        return ""
+
+
+def _with_host(request: Request, host: str) -> str:
+    url = request.base_url
+    port = f":{url.port}" if url.port else ""
+    return f"{url.scheme}://{host}{port}"
+
+
 def _base_url(request: Request) -> str:
+    """The address other computers (collectors, Fusion) use for this server.
+
+    public_url when set; otherwise the address the browser used, except that a browser on the server
+    itself (localhost) is replaced by the server's network address, which the site can reach.
+    """
     public = request.app.state.settings.public_url
-    return (public or str(request.base_url)).rstrip("/")
+    if public:
+        return public.rstrip("/")
+    if _is_loopback(request.base_url.hostname or ""):
+        lan = lan_address()
+        if lan:
+            return _with_host(request, lan)
+    return str(request.base_url).rstrip("/")
+
+
+def server_addresses(request: Request) -> list[str]:
+    """Suggestions for the address collectors use: the chosen one, the network address, the name, others."""
+    import socket
+
+    hosts: list[str] = []
+    lan = lan_address()
+    if lan:
+        hosts.append(lan)
+    try:
+        name = socket.gethostname()
+        hosts.append(name)
+        hosts += [info[4][0] for info in socket.getaddrinfo(name, None, socket.AF_INET)]
+    except OSError:
+        pass
+    found = [_base_url(request)] + [_with_host(request, h) for h in hosts if h and not _is_loopback(h)]
+    if not _is_loopback(request.base_url.hostname or ""):
+        found.append(str(request.base_url).rstrip("/"))
+    return list(dict.fromkeys(found))  # in order, without repeats
+
+
+def _setup_info(request: Request, token: str) -> dict[str, Any]:
+    """What the "Set up the collector" dialog needs."""
+    return {"token": token, "install": install_commands(request, token), "server": _base_url(request),
+            "servers": server_addresses(request), "opened_on_server": _is_loopback(request.base_url.hostname or "")}
 
 
 def install_commands(request: Request, token: str) -> dict[str, str]:
@@ -184,7 +261,7 @@ def create_collector(body: CollectorIn, request: Request, db: Database = Depends
         row, token = collectors.create_collector(db, body.name, body.site, body.description)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    return {**collectors.public_collector(row), "token": token, "install": install_commands(request, token)}
+    return {**collectors.public_collector(row), **_setup_info(request, token)}
 
 
 @router.get("/api/collectors/{collector_id}", tags=["collectors"])
@@ -216,7 +293,7 @@ def rotate_collector_token(collector_id: int, request: Request, db: Database = D
         token = collectors.rotate_token(db, collector_id)
     except KeyError as exc:
         raise HTTPException(404, "collector not found") from exc
-    return {"token": token, "install": install_commands(request, token)}
+    return _setup_info(request, token)
 
 
 @router.delete("/api/collectors/{collector_id}", status_code=204, tags=["collectors"])

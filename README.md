@@ -317,6 +317,13 @@ code. The setup asks what this computer should be:
   port (opening the firewall for it if you tick that) and adds it to your server's **Fusion**
   dashboard in place of the collector.
 
+**Server address:** the dialog shows the address collectors use to reach the server, and the
+setup code and install commands follow it. Opened on the server itself (`localhost`), it uses the
+server's network address instead; change it if the site reaches the server another way (a name,
+VPN or public address), or set `public_url` in `snmpathy.yaml` to always use one address. The
+collector's setup window also has a **Server address** field, so a code made with the wrong
+address can be corrected there.
+
 Your server fetches the SNMPathy Collector files from the GitHub release the first time
 someone downloads them and keeps them in its `downloads` folder.
 

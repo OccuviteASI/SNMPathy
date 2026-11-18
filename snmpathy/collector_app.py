@@ -69,6 +69,43 @@ def decode_setup_code(code: str) -> dict[str, Any]:
     return {"server": server.rstrip("/"), "token": token, "insecure": bool(data.get("k"))}
 
 
+def normalize_server(address: str) -> str:
+    """'192.168.1.10:8080' -> 'http://192.168.1.10:8080' (what people type into the address field)."""
+    address = (address or "").strip()
+    if address and not address.startswith(("http://", "https://")):
+        address = "http://" + address
+    return address.rstrip("/")
+
+
+def resolve_setup(code: str, server: str = "") -> dict[str, Any]:
+    """The setup code, with the server address from the address field when one is given."""
+    info = decode_setup_code(code)
+    server = normalize_server(server)
+    if server:
+        from urllib.parse import urlsplit
+
+        if not urlsplit(server).hostname:
+            raise ValueError(f"{server} is not a server address (e.g. http://192.168.1.10:8080)")
+        info["server"] = server
+    return info
+
+
+def _points_here(server: str) -> bool:
+    from urllib.parse import urlsplit
+
+    host = (urlsplit(server).hostname or "").lower()
+    return host in ("localhost", "::1") or host.startswith("127.")
+
+
+def unreachable(server: str, exc: Exception) -> RuntimeError:
+    """Why the server could not be reached; a localhost address gets the likely reason."""
+    if _points_here(server):
+        return RuntimeError(f"could not reach {server}. The setup code points at localhost (the computer it was "
+                            f"made on): enter the server's address in Server address, "
+                            f"e.g. http://192.168.1.10:8080")
+    return RuntimeError(f"could not reach {server}: {exc}")
+
+
 # --------------------------------------------------------------------------- config
 def config_path() -> Path:
     return app_dir() / CONFIG_NAME
@@ -110,7 +147,7 @@ def check_server(server: str, token: str, insecure: bool = False) -> None:
         with _client(server, insecure, token) as http:
             r = http.get("/api/collector/v1/config")
     except httpx.HTTPError as exc:
-        raise RuntimeError(f"could not reach {server}: {exc}")
+        raise unreachable(server, exc)
     if r.status_code == 401:
         raise RuntimeError("the server did not accept the collector token: create a new setup code "
                            "on its Collectors page")
@@ -161,6 +198,8 @@ def install_full_server(server: str, token: str, insecure: bool = False, folder:
                     fh.write(chunk)
     except httpx.HTTPError as exc:
         part.unlink(missing_ok=True)
+        if _points_here(server):
+            raise unreachable(server, exc)
         raise RuntimeError(f"download failed: {exc}")
     if not sys.platform.startswith("win"):
         part.chmod(0o755)
@@ -237,6 +276,14 @@ class SetupWindow:
         if existing and existing.get("server") and existing.get("token"):
             self.code.insert(0, encode_setup_code(existing["server"], existing["token"],
                                                   str(existing.get("verify_tls", "true")).lower() == "false"))
+        ttk.Label(frame, text="Server address (from the setup code; change it if this computer reaches the server "
+                              "another way)", wraplength=520, justify="left").pack(anchor="w")
+        self.server = ttk.Entry(frame, width=72)
+        self.server.pack(fill="x", pady=(2, 10))
+        self._filled = ""  # what the code filled in (replaced when another code is pasted)
+        for event in ("<KeyRelease>", "<<Paste>>", "<FocusOut>"):
+            self.code.bind(event, lambda _e: self.root.after(10, self._fill_server))
+        self._fill_server()
         ttk.Label(frame, text="Install").pack(anchor="w")
         self.mode = tk.StringVar(value="collector")
         ttk.Radiobutton(frame, variable=self.mode, value="collector",
@@ -268,6 +315,17 @@ class SetupWindow:
         root.attributes("-topmost", True)
         root.after(800, lambda: root.attributes("-topmost", False))
 
+    def _fill_server(self) -> None:
+        try:
+            server = decode_setup_code(self.code.get())["server"]
+        except ValueError:
+            return
+        current = self.server.get().strip()
+        if not current or current == self._filled:
+            self.server.delete(0, "end")
+            self.server.insert(0, server)
+            self._filled = server
+
     def _sync(self) -> None:
         self.fw_box.state(["!disabled"] if self.mode.get() == "server" else ["disabled"])
 
@@ -280,7 +338,7 @@ class SetupWindow:
 
     def install(self) -> None:
         try:
-            info = decode_setup_code(self.code.get())
+            info = resolve_setup(self.code.get(), self.server.get())
         except ValueError as exc:
             self.status.configure(text=str(exc))
             return
