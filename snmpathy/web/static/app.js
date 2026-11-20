@@ -1433,7 +1433,7 @@
   // ------------------------------------------------------- live updates
   // Per browser: page refresh interval and how new alerts are announced (Live menu in the sidebar).
   const LIVE_KEY = "snmpathy.live";
-  const LIVE_DEFAULTS = { refresh: 30, popups: true, notify: true, sound: true };
+  const LIVE_DEFAULTS = { refresh: 30, popups: true, notify: true, sound: true, soundName: "sonar" };
   function liveSettings() {
     try { return Object.assign({}, LIVE_DEFAULTS, JSON.parse(localStorage.getItem(LIVE_KEY) || "{}")); }
     catch (e) { return Object.assign({}, LIVE_DEFAULTS); }
@@ -1496,20 +1496,39 @@
   }
   document.addEventListener("pointerdown", unlockAudio, { passive: true });
   document.addEventListener("keydown", unlockAudio);
-  function chime() {
-    if (!audio || audio.state !== "running") return;
+  // New-alert sounds, made by the browser (no sound files). Each tone: [start s, length s, wave, from Hz,
+  // to Hz (a sweep when different), loudness]. All fade in and out smoothly.
+  const SOUNDS = {
+    sonar: { label: "Sonar ping", tones: [[0, 0.55, "sine", 700, 1400, 0.28], [0.42, 0.5, "sine", 700, 1400, 0.1]] },
+    beeps: { label: "Three beeps", tones: [[0, 0.08, "square", 1000, 1000, 0.06], [0.15, 0.08, "square", 1000, 1000, 0.06],
+                                          [0.3, 0.08, "square", 1000, 1000, 0.06]] },
+    rising: { label: "Rising chime", tones: [[0, 0.4, "triangle", 523, 523, 0.3], [0.14, 0.4, "triangle", 659, 659, 0.3],
+                                            [0.28, 0.6, "triangle", 784, 784, 0.3]] },
+    knock: { label: "Double knock", tones: [[0, 0.09, "sine", 180, 120, 0.6], [0.16, 0.09, "sine", 180, 120, 0.6]] },
+  };
+  SP.SOUNDS = SOUNDS;
+  function tones(name) {
     const t = audio.currentTime;
-    [[880, 0], [660, 0.18]].forEach(([freq, at]) => {
+    (SOUNDS[name] || SOUNDS.sonar).tones.forEach(([at, len, wave, from, to, level]) => {
       const osc = audio.createOscillator(), gain = audio.createGain();
-      osc.type = "sine"; osc.frequency.value = freq;
+      osc.type = wave;
+      osc.frequency.setValueAtTime(from, t + at);
+      if (to !== from) osc.frequency.exponentialRampToValueAtTime(to, t + at + Math.min(0.25, len));
       gain.gain.setValueAtTime(0.0001, t + at);
-      gain.gain.exponentialRampToValueAtTime(0.25, t + at + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + at + 0.32);
+      gain.gain.exponentialRampToValueAtTime(level, t + at + Math.min(0.015, len / 4));
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + at + len);
       osc.connect(gain); gain.connect(audio.destination);
-      osc.start(t + at); osc.stop(t + at + 0.35);
+      osc.start(t + at); osc.stop(t + at + len + 0.02);
     });
   }
-  SP.chime = chime;
+  function playSound(name) {
+    if (!audio) return;
+    name = SOUNDS[name] ? name : liveSettings().soundName;
+    if (audio.state === "running") return tones(name);
+    // Right after a click the browser may still be starting the audio: play once it has.
+    try { Promise.resolve(audio.resume()).then(() => { if (audio.state === "running") tones(name); }); } catch (e) { /* ignore */ }
+  }
+  SP.playSound = playSound;
   function setBadge(id, count) {
     const link = $("#" + id);
     if (!link) return;
@@ -1543,7 +1562,7 @@
       }
     });
     if (fresh.length > 3 && settings.popups) SP.toast(`${fresh.length - 3} more new alerts`, "", { label: "View alerts", onClick: () => { location.href = "/alerts"; } }, 15000);
-    if (settings.sound) chime();
+    if (settings.sound) playSound(settings.soundName);
   }
   async function livePoll() {
     try {
@@ -1568,6 +1587,9 @@
     if (!btn || !menu) return;
     const settings = liveSettings();
     const refresh = $("#live-refresh"), popups = $("#live-popups"), notify = $("#live-notify"), sound = $("#live-sound");
+    const soundName = $("#live-sound-name"), soundPlay = $("#live-sound-play");
+    soundName.innerHTML = Object.entries(SOUNDS).map(([key, sd]) => `<option value="${key}">${SP.esc(sd.label)}</option>`).join("");
+    soundName.value = SOUNDS[settings.soundName] ? settings.soundName : "sonar";
     refresh.value = String(settings.refresh);
     if (!refresh.value) refresh.value = "30";
     popups.checked = settings.popups;
@@ -1581,11 +1603,15 @@
       if (Notification.permission === "denied") note.textContent = "Blocked in this browser's site settings.";
     }
     const save = () => {
-      saveLive({ refresh: Number(refresh.value), popups: popups.checked, notify: notify.checked, sound: sound.checked });
+      saveLive({ refresh: Number(refresh.value), popups: popups.checked, notify: notify.checked, sound: sound.checked,
+                 soundName: soundName.value });
     };
     refresh.addEventListener("change", () => { save(); SP.toast(Number(refresh.value) ? "Pages refresh " + refresh.selectedOptions[0].textContent.toLowerCase() : "Page refresh is off"); });
     [popups, sound].forEach((el) => el.addEventListener("change", save));
-    sound.addEventListener("change", () => { if (sound.checked) { unlockAudio(); setTimeout(chime, 50); } });
+    const preview = () => { unlockAudio(); playSound(soundName.value); };
+    sound.addEventListener("change", () => { if (sound.checked) preview(); });
+    soundName.addEventListener("change", () => { save(); preview(); });
+    soundPlay.addEventListener("click", preview);
     notify.addEventListener("change", async () => {
       save();
       if (notify.checked && Notification.permission === "default") {

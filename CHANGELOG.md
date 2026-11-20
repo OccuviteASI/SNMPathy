@@ -4,6 +4,12 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 `snmpathy version`. Executables built with `scripts/build_executable` also show the git
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
+## 0.7.17
+- **New alert sounds.** The two-note alert chime is replaced by a choice of four sounds in the
+  **Live** menu: *Sonar ping* (the default, a rising sweep with an echo), *Three beeps*, *Rising
+  chime* and *Double knock*. Choosing one plays it, ▶ plays it again, and each browser remembers
+  its choice.
+
 ## 0.7.16
 - **Collector setup codes no longer point at localhost.** A collector added from a browser on the
   server itself (the tray opens `http://localhost:8080`) got a setup code and install commands
