@@ -547,7 +547,13 @@ themselves as before.
 
 The **Live** button at the bottom of the sidebar sets this per browser: the refresh interval
 (off, 15 s, 30 s, 1 minute, 5 minutes), which alert notices to use and the alert sound
-(Sonar ping, Three beeps, Rising chime or Double knock; ▶ plays it). Browsers allow Windows
+(Sonar ping, Three beeps, Rising chime or Double knock; ▶ plays it).
+
+**Mute:** the bell button next to it mutes new-alert pop-ups, Windows notifications and sound in
+that browser for 15 minutes, 1 hour, 8 hours or until you unmute. Alerts still show in the count
+and on the Alerts page, and emails and other channels still go out. On the server, the tray's
+**Mute alerts** does the same for the browsers on that computer (the bell there shows
+*Muted (tray)*, and its *Unmute* also ends the tray's mute). Browsers allow Windows
 notifications only on the server itself (`http://localhost:...`) or over HTTPS, and sound only
 after you have clicked on the page; Windows notifications make their own sound.
 

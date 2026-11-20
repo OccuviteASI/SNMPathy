@@ -496,3 +496,23 @@ def new_alerts(db: Database, since: float, limit: int = 5) -> list[dict[str, Any
         "devices.name AS device_name FROM alerts LEFT JOIN devices ON devices.id = alerts.device_id "
         "WHERE alerts.state = 'firing' AND alerts.acknowledged = 0 AND alerts.fired_at > ? "
         "ORDER BY alerts.fired_at DESC LIMIT ?", (since, limit))
+
+
+# The tray's "Mute alerts": browsers on the server computer stop announcing new alerts until then.
+SERVER_MUTE_KEY = "local_alert_mute_until"
+
+
+def server_mute_until(db: Database, now: float | None = None) -> float:
+    """When the tray's mute ends (epoch seconds), -1 until unmuted, 0 when not muted."""
+    try:
+        until = float(db.get_meta(SERVER_MUTE_KEY, "0") or 0)
+    except ValueError:
+        return 0.0
+    return until if until == -1 or until > (now or time.time()) else 0.0
+
+
+def set_server_mute(db: Database, minutes: int | None) -> float:
+    """Mute for ``minutes`` (-1: until unmuted; None or 0: unmute). Returns the new end."""
+    until = 0.0 if not minutes else (-1.0 if minutes == -1 else time.time() + minutes * 60)
+    db.set_meta(SERVER_MUTE_KEY, str(until))
+    return until

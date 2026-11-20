@@ -38,6 +38,18 @@
     <div class="sidebar-foot">
       <a class="small muted" href="/admin" title="SNMPathy version{{ ' (Server admin)' if admin_allowed else ' (Server admin: passcode required)' }}" style="display:block;padding:0 4px 6px">v{{ version }}</a>
       <button class="btn ghost sm" data-action="theme" title="Switch light / dark / system theme">{{ icon('moon') }} Theme</button>
+      <button class="btn ghost sm" type="button" id="mute-btn" aria-expanded="false" aria-controls="mute-menu" title="Mute new-alert pop-ups, notifications and sound in this browser"><span class="mute-on">{{ icon('bell') }}</span><span class="mute-off">{{ icon('bell-off') }}</span> <span id="mute-label">Mute</span></button>
+      <div class="live-menu hidden" id="mute-menu" role="dialog" aria-label="Mute alerts">
+        <div class="live-head">Mute new alerts <span class="small muted">(this browser)</span></div>
+        <div class="small muted" id="mute-state">Pop-ups, Windows notifications and sound stop. Alerts still show in the count and on the Alerts page, and emails still go out.</div>
+        <div class="mute-choices">
+          <button class="btn sm" type="button" data-mute="15">15 minutes</button>
+          <button class="btn sm" type="button" data-mute="60">1 hour</button>
+          <button class="btn sm" type="button" data-mute="480">8 hours</button>
+          <button class="btn sm" type="button" data-mute="-1">Until I unmute</button>
+        </div>
+        <button class="btn primary sm hidden" type="button" id="mute-off">Unmute</button>
+      </div>
       <button class="btn ghost sm" type="button" id="live-btn" aria-expanded="false" aria-controls="live-menu" title="Live updates: page refresh and new-alert notices">{{ icon('refresh') }} Live</button>
       <div class="live-menu hidden" id="live-menu" role="dialog" aria-label="Live updates">
         <div class="live-head">Live updates <span class="small muted">(this browser)</span></div>

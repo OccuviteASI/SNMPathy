@@ -543,3 +543,9 @@ a.dl-row:hover { background: var(--surface-2); text-decoration: none; }
 .live-menu label.check.disabled { opacity: .55; }
 .live-menu .live-sound-row { gap: 6px; flex-wrap: nowrap; }
 .live-menu .live-sound-row select { flex: 1; min-width: 0; width: auto; }
+/* Mute new alerts (sidebar footer) */
+#mute-btn .mute-off { display: none; }
+#mute-btn.muted .mute-on { display: none; }
+#mute-btn.muted .mute-off { display: inline; }
+#mute-btn.muted { color: var(--warning-text); }
+.mute-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
