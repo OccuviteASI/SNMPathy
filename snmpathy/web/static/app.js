@@ -1433,12 +1433,25 @@
   // ------------------------------------------------------- live updates
   // Per browser: page refresh interval and how new alerts are announced (Live menu in the sidebar).
   const LIVE_KEY = "snmpathy.live";
-  const LIVE_DEFAULTS = { refresh: 30, popups: true, notify: true, sound: true, soundName: "sonar" };
+  // mutedUntil: 0 = not muted, -1 = until unmuted, else a time (ms) when the mute ends.
+  const LIVE_DEFAULTS = { refresh: 30, popups: true, notify: true, sound: true, soundName: "sonar", mutedUntil: 0 };
   function liveSettings() {
     try { return Object.assign({}, LIVE_DEFAULTS, JSON.parse(localStorage.getItem(LIVE_KEY) || "{}")); }
     catch (e) { return Object.assign({}, LIVE_DEFAULTS); }
   }
-  function saveLive(settings) { try { localStorage.setItem(LIVE_KEY, JSON.stringify(settings)); } catch (e) { /* private window */ } }
+  function saveLive(settings) {
+    // Keep what the other menu set (each menu saves only its own fields).
+    try { localStorage.setItem(LIVE_KEY, JSON.stringify(Object.assign(liveSettings(), settings))); } catch (e) { /* private window */ }
+  }
+  function mutedUntil() {
+    const until = Number(liveSettings().mutedUntil) || 0;
+    return until === -1 || until > Date.now() ? until : 0;
+  }
+  // The tray's "Mute alerts" (browsers on the server computer only; from /api/ui/status, server seconds).
+  let serverMute = 0;
+  const serverMuted = () => serverMute === -1 || serverMute > Date.now() / 1000;
+  SP.alertsMuted = () => mutedUntil() !== 0 || serverMuted();
+  let showMute = () => {};
   SP.liveSettings = liveSettings;
   const canNotify = () => "Notification" in window && window.isSecureContext;
 
@@ -1548,6 +1561,7 @@
     fresh.forEach((a) => done.add(a.id));
     try { localStorage.setItem(ANNOUNCED_KEY, JSON.stringify([...done].slice(-200))); } catch (e) { /* ignore */ }
     const settings = liveSettings();
+    if (SP.alertsMuted()) return;  // muted (bell or tray): counted and listed, not announced
     fresh.slice(0, 3).forEach((a) => {
       const text = (a.device_name ? a.device_name + ": " : "") + a.subject;
       if (settings.popups) {
@@ -1573,6 +1587,9 @@
         setBadge("nav-alerts", d.alerts);
         setBadge("nav-collectors", d.collectors_offline);
         document.title = (d.alerts ? `(${d.alerts}) ` : "") + baseTitle;
+        const before = serverMuted();
+        serverMute = Number(d.server_muted_until) || 0;
+        if (serverMuted() !== before) showMute();
         if (!openedAt) openedAt = d.now;  // only alerts from now on are announced
         else if (d.new_alerts && d.new_alerts.length) announce(d.new_alerts);
       }
@@ -1582,6 +1599,61 @@
   SP.livePoll = livePoll;
 
   // The Live menu.
+  // Mute: a bell in the sidebar silences new-alert notices in this browser for a while.
+  function muteMenu() {
+    const btn = $("#mute-btn"), menu = $("#mute-menu");
+    if (!btn || !menu) return;
+    const label = $("#mute-label"), off = $("#mute-off"), state = $("#mute-state");
+    const intro = state.textContent;
+    const show = () => {
+      let until = mutedUntil();
+      const byTray = !until && serverMuted();
+      if (byTray) until = serverMute === -1 ? -1 : serverMute * 1000;
+      btn.classList.toggle("muted", !!until);
+      off.classList.toggle("hidden", !until);
+      if (!until) {
+        label.textContent = "Mute"; btn.title = "Mute new-alert pop-ups, notifications and sound in this browser";
+        state.textContent = intro;
+        return;
+      }
+      const left = until === -1 ? "" : Math.max(1, Math.round((until - Date.now()) / 60000));
+      const text = until === -1 ? "until you unmute" : left >= 60 ? `for ${Math.floor(left / 60)} h ${left % 60} min` : `for ${left} min`;
+      label.textContent = byTray ? "Muted (tray)" : until === -1 ? "Muted" : `Muted · ${left >= 60 ? Math.round(left / 60) + " h" : left + " min"}`;
+      btn.title = byTray ? `New alerts are muted from the SNMPathy tray on this computer ${text}` : `New alerts are muted in this browser ${text}`;
+      state.textContent = (byTray ? `Muted from the SNMPathy tray on this computer ${text}.` : `Muted ${text}.`)
+        + " Alerts still show in the count and on the Alerts page, and emails still go out.";
+    };
+    showMute = show;
+    $$("[data-mute]", menu).forEach((b) => b.addEventListener("click", () => {
+      const minutes = Number(b.dataset.mute);
+      saveLive({ mutedUntil: minutes === -1 ? -1 : Date.now() + minutes * 60000 });
+      show(); menu.classList.add("hidden");
+      SP.toast(minutes === -1 ? "New alerts muted until you unmute" : `New alerts muted for ${b.textContent}`);
+    }));
+    off.addEventListener("click", async () => {
+      saveLive({ mutedUntil: 0 });
+      if (serverMuted()) {  // muted from the tray: unmute it there too (this browser is on the server)
+        try { await SP.api("DELETE", "/api/ui/mute"); serverMute = 0; } catch (e) { SP.toast(e.message, "error"); }
+      }
+      show(); menu.classList.add("hidden"); SP.toast("New alerts unmuted");
+    });
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      show();
+      const open = menu.classList.toggle("hidden") === false;
+      btn.setAttribute("aria-expanded", String(open));
+      const other = $("#live-menu");
+      if (open && other) other.classList.add("hidden");
+    });
+    document.addEventListener("click", (e) => {
+      if (!menu.classList.contains("hidden") && !menu.contains(e.target) && !btn.contains(e.target)) menu.classList.add("hidden");
+    });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") menu.classList.add("hidden"); });
+    window.addEventListener("storage", (e) => { if (e.key === LIVE_KEY) show(); });  // muted in another tab
+    setInterval(show, 30000);  // the time left, and the end of the mute
+    show();
+  }
+
   function liveMenu() {
     const btn = $("#live-btn"), menu = $("#live-menu");
     if (!btn || !menu) return;
@@ -1623,6 +1695,8 @@
       e.stopPropagation();
       const open = menu.classList.toggle("hidden") === false;
       btn.setAttribute("aria-expanded", String(open));
+      const other = $("#mute-menu");
+      if (open && other) other.classList.add("hidden");
     });
     document.addEventListener("click", (e) => {
       if (!menu.classList.contains("hidden") && !menu.contains(e.target) && e.target !== btn) {
@@ -1652,6 +1726,7 @@
       SP.autoRefresh(chosen == null ? pageRefresh : chosen);
     }
     liveMenu();
+    muteMenu();
     if ($("#nav-alerts")) livePoll();  // pages with the sidebar (not the public status page)
   });
 })();

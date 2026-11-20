@@ -605,6 +605,56 @@ class TrayApp:
             item("View log", self.view_log),
         )
 
+    # ------------------------------------------------------------ mute
+    MUTE_CHOICES = ((15, "15 minutes"), (60, "1 hour"), (480, "8 hours"), (-1, "Until I unmute"))
+
+    def muted_until(self) -> float:
+        from .services import server_mute_until
+
+        db = getattr(getattr(getattr(self, "app", None), "state", None), "db", None)
+        return server_mute_until(db) if db is not None else 0.0
+
+    def mute_label(self, *_: Any) -> str:
+        until = self.muted_until()
+        if not until:
+            return "Mute alerts"
+        if until == -1:
+            return "Alerts muted (until unmuted)"
+        left = max(1, round((until - time.time()) / 60))
+        return f"Alerts muted ({left // 60} h {left % 60} min left)" if left >= 60 else f"Alerts muted ({left} min left)"
+
+    def mute(self, minutes: int | None) -> None:
+        from .services import set_server_mute
+
+        db = getattr(getattr(getattr(self, "app", None), "state", None), "db", None)
+        if db is None:
+            self.notify("SNMPathy is still starting: try again in a moment")
+            return
+        set_server_mute(db, minutes)
+        if not minutes:
+            self.notify("Alerts unmuted: browsers on this computer announce new alerts again")
+        else:
+            span = dict(self.MUTE_CHOICES)[minutes].lower()
+            self.notify(f"Alerts muted {'until you unmute' if minutes == -1 else 'for ' + span}: browsers on this "
+                        "computer stop the pop-ups, notifications and sound (emails still go out)")
+        icon = getattr(self, "icon", None)
+        if icon is not None:
+            try:
+                icon.update_menu()
+            except Exception:
+                pass
+
+    def mute_menu(self):
+        import pystray
+
+        item = pystray.MenuItem
+        return pystray.Menu(
+            item("Quiets new-alert pop-ups and sound in browsers on this computer", None, enabled=False),
+            *[item(label, (lambda m: lambda *_: self.mute(m))(minutes)) for minutes, label in self.MUTE_CHOICES],
+            pystray.Menu.SEPARATOR,
+            item("Unmute", lambda *_: self.mute(None), enabled=lambda _i: bool(self.muted_until())),
+        )
+
     def menu(self):
         import pystray
 
@@ -613,6 +663,7 @@ class TrayApp:
             item("Open SNMPathy", self.open_ui, default=True),
             item(lambda _i: self.status, None, enabled=False),
             pystray.Menu.SEPARATOR,
+            item(self.mute_label, self.mute_menu()),
             item("Server admin", self.admin_menu()),
             pystray.Menu.SEPARATOR,
             item("Quit SNMPathy", self.quit),

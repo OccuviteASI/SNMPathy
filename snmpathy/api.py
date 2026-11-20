@@ -1056,12 +1056,26 @@ def preview_scan(body: dict[str, Any]):
 
 
 @router.get("/ui/status", tags=["system"])
-def ui_status(since: float = 0, db: Database = Depends(get_db)):
-    """For open pages: the sidebar counts and alerts that fired after ``since`` (server time)."""
+def ui_status(request: Request, since: float = 0, db: Database = Depends(get_db)):
+    """For open pages: the sidebar counts and alerts that fired after ``since`` (server time).
+
+    ``server_muted_until``: the tray's "Mute alerts", which only browsers on the server itself obey.
+    """
+    from .adminauth import is_local
+
     now = time.time()
     counts = services.attention_counts(db)
     fresh = services.new_alerts(db, since) if since > 0 else []
-    return {"now": now, "alerts": counts["alerts"], "collectors_offline": counts["collectors"], "new_alerts": fresh}
+    muted = services.server_mute_until(db, now) if is_local(request) else 0
+    return {"now": now, "alerts": counts["alerts"], "collectors_offline": counts["collectors"], "new_alerts": fresh,
+            "server_muted_until": muted}
+
+
+@router.delete("/ui/mute", dependencies=[Depends(require_local)], tags=["system"])
+def ui_unmute(db: Database = Depends(get_db)):
+    """Unmute what the tray muted (from a browser on the server itself)."""
+    services.set_server_mute(db, None)
+    return {"server_muted_until": 0}
 
 
 @router.get("/scans", tags=["scans"])

@@ -544,3 +544,55 @@ def test_web_port_api_and_restart(tmp_path):
         assert "Web port" in client.get("/admin").text
     with TestClient(app, client=("203.0.113.9", 1)) as remote:  # Server admin needs the passcode
         assert remote.put("/api/system/web-port", json={"port": 18556}).status_code == 403
+
+
+def test_tray_mute_alerts(monkeypatch, db):
+    import sys as _sys
+    import types
+
+    from snmpathy import services
+
+    monkeypatch.setitem(_sys.modules, "pystray", _FakePystray)
+    app = tray.TrayApp.__new__(tray.TrayApp)
+    app.available, app.status, app.url, app.icon = "", "All up", "http://localhost:8080/", None
+    app.app = types.SimpleNamespace(state=types.SimpleNamespace(db=db))
+    notes = []
+    app.notify = notes.append
+    from snmpathy.config import Settings
+
+    app.settings = Settings()
+    top = app.menu().items
+    assert [str(i) for i in top][:4] == ["Open SNMPathy", "All up", "Mute alerts", "Server admin"]
+    sub = next(i for i in top if str(i) == "Mute alerts").submenu
+    names = [str(i) for i in sub.items]
+    assert names[1:5] == ["15 minutes", "1 hour", "8 hours", "Until I unmute"] and names[-1] == "Unmute"
+    unmute = sub.items[-1]
+    assert unmute.kw["enabled"](unmute) is False
+
+    next(i for i in sub.items if str(i) == "1 hour").action()
+    assert 59 * 60 < services.server_mute_until(db) - __import__("time").time() <= 3600
+    assert str(next(i for i in app.menu().items if str(i).startswith("Alerts muted"))) == "Alerts muted (1 h 0 min left)"
+    assert unmute.kw["enabled"](unmute) is True and "for 1 hour" in notes[-1]
+    app.mute(-1)
+    assert services.server_mute_until(db) == -1 and app.mute_label() == "Alerts muted (until unmuted)"
+    unmute.action()
+    assert services.server_mute_until(db) == 0 and app.mute_label() == "Mute alerts" and "unmuted" in notes[-1]
+
+
+def test_only_browsers_on_the_server_obey_the_tray_mute(tmp_path, db):
+    from fastapi.testclient import TestClient
+
+    from snmpathy import services
+    from snmpathy.app import create_app
+    from snmpathy.config import Settings
+
+    services.set_server_mute(db, 60)
+    app = create_app(Settings(database=str(tmp_path / "t.db")), db=db, start_monitor=False)
+    with TestClient(app) as local, TestClient(app, client=("203.0.113.9", 5000)) as remote:
+        assert local.get("/api/ui/status").json()["server_muted_until"] > 0
+        assert remote.get("/api/ui/status").json()["server_muted_until"] == 0
+        assert remote.delete("/api/ui/mute").status_code == 403  # only on the server itself
+        assert local.delete("/api/ui/mute").json() == {"server_muted_until": 0}
+        assert services.server_mute_until(db) == 0
+        page = local.get("/devices").text
+        assert 'id="mute-btn"' in page and 'data-mute="-1"' in page

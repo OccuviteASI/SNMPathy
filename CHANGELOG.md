@@ -4,6 +4,14 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 `snmpathy version`. Executables built with `scripts/build_executable` also show the git
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
+## 0.7.18
+- **Mute new alerts.** A bell button in the sidebar mutes new-alert pop-ups, Windows notifications
+  and sound in that browser for 15 minutes, 1 hour, 8 hours or until unmuted (it shows the time
+  left). Alerts are still counted and listed, and emails and other channels still go out.
+- The tray's right-click menu has **Mute alerts** with the same choices and *Unmute*; it quiets
+  the browsers on the server computer (their bell shows *Muted (tray)*). Other computers'
+  browsers are not affected.
+
 ## 0.7.17
 - **New alert sounds.** The two-note alert chime is replaced by a choice of four sounds in the
   **Live** menu: *Sonar ping* (the default, a rising sweep with an echo), *Three beeps*, *Rising
