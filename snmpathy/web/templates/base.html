@@ -52,6 +52,10 @@
         <label class="check"><input type="checkbox" id="live-notify"> Windows notification</label>
         <div class="small muted" id="live-notify-note"></div>
         <label class="check"><input type="checkbox" id="live-sound"> Sound</label>
+        <div class="row live-sound-row">
+          <select id="live-sound-name" aria-label="Alert sound"></select>
+          <button class="btn sm" type="button" id="live-sound-play" title="Play this sound" aria-label="Play this sound">&#9654;</button>
+        </div>
         <div class="small muted">Browsers only play sound after you have clicked on the page.</div>
       </div>
       {% if auth_enabled %}<a class="btn ghost sm" href="/logout">Log out</a>{% endif %}

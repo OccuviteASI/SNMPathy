@@ -541,3 +541,5 @@ a.dl-row:hover { background: var(--surface-2); text-decoration: none; }
 .live-menu .live-sub { font-weight: 600; margin-top: 4px; }
 .live-menu select { width: 100%; }
 .live-menu label.check.disabled { opacity: .55; }
+.live-menu .live-sound-row { gap: 6px; flex-wrap: nowrap; }
+.live-menu .live-sound-row select { flex: 1; min-width: 0; width: auto; }

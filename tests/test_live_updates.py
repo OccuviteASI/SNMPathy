@@ -59,4 +59,5 @@ def test_status_pages_refresh_themselves(client, db, make_device):
         r = client.get(page)
         assert r.status_code == 200 and "data-refresh" not in r.text.split("<body", 1)[1][:80], page
     # Every page with the sidebar has the Live menu.
-    assert 'id="live-menu"' in client.get("/devices").text
+    page = client.get("/devices").text
+    assert 'id="live-menu"' in page and 'id="live-sound-name"' in page and 'id="live-sound-play"' in page

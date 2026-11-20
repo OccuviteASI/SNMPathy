@@ -546,7 +546,8 @@ last 10 seconds. Dashboards, the Overview, Fusion, the Network analyzer and Logs
 themselves as before.
 
 The **Live** button at the bottom of the sidebar sets this per browser: the refresh interval
-(off, 15 s, 30 s, 1 minute, 5 minutes) and which alert notices to use. Browsers allow Windows
+(off, 15 s, 30 s, 1 minute, 5 minutes), which alert notices to use and the alert sound
+(Sonar ping, Three beeps, Rising chime or Double knock; ▶ plays it). Browsers allow Windows
 notifications only on the server itself (`http://localhost:...`) or over HTTPS, and sound only
 after you have clicked on the page; Windows notifications make their own sound.
 
