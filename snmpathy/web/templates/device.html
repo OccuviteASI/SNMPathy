@@ -62,7 +62,7 @@
     </div>
     {% if alerts %}
     <div class="card">
-      <div class="card-head"><h2>Firing alerts</h2></div>
+      <div class="card-head"><h2>Alerting now</h2></div>
       <div class="card-body">{% for a in alerts %}<div class="alert-row">{{ status(a.severity, '') }}<div class="body"><div class="subject">{{ a.subject }}</div><div class="msg">{{ a.message }}</div></div></div>{% endfor %}</div>
     </div>
     {% endif %}

@@ -554,10 +554,10 @@ def alerts_report(db: Database, start: float, end: float, label: str, device_id:
     for r in rows:
         by_subject[r["subject"]] = by_subject.get(r["subject"], 0) + 1
     rep["summary"] = [
-        {"label": "Alerts fired", "value": len(rows), "fmt": "int"},
+        {"label": "Alerts raised", "value": len(rows), "fmt": "int"},
         {"label": "Critical", "value": sum(1 for r in rows if r["severity"] == "critical"), "fmt": "int",
          "status": "bad" if any(r["severity"] == "critical" for r in rows) else "ok"},
-        {"label": "Still firing", "value": sum(1 for r in rows if r["state"] == "firing"), "fmt": "int"},
+        {"label": "Still alerting", "value": sum(1 for r in rows if r["state"] == "firing"), "fmt": "int"},
         {"label": "Mean time to resolve", "value": mttr, "fmt": "duration"},
         {"label": "Mean time to acknowledge", "value": mtta, "fmt": "duration"},
     ]
@@ -565,7 +565,7 @@ def alerts_report(db: Database, start: float, end: float, label: str, device_id:
         {"title": "By rule", "columns": [{"key": "rule", "label": "Rule"}, {"key": "severity", "label": "Severity", "fmt": "badge"},
                                           {"key": "count", "label": "Alerts", "fmt": "int"},
                                           {"key": "subjects", "label": "Distinct subjects", "fmt": "int"},
-                                          {"key": "duration", "label": "Total time firing", "fmt": "duration"}],
+                                          {"key": "duration", "label": "Total time alerting", "fmt": "duration"}],
          "rows": rule_rows},
         {"title": "Noisiest subjects", "columns": [{"key": "subject", "label": "Subject"},
                                                     {"key": "count", "label": "Alerts", "fmt": "int"}],

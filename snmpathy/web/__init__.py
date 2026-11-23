@@ -58,6 +58,9 @@ def _older_than_server(version: str) -> bool:
 
 
 templates.env.filters["older_than_server"] = _older_than_server
+# How states read on the pages (the stored value stays, e.g. for the API and webhooks).
+STATE_LABELS = {"firing": "alerting"}
+templates.env.globals["STATE_LABELS"] = STATE_LABELS
 templates.env.globals.update(
     SEVERITIES=SEVERITIES, SEVERITY_LABELS=SEVERITY_LABELS, FACILITIES=FACILITIES,
     IF_OPER=mibs.IF_OPER_STATUS_NAMES, METRIC_INFO=mibs.METRIC_INFO, now=time.time, AVAIL_MODES=AVAIL_MODES,

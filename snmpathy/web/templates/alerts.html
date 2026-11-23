@@ -4,8 +4,8 @@
 {% set refresh = 30 if tab in ("active", "history") else 0 %}
 {% block actions %}
 {% set unacked = active|selectattr('state', 'equalto', 'firing')|rejectattr('acknowledged')|list|length %}
-{% if tab == 'active' and unacked %}<button class="btn primary" id="ack-all" data-action="api" data-url="/api/alerts/ack-all" data-body='{"by": "web"}' data-confirm="Acknowledge all {{ unacked }} firing alert{{ '' if unacked == 1 else 's' }}?" data-success="Acknowledged {acknowledged} alerts">Acknowledge all ({{ unacked }})</button>{% endif %}
-<button class="btn" data-action="api" data-url="/api/alerts/evaluate" data-success="Evaluated: {firing} firing, {pending} pending">{{ icon('refresh') }} Evaluate now</button>
+{% if tab == 'active' and unacked %}<button class="btn primary" id="ack-all" data-action="api" data-url="/api/alerts/ack-all" data-body='{"by": "web"}' data-confirm="Acknowledge all {{ unacked }} unacknowledged alert{{ '' if unacked == 1 else 's' }}?" data-success="Acknowledged {acknowledged} alerts">Acknowledge all ({{ unacked }})</button>{% endif %}
+<button class="btn" data-action="api" data-url="/api/alerts/evaluate" data-success="Evaluated: {firing} alerting, {pending} pending">{{ icon('refresh') }} Evaluate now</button>
 {% if tab == 'rules' %}<button class="btn primary" data-action="modal" data-target="#rule-modal" id="new-rule">{{ icon('plus') }} New rule</button>{% endif %}
 {% if tab == 'channels' %}<button class="btn primary" data-action="modal" data-target="#channel-modal" id="new-channel">{{ icon('plus') }} New channel</button>{% endif %}
 {% endblock %}
@@ -36,7 +36,7 @@
 {% elif tab == 'history' %}
 <div class="card"><div class="card-body flush table-wrap">
   <table class="table compact">
-    <thead><tr><th>Severity</th><th>Subject</th><th>Details</th><th>Fired</th><th>Resolved</th><th>Duration</th><th>Rule</th></tr></thead>
+    <thead><tr><th>Severity</th><th>Subject</th><th>Details</th><th>Alerting from</th><th>Resolved</th><th>Duration</th><th>Rule</th></tr></thead>
     <tbody>
     {% for a in history %}
       <tr><td>{{ status(a.severity) }}</td><td>{{ a.subject }}</td><td class="small">{{ a.message }}</td><td class="nowrap">{{ a.fired_at|ts|safe }}</td><td class="nowrap">{{ a.resolved_at|ts|safe }}</td><td>{{ ((a.resolved_at or 0) - (a.fired_at or a.resolved_at or 0))|duration }}</td><td class="small">{{ a.rule_name }}</td></tr>
@@ -163,7 +163,7 @@
     <thead><tr><th>Time</th><th>Event</th><th>Alert</th><th>Channel</th><th>Result</th></tr></thead>
     <tbody>
     {% for n in notifications %}
-      <tr><td class="nowrap">{{ n.ts|ts|safe }}</td><td>{{ status('firing' if n.event == 'firing' else 'resolved', n.event) }}</td><td>{{ n.subject or '-' }}</td><td>{{ n.channel_name or '(deleted)' }}</td>
+      <tr><td class="nowrap">{{ n.ts|ts|safe }}</td><td>{{ status('firing' if n.event == 'firing' else 'resolved', STATE_LABELS.get(n.event, n.event)) }}</td><td>{{ n.subject or '-' }}</td><td>{{ n.channel_name or '(deleted)' }}</td>
       <td>{% if n.status == 'sent' %}{{ status('ok', 'sent') }}{% else %}{{ status('down', 'failed') }} <span class="small">{{ n.error }}</span>{% endif %}</td></tr>
     {% else %}<tr><td colspan="5" class="empty">No notifications sent yet</td></tr>{% endfor %}
     </tbody>

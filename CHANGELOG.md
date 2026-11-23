@@ -4,6 +4,13 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 `snmpathy version`. Executables built with `scripts/build_executable` also show the git
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
+## 0.7.19
+- Alerts now read **alerting** instead of *firing* everywhere you see them: the Alerts page
+  ("alerting", *Alerting from*), device pages and dashboards (*Alerting now*), Fusion, the
+  Overview, reports (*Still alerting*, *Alerts raised*), the tray ("3 alerting") and the docs.
+  Saved dashboard panels titled "Firing alerts" are renamed "Alerting now" once. The API,
+  webhooks and Grafana keep the name `firing`, so scripts and integrations are unchanged.
+
 ## 0.7.18
 - **Mute new alerts.** A bell button in the sidebar mutes new-alert pop-ups, Windows notifications
   and sound in that browser for 15 minutes, 1 hour, 8 hours or until unmuted (it shows the time

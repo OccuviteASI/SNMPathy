@@ -116,7 +116,7 @@ def status_donut(db: Database, opts: dict[str, Any], ids: set[int] | None) -> di
                 continue
             s = {"critical": "critical", "warning": "warning"}.get(a["severity"], "unknown")
             counts[s] = counts.get(s, 0) + 1
-        segments, noun, href = [("critical", "Critical"), ("warning", "Warning"), ("unknown", "Info")], "firing", "/alerts"
+        segments, noun, href = [("critical", "Critical"), ("warning", "Warning"), ("unknown", "Info")], "alerting", "/alerts"
     else:
         for d in _devices(db, ids):
             s = device_state(d)
@@ -363,7 +363,7 @@ def hud_config() -> dict[str, Any]:
         _p("status_donut", "Check status", 3, 2, of="checks"),
         _p("status_bars", "Device status by site", 6, 2, of="devices", group_by="site"),
         _p("state_changes", "Latest state changes", 8, 2, limit=9),
-        _p("status_donut", "Firing alerts", 4, 2, of="alerts"),
+        _p("status_donut", "Alerting now", 4, 2, of="alerts"),
         _p("timeseries", "Total traffic", 6, 2, [
             {"key": "if.in_bps", "agg": "sum", "alias": "Inbound"},
             {"key": "if.out_bps", "agg": "sum", "alias": "Outbound"}], chart="area"),

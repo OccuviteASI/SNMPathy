@@ -31,7 +31,8 @@
 {%- endmacro %}
 
 {% macro status(state, label=None) -%}
-<span class="status {{ state or 'unknown' }}">{{ label or state or 'unknown' }}</span>
+{%- set _labels = STATE_LABELS if STATE_LABELS is defined else {} -%}
+<span class="status {{ state or 'unknown' }}">{{ label or _labels.get(state, state) or 'unknown' }}</span>
 {%- endmacro %}
 
 {% macro sev_badge(name) -%}

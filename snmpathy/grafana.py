@@ -139,7 +139,7 @@ async def metrics(request: Request):
         {"label": "Table: checks & uptime", "value": "checks", "payloads": []},
         {"label": "Table: interfaces", "value": "interfaces", "payloads": [
             {"name": "device", "label": "Device", "type": "multi-select", "options": devices}]},
-        {"label": "Table: firing alerts", "value": "alerts", "payloads": []},
+        {"label": "Table: alerting now", "value": "alerts", "payloads": []},
         {"label": "Table: syslog messages", "value": "syslog_events", "payloads": [
             {"name": "q", "type": "input"}, {"name": "severity", "type": "select", "options": sev},
             {"name": "host", "type": "input"}, {"name": "limit", "type": "input"}]},
@@ -305,7 +305,7 @@ def run_target(db: Database, kind: str, payload: dict[str, Any], start: float, e
               (r["out_bps"] / r["speed"] * 100) if r["speed"] and r["out_bps"] is not None else None] for r in rows])]
     if kind == "alerts":
         rows = db.query("SELECT * FROM alerts WHERE state = 'firing' ORDER BY fired_at DESC")
-        return [_table([("Fired", "time"), ("Severity", "string"), ("Subject", "string"), ("Message", "string"),
+        return [_table([("Alerting since", "time"), ("Severity", "string"), ("Subject", "string"), ("Message", "string"),
                         ("Acknowledged", "string")],
                        [[int(r["fired_at"] * 1000), r["severity"], r["subject"], r["message"],
                          "yes" if r["acknowledged"] else "no"] for r in rows])]
@@ -422,7 +422,7 @@ def grafana_dashboards() -> dict[str, dict[str, Any]]:
         _Builder("snmpathy-overview", "SNMPathy - Network Overview", "Health, traffic, availability and logs.", ["overview"])
         .variable("device", "devices", "Device")
         .panel("stat", "Devices down", 4, 4, [("count", {"what": "devices_down"})], thresholds=[1, 1])
-        .panel("stat", "Firing alerts", 4, 4, [("count", {"what": "alerts_firing"})], thresholds=[1, 5])
+        .panel("stat", "Alerting now", 4, 4, [("count", {"what": "alerts_firing"})], thresholds=[1, 5])
         .panel("stat", "Total inbound", 4, 4, [("metric", {"key": "if.in_bps", "device": D, "agg": "sum"})], unit="bps")
         .panel("stat", "Total outbound", 4, 4, [("metric", {"key": "if.out_bps", "device": D, "agg": "sum"})], unit="bps")
         .panel("stat", "Avg CPU", 4, 4, [("metric", {"key": "cpu.avg", "device": D, "agg": "avg"})], unit="%",
@@ -432,7 +432,7 @@ def grafana_dashboards() -> dict[str, dict[str, Any]]:
         .panel("timeseries", "Total traffic", 16, 8, [
             ("metric", {"key": "if.in_bps", "device": D, "agg": "sum", "alias": "Inbound"}),
             ("metric", {"key": "if.out_bps", "device": D, "agg": "sum", "alias": "Outbound"})], unit="bps", fill=25)
-        .panel("table", "Firing alerts", 8, 8, [("alerts", {})])
+        .panel("table", "Alerting now", 8, 8, [("alerts", {})])
         .panel("table", "Devices", 12, 9, [("devices", {})])
         .panel("table", "Availability", 12, 9, [("checks", {})],
                defaults={"custom": {"align": "auto"}})
