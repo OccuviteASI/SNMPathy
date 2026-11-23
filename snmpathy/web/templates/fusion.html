@@ -63,7 +63,7 @@
 <div class="fx-section"><h2>Problems</h2><span class="small muted" id="fx-problem-count"></span></div>
 <div class="card" id="fx-problems"></div>
 
-<div class="fx-section"><h2>Firing alerts</h2><span class="small muted" id="fx-alert-count"></span></div>
+<div class="fx-section"><h2>Alerting now</h2><span class="small muted" id="fx-alert-count"></span></div>
 <div class="card" id="fx-alerts"></div>
 
 <div class="fx-section"><h2>Top metrics across servers</h2></div>
@@ -158,7 +158,7 @@
         c.up >= checksActive ? st("up", "all ok") : `${n(checksActive - c.up)} not ok`, "", "#fx-problems"),
       tile("Checks warning", n(c.warning), c.warning ? st("warning", "warning") : st("up", "none"), c.warning ? "warn" : "good", "#fx-problems"),
       tile("Checks critical", n(c.down), c.down ? st("down", "down") : st("up", "none"), c.down ? "bad" : "good", "#fx-problems"),
-      tile("Alerts firing", n(a.firing),
+      tile("Alerting", n(a.firing),
         a.critical ? st("critical", a.critical + " critical") : `${n(a.unacknowledged)} unacknowledged`,
         a.critical ? "bad" : "", "#fx-alerts"),
     ].join("");
@@ -186,7 +186,7 @@
       const checks = [st("up", n(c.up) + " ok")];
       if (c.warning) checks.push(st("warning", n(c.warning) + " warning"));
       if (c.down) checks.push(st("down", n(c.down) + " critical"));
-      const alerts = a.firing ? [st(a.critical ? "critical" : "warning", n(a.firing) + " firing")] : ['<span class="muted">none firing</span>'];
+      const alerts = a.firing ? [st(a.critical ? "critical" : "warning", n(a.firing) + " alerting")] : ['<span class="muted">none alerting</span>'];
       const meta = [s.local ? "local" : "", s.hostname, s.version ? "v" + s.version : "",
         s.local ? "live" : (s.last_ok ? "updated " + SP.ago(s.last_ok) : "never fetched")].filter(Boolean).join(" · ");
       const hasData = s.local || s.last_ok;
@@ -228,10 +228,10 @@
 
   function renderAlerts() {
     const rows = data.firing || [];
-    $("#fx-alert-count").textContent = rows.length ? `${rows.length} firing` : "";
-    if (!rows.length) { $("#fx-alerts").innerHTML = '<div class="empty">No alerts firing</div>'; return; }
+    $("#fx-alert-count").textContent = rows.length ? `${rows.length} alerting` : "";
+    if (!rows.length) { $("#fx-alerts").innerHTML = '<div class="empty">Nothing alerting</div>'; return; }
     $("#fx-alerts").innerHTML = `<div class="card-body flush table-wrap scroll"><table class="table compact">
-      <thead><tr><th class="fx-hide-sm">Server</th><th>Alert</th><th>Severity</th><th>Firing for</th><th class="fx-hide-sm">Acknowledged</th></tr></thead><tbody>`
+      <thead><tr><th class="fx-hide-sm">Server</th><th>Alert</th><th>Severity</th><th>Alerting for</th><th class="fx-hide-sm">Acknowledged</th></tr></thead><tbody>`
       + rows.map((a) => `<tr>
         <td class="fx-hide-sm">${serverCell(a)}</td>
         <td>${link(a.url, a.subject, a.server_local)}<div class="fx-sub" style="display:block"><b class="fx-show-sm">${esc(a.server)} · </b>${esc(a.message)}</div></td>

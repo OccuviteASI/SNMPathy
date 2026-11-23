@@ -44,7 +44,7 @@
         {% for c in sec.columns %}
           {% set v = row.get(c.key) %}
           {% set f = c.fmt or 'text' %}
-          {% if f == 'badge' %}<td>{% if v %}{{ status({'met': 'up', 'breached': 'down', 'up': 'up', 'down': 'down', 'firing': 'firing', 'resolved': 'resolved', 'critical': 'critical', 'warning': 'warning', 'info': 'info'}.get(v, 'unknown'), v) }}{% else %}-{% endif %}</td>
+          {% if f == 'badge' %}<td>{% if v %}{{ status({'met': 'up', 'breached': 'down', 'up': 'up', 'down': 'down', 'firing': 'firing', 'resolved': 'resolved', 'critical': 'critical', 'warning': 'warning', 'info': 'info'}.get(v, 'unknown'), STATE_LABELS.get(v, v)) }}{% else %}-{% endif %}</td>
           {% elif f == 'ts' %}<td class="nowrap" data-sort="{{ v or 0 }}">{{ v|ts|safe if v else '-' }}</td>
           {% elif f == 'text' %}<td>{% if loop.first and row._link %}<a href="{{ row._link }}">{{ v if v not in (none, '') else '-' }}</a>{% else %}{{ v if v not in (none, '') else '-' }}{% endif %}</td>
           {% else %}<td class="num" data-sort="{{ v if v is not none else -1 }}">{{ fmt(v, f) }}</td>{% endif %}

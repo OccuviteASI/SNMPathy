@@ -93,7 +93,7 @@ def status_summary(db: Any) -> tuple[str, str]:
     if parts:
         return "down", ", ".join(parts)
     if alerts:
-        return "warning", f"{alerts} alert{'s' if alerts != 1 else ''} firing"
+        return "warning", f"{alerts} alerting"
     return "ok", f"All {total} device{'s' if total != 1 else ''} OK" if total else "No devices yet"
 
 

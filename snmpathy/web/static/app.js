@@ -881,8 +881,8 @@
     if (type === "status_donut") {
       const parts = data.segments.map((s) => ({ label: s.label, count: s.count, color: stateColor(s.state), href: s.href }));
       const alerts = data.of === "alerts";
-      donut(body, parts, { sub: alerts ? (data.total ? "firing" : "all clear") : data.noun, center: data.total,
-        emptyColor: alerts ? stateColor("ok") : null, emptyText: alerts ? "No alerts are firing" : "Nothing monitored yet", aria: panel.title });
+      donut(body, parts, { sub: alerts ? (data.total ? "alerting" : "all clear") : data.noun, center: data.total,
+        emptyColor: alerts ? stateColor("ok") : null, emptyText: alerts ? "Nothing alerting" : "Nothing monitored yet", aria: panel.title });
       return true;
     }
     if (type === "status_bars") {
@@ -1051,8 +1051,8 @@
       }).join("") : `<div class="empty">No messages</div>`;
     } else if (type === "alerts") {
       body.innerHTML = data.rows.length ? data.rows.map((a) =>
-        `<div class="alert-row"><span class="status ${esc(a.severity)}"></span><div class="body"><div class="subject">${esc(a.subject)}</div><div class="msg">${esc(a.message)}</div><div class="small muted">firing ${esc(SP.ago(a.fired_at))}${a.acknowledged ? " · acknowledged" : ""}</div></div></div>`).join("")
-        : `<div class="empty"><span class="status ok">All clear</span><br><span class="small">No alerts are firing</span></div>`;
+        `<div class="alert-row"><span class="status ${esc(a.severity)}"></span><div class="body"><div class="subject">${esc(a.subject)}</div><div class="msg">${esc(a.message)}</div><div class="small muted">began alerting ${esc(SP.ago(a.fired_at))}${a.acknowledged ? " · acknowledged" : ""}</div></div></div>`).join("")
+        : `<div class="empty"><span class="status ok">All clear</span><br><span class="small">Nothing alerting</span></div>`;
     } else if (type === "events") {
       body.innerHTML = data.rows.length ? data.rows.map((e) =>
         `<div class="event-row"><time>${esc(SP.fmtTime(e.ts))}</time><span class="status ${e.level === "error" ? "down" : e.level === "warning" ? "warning" : "info"}"></span><span>${esc(e.message)}</span></div>`).join("") : `<div class="empty">No events</div>`;
@@ -1062,7 +1062,7 @@
       body.innerHTML = `<div class="tiles">` +
         tile("Devices", `${d.devices.up}/${d.devices.total - d.devices.disabled}`, d.devices.down ? `<span class="status down">${d.devices.down} down</span>` : `<span class="status up">all responding</span>`, d.devices.down, "/devices") +
         tile("Checks", `${d.checks.up}/${d.checks.total - d.checks.paused}`, d.checks.down ? `<span class="status down">${d.checks.down} down</span>` : `<span class="status up">all up</span>`, d.checks.down, "/checks") +
-        tile("Alerts firing", d.alerts.firing, d.alerts.critical ? `<span class="status critical">${d.alerts.critical} critical</span>` : "none critical", d.alerts.critical, "/alerts") +
+        tile("Alerting", d.alerts.firing, d.alerts.critical ? `<span class="status critical">${d.alerts.critical} critical</span>` : "none critical", d.alerts.critical, "/alerts") +
         tile("Ports down", d.interfaces.down, `of ${d.interfaces.total} interfaces`, false, "/devices") +
         tile("Syslog / hour", d.syslog.last_hour.toLocaleString(), `${d.syslog.errors_last_hour} errors`, false, "/syslog") + `</div>`;
       $$(".tile", body).forEach((t) => (t.style.boxShadow = "none"));
@@ -1264,7 +1264,7 @@
       if (t === "syslog_top") h += optField("field", "Group by", `<select data-o="field">${["host", "app", "severity", "facility", "source_ip"].map((f) => opt(f, o.field || "host")).join("")}</select>`);
       if (t === "syslog_histogram") h += optField("buckets", "Bars", `<input data-o="buckets" type="number" min="10" max="300" value="${esc(o.buckets || 80)}">`);
       if (t === "text") h += `<label class="field wide">Text<textarea data-o="text">${esc(o.text || "")}</textarea></label>`;
-      if (t === "status_donut") h += optField("of", "Show", `<select data-o="of">${opt("devices", o.of || "devices", "Devices")}${opt("checks", o.of, "Checks / services")}${opt("interfaces", o.of, "Interfaces (ports)")}${opt("alerts", o.of, "Firing alerts")}</select>`);
+      if (t === "status_donut") h += optField("of", "Show", `<select data-o="of">${opt("devices", o.of || "devices", "Devices")}${opt("checks", o.of, "Checks / services")}${opt("interfaces", o.of, "Interfaces (ports)")}${opt("alerts", o.of, "Alerts (alerting now)")}</select>`);
       if (t === "status_bars") h += optField("of", "Count", `<select data-o="of">${opt("devices", o.of || "devices", "Devices")}${opt("checks", o.of, "Checks / services")}</select>`) +
         optField("group_by", "One bar per", `<select data-o="group_by">${["site", "collector", "kind", "tag", "device"].map((g) => opt(g, o.group_by || "site", { kind: "device type" }[g] || g)).join("")}</select>`);
       if (["status_bars", "state_changes", "bars", "treemap", "device_services", "log_field"].includes(t)) h += optField("limit", "Rows", `<input data-o="limit" type="number" min="1" value="${esc(o.limit || "")}" placeholder="10">`);
@@ -1708,7 +1708,7 @@
     let asked = false;
     try { asked = !!localStorage.getItem("snmpathy.notifyAsked"); } catch (e) { asked = true; }
     if (settings.notify && canNotify() && Notification.permission === "default" && !asked) {
-      SP.toast("Get a Windows notification when an alert fires?", "", {
+      SP.toast("Get a Windows notification when something starts alerting?", "", {
         label: "Turn on", onClick: () => { Notification.requestPermission().then((a) => { if (a !== "granted") { notify.checked = false; save(); } }); },
       }, 20000);
       try { localStorage.setItem("snmpathy.notifyAsked", "1"); } catch (e) { /* ignore */ }

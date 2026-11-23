@@ -24,7 +24,7 @@
     <div class="sub">average of all checks</div>
   </a>
   <a class="card tile {{ 'bad' if o.alerts.critical }}" href="/alerts" style="color:inherit">
-    <div class="label">Alerts firing</div>
+    <div class="label">Alerting</div>
     <div class="value">{{ o.alerts.firing }}</div>
     <div class="sub">{% if o.alerts.critical %}{{ status('critical', o.alerts.critical ~ ' critical') }}{% else %}{{ o.alerts.unacknowledged }} unacknowledged{% endif %}</div>
   </a>
@@ -50,7 +50,7 @@
       {% endfor %}
       {% for a in firing %}
         {% if not a.check_id or a.check_id not in down_checks|map(attribute='id')|list %}
-        <div class="alert-row">{{ status(a.severity, '') }}<div class="body"><div class="subject">{{ a.subject }}</div><div class="msg">{{ a.message }}</div><div class="small muted">{{ a.severity }} · firing {{ a.fired_at|ago }}{% if a.acknowledged %} · acknowledged by {{ a.ack_by or 'someone' }}{% endif %}</div></div></div>
+        <div class="alert-row">{{ status(a.severity, '') }}<div class="body"><div class="subject">{{ a.subject }}</div><div class="msg">{{ a.message }}</div><div class="small muted">{{ a.severity }} · began alerting {{ a.fired_at|ago }}{% if a.acknowledged %} · acknowledged by {{ a.ack_by or 'someone' }}{% endif %}</div></div></div>
         {% endif %}
       {% endfor %}
     </div>

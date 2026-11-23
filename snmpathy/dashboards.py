@@ -37,7 +37,7 @@ PANEL_TYPES = {
     "syslog_histogram": "Syslog volume",
     "syslog_stream": "Syslog stream",
     "syslog_top": "Syslog top hosts/apps",
-    "alerts": "Firing alerts",
+    "alerts": "Alerting now",
     "summary": "Overview counters",
     "events": "Event log",
     "text": "Text / notes",
@@ -516,7 +516,7 @@ DEFAULT_DASHBOARDS: list[dict[str, Any]] = [
             _p("timeseries", "Total traffic (all interfaces)", 8, 2, [
                 {"key": "if.in_bps", "agg": "sum", "alias": "Inbound"},
                 {"key": "if.out_bps", "agg": "sum", "alias": "Outbound"}], chart="area"),
-            _p("alerts", "Firing alerts", 4, 2, limit=10),
+            _p("alerts", "Alerting now", 4, 2, limit=10),
             _p("status", "Devices", 6, 2, of="devices"),
             _p("status", "Availability checks", 6, 2, of="checks"),
             _p("table", "Busiest interfaces (inbound)", 6, 2, [{"key": "if.in_bps"}], limit=8),
@@ -583,6 +583,27 @@ DEFAULT_DASHBOARDS: list[dict[str, Any]] = [
 ]
 
 
+def rename_alerting_panels(db: Database) -> int:
+    """0.7.19: panels still titled "Firing alerts" (the old default) are renamed "Alerting now", once."""
+    key = "panels_renamed_alerting"
+    if db.get_meta(key):
+        return 0
+    changed = 0
+    for row in db.query("SELECT id, config FROM dashboards"):
+        config = loads(row["config"], {})
+        panels = config.get("panels") if isinstance(config, dict) else None
+        hit = False
+        for panel in panels or []:
+            if isinstance(panel, dict) and panel.get("title") == "Firing alerts":
+                panel["title"] = "Alerting now"
+                hit = True
+        if hit:
+            db.update("dashboards", row["id"], {"config": json.dumps(config)})
+            changed += 1
+    db.set_meta(key, str(time.time()))
+    return changed
+
+
 def seed_dashboards(db: Database) -> int:
     from . import hud
 
@@ -599,6 +620,7 @@ def seed_dashboards(db: Database) -> int:
                 save_dashboard(db, d)
                 n += 1
             db.set_meta(key, str(time.time()))
+    rename_alerting_panels(db)
     if db.get_meta("dashboards_seeded"):
         return n
     for i, d in enumerate(DEFAULT_DASHBOARDS):

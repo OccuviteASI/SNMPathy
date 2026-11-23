@@ -18,7 +18,7 @@ and a lightweight ELK stack:
 | **Network map** (Auvik style) | Topology drawn from LLDP / CDP neighbours in tidy, non-overlapping site boxes, with live device status and link utilisation, unmanaged neighbours, manual links, and drag-and-drop moving of devices between sites. |
 | **Network Analyzer** (Nagios Network Analyzer style) | Built-in NetFlow v5/v9, IPFIX and sFlow collector: bandwidth by talker, application, protocol or exporter; top talkers, destinations, applications, conversations; per-host drill-down; bandwidth alerts and a traffic report, next to SNMP interface bandwidth. |
 | **Fusion** (Nagios Fusion style) | One tactical dashboard across several SNMPathy servers: totals, per-server health, merged problems and alerts, cross-server top metrics. |
-| **Alerting** (Zabbix style) | Threshold rules on any metric (with wildcards), device-unreachable, check-down and syslog pattern rules. Pending → firing → resolved lifecycle, "for" durations, acknowledgements, maintenance windows. Notifications via email, Slack / Mattermost, Microsoft Teams, Discord, PagerDuty and generic webhooks. |
+| **Alerting** (Zabbix style) | Threshold rules on any metric (with wildcards), device-unreachable, check-down and syslog pattern rules. Pending → alerting → resolved lifecycle, "for" durations, acknowledgements, maintenance windows. Notifications via email, Slack / Mattermost, Microsoft Teams, Discord, PagerDuty and generic webhooks. |
 | **Dashboards** (Grafana style) | Built-in, editable dashboards with 13 panel types, a time-range picker, auto-refresh, light / dark themes, a kiosk / TV mode and a JSON model editor. Five dashboards ship ready to use. |
 | **Grafana integration** | A Grafana JSON data-source endpoint at `/grafana`, plus five pre-built Grafana dashboards that are provisioned automatically by the Docker Compose stack. |
 | **Reporting** | Availability / SLA, device health, bandwidth with 95th percentile and data volume, syslog summary and alert history. Each report can be viewed in the browser, exported to CSV, printed or saved as PDF, and scheduled for daily, weekly or monthly delivery by email, chat or webhook. |
@@ -284,7 +284,7 @@ website being down is not the server being down).
 
 The device page shows each method with its state, the overall verdict and the 30-day
 device uptime; uptime and health reports include **availability by device**. The
-**Device offline** alert fires only when the rule says the device is offline, and the
+**Device offline** alert starts alerting only when the rule says the device is offline, and the
 **Availability check down** rule skips checks on devices that are still online (untick
 *Ignore failing checks on devices that are still online* on the rule to be told anyway).
 
@@ -437,7 +437,7 @@ kept for 14 days (`retention_flow_days`).
 On the server you want as the "master", open **Fusion → Manage servers** and add each other
 SNMPathy server's URL and API token. Every minute it fetches each server's summary and shows
 one tactical overview: servers reporting, hosts up / down / unreachable, checks OK /
-warning / critical, firing alerts, one merged problems list (each linking into the server
+warning / critical, what is alerting, one merged problems list (each linking into the server
 that owns it), and the highest CPU, memory, busiest interfaces and worst availability
 across all servers. A server that cannot be reached keeps its last data, marked stale.
 
@@ -522,7 +522,7 @@ Edit them or add your own under **Alerts → Rules**:
 
 * **metric**: `cpu.avg > 90 for 600s`. Keys accept wildcards (`if.*_util`), instances
   accept globs (`Gi1/0/*`), and rules can be scoped to one device or a device tag.
-* **check / device**: fires when a check is down or a device stops answering SNMP.
+* **check / device**: alerts when a check is down or a device stops answering SNMP.
 * **syslog**: N matching messages per host within a window (search query plus a minimum
   severity).
 
@@ -531,11 +531,16 @@ message. A rule with no channels selected notifies every enabled channel. **Main
 windows** (for everything, one device or one check) suppress alerts and are excluded from
 SLA calculations.
 
+An alert is **pending** while its condition has not held for the rule's time yet, **alerting**
+once it has (notifications go out, it counts in the sidebar), and **resolved** when the condition
+clears. *Acknowledged* means someone has seen an alerting alert. (The API and webhooks call the
+alerting state `firing`.)
+
 ### Live updates
 
 Open pages keep themselves current. Every page with the sidebar checks the server every 15
 seconds: the **Alerts** and **Collectors** counts update in place and the browser tab shows the
-alert count (e.g. `(3) Devices · SNMPathy`). When a new alert fires, a page that is open
+alert count (e.g. `(3) Devices · SNMPathy`). When something starts alerting, a page that is open
 announces it with a **pop-up** (with *View alerts*), a **Windows notification** and a short
 **sound**, once per alert even with several tabs open.
 
@@ -561,7 +566,7 @@ after you have clicked on the page; Windows notifications make their own sound.
 
 The **Overview** page is the **Main HUD** dashboard (Nagios Fusion style): device and check
 status donuts, device status by site, the latest state changes with CRITICAL / WARNING / OK
-pills, firing alerts, traffic, CPU by device, interfaces, busiest ports and syslog volume.
+pills, alerts that are alerting, traffic, CPU by device, interfaces, busiest ports and syslog volume.
 Click a donut segment or legend row to open exactly those devices or checks. It is an
 ordinary dashboard, so you can rearrange or extend it (the old overview is at `/?classic=1`).
 
@@ -577,7 +582,7 @@ Server & Device Health, Availability, Syslog, Log Analysis) and any you create. 
   **Hypermap** (radial map: SNMPathy in the middle, then collectors and devices by parent),
   devices with their service chips, log events over time (one line per query), log field
   top values (donut, bars or table), plus time series, stat, gauge, top-N table, status
-  grid, uptime bars, syslog volume / stream / top, firing alerts, events and text
+  grid, uptime bars, syslog volume / stream / top, alerting now, events and text
 * **Kiosk** mode for a wall display, **JSON** to export or import a board, **Duplicate**
 
 **Cluster dashboards (device groups).** *Dashboards → New cluster dashboard* builds a board
@@ -625,7 +630,7 @@ optionally filtered to a device or tag:
 | Device health | CPU / memory averages and peaks, fullest disk, ping availability, SNMP response time, reboots, ports down, log errors, flagged issues |
 | Bandwidth & 95th percentile | per-interface average / peak / 95th percentile (from 5-minute averages, the burstable-billing method), utilisation, and GB received / sent |
 | Syslog summary | volume by severity, top hosts and apps, most frequent warning / error patterns (numbers, IPs and MACs collapsed), per-day counts |
-| Alert history | alerts fired by rule and severity, noisiest subjects, mean time to acknowledge and to resolve |
+| Alert history | alerts raised by rule and severity, noisiest subjects, mean time to acknowledge and to resolve |
 
 Every report has **CSV** export and a print-friendly layout you can save as PDF. You can
 also schedule a report for daily, weekly or monthly delivery: email sends HTML plus a CSV
