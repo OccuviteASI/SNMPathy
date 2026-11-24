@@ -674,6 +674,14 @@ downloading, checking the new version starts, restarting) with the full log unde
 details**. **Run in background** hides the window and lets the update finish on its own; after a
 successful update the window closes itself after 5 seconds.
 
+**Automatic updates at start:** each time SNMPathy starts in the tray it checks for a newer
+release about 30 seconds later and, if there is one, updates straight away (the same progress
+window, then SNMPathy restarts on the new version). Turn it off under **Server admin → Updates**
+(*Update automatically when SNMPathy starts*) or in the tray's **Server admin** menu (*Update
+automatically at start*). While SNMPathy keeps running it still checks every few hours and only
+says when a new version is available. If an update to a version did not go through, SNMPathy
+waits 6 hours before trying that version again at start.
+
 * The download is checked against the release (size and SHA-256) and must start and report the
   new version before anything is replaced.
 * The running SNMPathy is closed, the new executable takes its place and SNMPathy starts again

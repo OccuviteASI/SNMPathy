@@ -12,7 +12,8 @@ server in a background thread and shows a tray icon with:
   its rules), **Update SNMPathy**, **Open data folder**, **View log**
 * **Update SNMPathy** - downloads the latest release from GitHub and restarts, showing a
   progress window (``snmpathy/selfupdate.py``; nothing else needs to be installed). Checked
-  every few hours; the menu says when a new version is available. Running from source, it
+  when SNMPathy starts, which installs a newer release straight away (*Update automatically
+  at start*, on by default), then every few hours; the menu says when a new version is available. Running from source, it
   pulls and rebuilds instead (``scripts/update_gui.py``, recorded in ``updater.json``).
 * (the log goes to ``snmpathy.log`` in tray mode)
 * **Quit SNMPathy**
@@ -198,6 +199,28 @@ def open_path(path: Path) -> None:
 # source is looked for elsewhere, or downloaded once with git into SOURCE_HOME.
 DEFAULT_REMOTE = "https://github.com/OccuviteASI/SNMPathy.git"
 UPDATE_CHECK_INTERVAL = 6 * 3600  # seconds between looks for a new release
+LAUNCH_CHECK_DELAY = 30  # the check at start (which may update) waits this long after launch
+RETRY_UPDATE_AFTER = 6 * 3600  # an update to one version that did not happen is not retried at start sooner
+
+
+def _attempt_file() -> Path:
+    return app_dir() / "update-attempt.json"
+
+
+def recently_tried(version: str, now: float | None = None) -> bool:
+    """An automatic update to this version was started a short while ago (and we are still here)."""
+    try:
+        data = json.loads(_attempt_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return data.get("version") == version and (now or time.time()) - float(data.get("at", 0)) < RETRY_UPDATE_AFTER
+
+
+def record_attempt(version: str) -> None:
+    try:
+        _attempt_file().write_text(json.dumps({"version": version, "at": time.time()}), encoding="utf-8")
+    except OSError:
+        pass
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
@@ -460,15 +483,55 @@ class TrayApp:
         except OSError as exc:
             show_message(f"Could not start the updater: {exc}")
 
+    def _db(self) -> Any:
+        return getattr(getattr(getattr(self, "app", None), "state", None), "db", None)
+
+    def auto_update_enabled(self, *_: Any) -> bool:
+        from .services import auto_update_enabled
+
+        db = self._db()
+        return auto_update_enabled(db) if db is not None else True
+
+    def toggle_auto_update(self, *_: Any) -> None:
+        from .services import set_auto_update
+
+        db = self._db()
+        if db is None:
+            self.notify("SNMPathy is still starting: try again in a moment")
+            return
+        set_auto_update(db, not self.auto_update_enabled())
+        self.notify("SNMPathy updates itself when it starts" if self.auto_update_enabled()
+                    else "Automatic updates at start are off: Update SNMPathy in this menu still works")
+
+    def update_at_launch(self, release: Any) -> bool:
+        """At start: install a newer release straight away (unless turned off). True when it started."""
+        if not is_frozen() or release is None or not release.is_newer() or not self.auto_update_enabled():
+            return False
+        if recently_tried(release.version):
+            log.warning("not updating to %s at start: tried less than %d hours ago", release.version,
+                        RETRY_UPDATE_AFTER // 3600)
+            return False
+        record_attempt(release.version)
+        log.info("updating to %s at start", release.version)
+        self.notify(f"Updating SNMPathy to {release.version}: it restarts in a moment")
+        self.run_update()
+        return True
+
     def _update_check_loop(self) -> None:
-        """Look for a new release now and then, so the menu can say one is available."""
+        """At start: update to a newer release (see update_at_launch). Then look now and then and say so."""
         from . import selfupdate
 
-        if self._stop.wait(60):
+        if self._stop.wait(LAUNCH_CHECK_DELAY):
             return
+        for _ in range(24):  # the setting lives in the database: wait (up to 2 minutes) for the server
+            if self._db() is not None or self._stop.wait(5):
+                break
+        first = True
         while not self._stop.is_set():
             try:
                 release = selfupdate.latest_release()
+                if first and self.update_at_launch(release):
+                    return  # the updater closes this copy and starts the new one
                 if release is not None and release.is_newer():
                     if release.version != self.available:
                         self.available = release.version
@@ -479,6 +542,7 @@ class TrayApp:
                             pass
             except Exception as exc:  # offline, rate-limited, ...: try again later
                 log.debug("update check failed: %s", exc)
+            first = False
             if self._stop.wait(UPDATE_CHECK_INTERVAL):
                 return
 
@@ -598,6 +662,8 @@ class TrayApp:
             item(lambda _i: f"Web port: {self.settings.http_port} (change in Server admin config)", self.open_admin),
             pystray.Menu.SEPARATOR,
             item("Start at login", self.toggle_autostart, checked=self.autostart_enabled),
+            item("Update automatically at start", self.toggle_auto_update, checked=self.auto_update_enabled,
+                 visible=lambda _i: is_frozen()),
             item("Firewall", self.firewall_menu()),
             item(self.update_label, self.run_update, visible=lambda _i: update_available()),
             pystray.Menu.SEPARATOR,

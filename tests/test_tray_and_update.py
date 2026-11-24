@@ -596,3 +596,101 @@ def test_only_browsers_on_the_server_obey_the_tray_mute(tmp_path, db):
         assert services.server_mute_until(db) == 0
         page = local.get("/devices").text
         assert 'id="mute-btn"' in page and 'data-mute="-1"' in page
+
+
+class _Release:
+    def __init__(self, version, newer=True):
+        self.version, self._newer = version, newer
+
+    def is_newer(self):
+        return self._newer
+
+
+def _launch_app(db, monkeypatch, tmp_path):
+    import types
+
+    monkeypatch.setattr(tray, "is_frozen", lambda: True)
+    monkeypatch.setattr(tray, "_attempt_file", lambda: tmp_path / "update-attempt.json")
+    app = tray.TrayApp.__new__(tray.TrayApp)
+    app.app = types.SimpleNamespace(state=types.SimpleNamespace(db=db))
+    app.available, app.icon = "", None
+    app.notes, app.updates = [], []
+    app.notify = app.notes.append
+    app.run_update = lambda *_: app.updates.append(1)
+    return app
+
+
+def test_update_at_launch_installs_a_newer_release(db, monkeypatch, tmp_path):
+    from snmpathy import services
+
+    app = _launch_app(db, monkeypatch, tmp_path)
+    assert app.update_at_launch(_Release("9.9.9")) is True
+    assert app.updates == [1] and "Updating SNMPathy to 9.9.9" in app.notes[-1]
+    # Still here after starting it (the update did not happen): not again at the next start for a while.
+    assert app.update_at_launch(_Release("9.9.9")) is False and app.updates == [1]
+    assert app.update_at_launch(_Release("9.9.10")) is True  # a newer one is tried
+    # Not newer, turned off, or running from Python: nothing.
+    assert app.update_at_launch(_Release("0.0.1", newer=False)) is False
+    assert app.update_at_launch(None) is False
+    services.set_auto_update(db, False)
+    assert app.update_at_launch(_Release("9.9.11")) is False
+    services.set_auto_update(db, True)
+    monkeypatch.setattr(tray, "is_frozen", lambda: False)
+    assert app.update_at_launch(_Release("9.9.12")) is False
+    assert app.updates == [1, 1]
+
+
+def test_only_the_check_at_launch_updates(db, monkeypatch, tmp_path):
+    import threading
+
+    from snmpathy import selfupdate
+
+    app = _launch_app(db, monkeypatch, tmp_path)
+    monkeypatch.setattr(tray, "LAUNCH_CHECK_DELAY", 0)
+    monkeypatch.setattr(tray, "UPDATE_CHECK_INTERVAL", 0.05)
+    app._stop = threading.Event()
+    calls = []
+
+    def latest():
+        calls.append(1)
+        if len(calls) >= 3:
+            app._stop.set()
+        return _Release("9.9.9")
+
+    monkeypatch.setattr(selfupdate, "latest_release", latest)
+    from snmpathy import services
+
+    services.set_auto_update(db, False)  # off: every check only says a release is available
+    app._update_check_loop()
+    assert len(calls) == 3 and app.updates == [] and app.available == "9.9.9"
+    services.set_auto_update(db, True)
+    calls.clear()
+    app._stop.clear()
+    app._update_check_loop()
+    assert app.updates == [1] and len(calls) == 1  # updated at the first check; the updater takes over
+
+
+def test_auto_update_setting(tmp_path, db, monkeypatch):
+    import sys as _sys
+
+    from fastapi.testclient import TestClient
+
+    from snmpathy import selfupdate
+    from snmpathy.app import create_app
+    from snmpathy.config import Settings
+
+    monkeypatch.setattr(selfupdate, "latest_release", lambda: None)
+    app = create_app(Settings(database=str(tmp_path / "t.db")), db=db, start_monitor=False)
+    with TestClient(app) as local, TestClient(app, client=("203.0.113.9", 5000)) as remote:
+        assert local.get("/api/system/update").json()["auto"] is True
+        assert remote.put("/api/system/auto-update", json={"enabled": False}).status_code == 403  # Server admin
+        assert local.put("/api/system/auto-update", json={"enabled": False}).json() == {"auto": False}
+        assert local.get("/api/system/update").json()["auto"] is False
+    # The tray's Server admin menu has the switch.
+    monkeypatch.setitem(_sys.modules, "pystray", _FakePystray)
+    monkeypatch.setattr(tray, "is_frozen", lambda: True)
+    t = tray.TrayApp.__new__(tray.TrayApp)
+    t.available, t.status, t.url = "", "All up", "http://localhost:8080/"
+    t.settings = Settings()
+    admin = next(i for i in t.menu().items if str(i) == "Server admin").submenu
+    assert "Update automatically at start" in [str(i) for i in admin.items]

@@ -81,6 +81,7 @@
         <button class="btn" id="update-check">{{ icon('refresh') }} Check for updates</button>
         {% if frozen %}<button class="btn primary hidden" id="update-run" data-action="api" data-url="/api/system/update" data-confirm="Update SNMPathy on {{ hostname }} now? It restarts, and this page reconnects when it is back." data-success="Updating: SNMPathy restarts in a moment" data-then="none">Update now</button>{% endif %}
       </div>
+      {% if frozen %}<label class="check"><input type="checkbox" id="auto-update" {{ 'checked' if auto_update }}> Update automatically when SNMPathy starts</label>{% endif %}
       <p class="small muted" style="margin:0">{% if frozen %}Updates download the latest release and restart SNMPathy on the server (the tray's <em>Server admin &rsaquo; Update SNMPathy</em> does the same).{% else %}This server runs from a source checkout: update it with <code>scripts/update</code> on the server.{% endif %}</p>
     </div>
   </div>
@@ -196,6 +197,13 @@ document.addEventListener("DOMContentLoaded", () => {
     };
     tick();
   }
+  const autoUpdate = SP.$("#auto-update");
+  if (autoUpdate) autoUpdate.addEventListener("change", async () => {
+    try {
+      await SP.api("PUT", "/api/system/auto-update", { enabled: autoUpdate.checked });
+      SP.toast(autoUpdate.checked ? "SNMPathy updates itself when it starts" : "Automatic updates at start are off");
+    } catch (e) { autoUpdate.checked = !autoUpdate.checked; SP.toast(e.message, "error"); }
+  });
   const editForm = SP.$("#edit-passcode-form");
   if (editForm) editForm.addEventListener("submit", async (ev) => {
     ev.preventDefault();
