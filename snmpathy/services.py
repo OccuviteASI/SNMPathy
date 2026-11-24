@@ -516,3 +516,15 @@ def set_server_mute(db: Database, minutes: int | None) -> float:
     until = 0.0 if not minutes else (-1.0 if minutes == -1 else time.time() + minutes * 60)
     db.set_meta(SERVER_MUTE_KEY, str(until))
     return until
+
+
+# Update to the latest release when SNMPathy starts in the tray (executables only). On by default.
+AUTO_UPDATE_KEY = "auto_update_on_launch"
+
+
+def auto_update_enabled(db: Database) -> bool:
+    return (db.get_meta(AUTO_UPDATE_KEY, "1") or "1") != "0"
+
+
+def set_auto_update(db: Database, on: bool) -> None:
+    db.set_meta(AUTO_UPDATE_KEY, "1" if on else "0")

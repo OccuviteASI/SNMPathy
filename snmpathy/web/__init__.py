@@ -444,7 +444,7 @@ def server_admin(request: Request, error: str = "", wait: int = 0):
 
     Browsers elsewhere need the passcode set on the server (snmpathy/adminauth.py).
     """
-    from .. import adminauth, storage, version_string
+    from .. import adminauth, services, storage, version_string
     from ..checks.probes import detect_icmp_mode
     from ..config import is_frozen
     import platform
@@ -466,6 +466,7 @@ def server_admin(request: Request, error: str = "", wait: int = 0):
         frozen=is_frozen(), autostart=_autostart_status(s), firewall=_firewall_status(s),
         access=access, passcode_set=adminauth.passcode_set(db), local=adminauth.is_local(request),
         edit_passcode_set=adminauth.passcode_set(db, "edit"), timeout=adminauth.timeout_minutes(db),
+        auto_update=services.auto_update_enabled(db),
         timeout_choices=adminauth.TIMEOUT_CHOICES, remaining=max(0, int((access["expires"] or 0) - time.time())),
     )
 

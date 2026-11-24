@@ -1414,12 +1414,13 @@ def post_restart(request: Request):
 
 # =================================================================== updates
 @router.get("/system/update", tags=["system"])
-def get_update():
-    """This server's version and the latest published release."""
+def get_update(db: Database = Depends(get_db)):
+    """This server's version, the latest published release, and whether it updates itself at start."""
     from . import __version__, selfupdate
     from .config import is_frozen
 
-    out: dict[str, Any] = {"version": __version__, "frozen": is_frozen(), "latest": None, "available": False}
+    out: dict[str, Any] = {"version": __version__, "frozen": is_frozen(), "latest": None, "available": False,
+                           "auto": services.auto_update_enabled(db)}
     try:
         release = selfupdate.latest_release()
     except selfupdate.UpdateError as exc:
@@ -1427,6 +1428,18 @@ def get_update():
     if release is not None:
         out.update(latest=release.version, available=release.is_newer())
     return out
+
+
+class AutoUpdateIn(BaseModel):
+    enabled: bool
+
+
+@router.put("/system/auto-update", dependencies=[Depends(require_admin)], tags=["system"])
+def put_auto_update(body: AutoUpdateIn, db: Database = Depends(get_db)):
+    """Update to the latest release automatically when SNMPathy starts (in the tray, executables)."""
+    services.set_auto_update(db, body.enabled)
+    db.log_event("system.update", "Automatic updates at start turned " + ("on" if body.enabled else "off"), "info")
+    return {"auto": body.enabled}
 
 
 @router.post("/system/update", dependencies=[Depends(require_admin)], tags=["system"])

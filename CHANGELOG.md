@@ -4,6 +4,14 @@ The running version is shown at the bottom of the sidebar, on **Settings**, and 
 `snmpathy version`. Executables built with `scripts/build_executable` also show the git
 commit and build date, e.g. `0.5.0 (build 5c25a54, 2026-11-12)`.
 
+## 0.7.20
+- **Updates at start.** When SNMPathy starts in the tray it checks for a newer release about 30
+  seconds later and installs it straight away (progress window, then it restarts on the new
+  version). On by default; turn it off in **Server admin → Updates** or the tray's **Server
+  admin** menu (*Update automatically at start*). The checks every few hours while it runs still
+  only say that a new version is available. An update to a version that did not go through is
+  not retried at start for 6 hours.
+
 ## 0.7.19
 - Alerts now read **alerting** instead of *firing* everywhere you see them: the Alerts page
   ("alerting", *Alerting from*), device pages and dashboards (*Alerting now*), Fusion, the
